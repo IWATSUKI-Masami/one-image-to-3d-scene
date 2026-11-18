@@ -15,7 +15,7 @@ This is the reference implementation of the paper listed in [Citation](#citation
   </tr>
   <tr>
     <td align="center">Input: a single photo</td>
-    <td align="center">Reconstructed 3D scene (3D models, PC Boxes and model boxes)</td>
+    <td align="center">Reconstructed 3D scene</td>
   </tr>
 </table>
 
@@ -46,7 +46,7 @@ The sample photo [`samples/two-people-at-table.webp`](samples/two-people-at-tabl
   </tr>
   <tr>
     <td width="50%"><img src="docs/images/step5-depth-map.webp" alt="Depth map"><br><sub><b>5. Depth estimation</b> — Depth Anything V2 (brighter = nearer)</sub></td>
-    <td width="50%"><img src="docs/images/scene-result.webp" alt="3D scene"><br><sub><b>7. Scene composition</b> — models placed at the depth of their PC Boxes</sub></td>
+    <td width="50%"><img src="docs/images/scene-result.webp" alt="3D scene"><br><sub><b>7. Scene composition</b> — models placed at the depth of their PC Boxes (people, vase and cups)</sub></td>
   </tr>
 </table>
 

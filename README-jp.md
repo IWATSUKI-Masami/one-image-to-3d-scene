@@ -15,7 +15,7 @@
   </tr>
   <tr>
     <td align="center">入力：1枚の写真</td>
-    <td align="center">復元した3Dシーン（3Dモデル、PC Box、モデルの枠）</td>
+    <td align="center">復元した3Dシーン</td>
   </tr>
 </table>
 
@@ -46,7 +46,7 @@
   </tr>
   <tr>
     <td width="50%"><img src="docs/images/step5-depth-map.webp" alt="深度マップ"><br><sub><b>5. 深度推定</b>：Depth Anything V2（明るいほど手前）</sub></td>
-    <td width="50%"><img src="docs/images/scene-result.webp" alt="3Dシーン"><br><sub><b>7. シーン合成</b>：各モデルを PC Box の奥行きに配置</sub></td>
+    <td width="50%"><img src="docs/images/scene-result.webp" alt="3Dシーン"><br><sub><b>7. シーン合成</b>：各モデルを PC Box の奥行きに配置（人物、花瓶、カップ）</sub></td>
   </tr>
 </table>
 
