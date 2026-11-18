@@ -94,6 +94,7 @@ npm run dev
 | 物体検出、キャンバス拡張量の推定、補完結果のチェック | Gemini / OpenAI | `gemini-pro-latest` / `gpt-5.6-sol` |
 | 画像補完（アウトペインティング） | Gemini / OpenAI | `gemini-3-pro-image` / `gpt-image-2.6-sunburst` |
 
+- OpenAI は補完画像を透明背景で返します。Gemini は透明背景を出力できないため、補完後に背景除去（BRIA RMBG 2.0）を行います。背景除去に失敗した場合は、補完画像のカードに表示されます。
 - モデルIDは頻繁に変わります。モデルが提供終了になった場合は、AI Settings で新しいIDを入力してください。コードの変更は不要です。
 - 論文の結果は `gemini-3-pro-preview` と `gemini-3-pro-image-preview`（どちらも提供終了）で得たものです。他のプロバイダーやモデルでも同じプロンプトを使いますが、検出精度や姿勢の保持には差が出る可能性があります。
 - APIキーはメモリ上にだけ保持します。プロバイダーとモデルIDはブラウザに記憶されます。

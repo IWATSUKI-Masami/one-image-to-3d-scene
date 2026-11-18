@@ -94,6 +94,7 @@ Click the AI button in the header to open **AI Settings**, where you choose the 
 | Object detection, canvas expansion estimate, completion check | Gemini / OpenAI | `gemini-pro-latest` / `gpt-5.6-sol` |
 | Image completion (outpainting) | Gemini / OpenAI | `gemini-3-pro-image` / `gpt-image-2.6-sunburst` |
 
+- OpenAI returns completions with a transparent background. Gemini cannot, so its completions go through background removal (BRIA RMBG 2.0); a failed removal is marked on the completed card.
 - Model IDs change often. If a model is retired, type a new ID in AI Settings; no code change is needed.
 - The results in the paper were obtained with `gemini-3-pro-preview` and `gemini-3-pro-image-preview` (both since shut down). Other providers and models use the same prompts, but detection accuracy and pose preservation may differ.
 - API keys are kept in memory only. Providers and model IDs are remembered in the browser.

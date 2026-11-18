@@ -171,13 +171,24 @@ export const generateImage = async (
   const client = new OpenAI({ apiKey, dangerouslyAllowBrowser: true });
   const bytes = Uint8Array.from(atob(image.base64), c => c.charCodeAt(0));
   const ext = image.mimeType.split('/')[1] || 'png';
-  const response = await client.images.edit({
+  const edit = async (background?: 'transparent') => client.images.edit({
     model: settings.models.openaiImage,
     image: await toFile(bytes, `input.${ext}`, { type: image.mimeType }),
     prompt,
     size: '1024x1536',
     output_format: 'png',
+    ...(background ? { background } : {}),
   });
+  // Ask for a transparent background so that no separate background removal is
+  // needed. Models without transparency support reject it; retry without.
+  let response;
+  try {
+    response = await edit('transparent');
+  } catch (e: any) {
+    if (e?.status !== 400) throw e;
+    console.warn('OpenAI: transparent background not accepted, retrying with the default background:', e?.message);
+    response = await edit();
+  }
   const b64 = response.data?.[0]?.b64_json;
   if (!b64) throw new Error('OpenAI generated no image.');
   return `data:image/png;base64,${b64}`;

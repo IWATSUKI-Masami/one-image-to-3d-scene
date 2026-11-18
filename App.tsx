@@ -9,7 +9,7 @@ import { BoundingBoxOverlay } from './components/BoundingBoxOverlay';
 import { detectObjectsInImage, generateCompletion, estimateCanvasExpansion, verifyCompletion } from './services/aiService';
 import { loadAISettings, saveAISettings, hasRequiredKeys, PROVIDER_LABELS } from './services/ai/models';
 import { AISettingsDialog } from './components/AISettingsDialog';
-import { cropObjectsFromImage, removeBackgroundWithRembg, findBestMatchPosition, generate3DModelWithHunyuan3D, generate3DModelWithTrellis, blobUrlToDataUrl, dataUrlToBlobUrl, generateDepthMap, prepareImageForCompletion, calculateTightBoundingBox } from './utils';
+import { cropObjectsFromImage, removeBackgroundWithRembg, findBestMatchPosition, hasTransparentBackground, generate3DModelWithHunyuan3D, generate3DModelWithTrellis, blobUrlToDataUrl, dataUrlToBlobUrl, generateDepthMap, prepareImageForCompletion, calculateTightBoundingBox } from './utils';
 import { DetectedObject, CroppedObject, Model3D, ModelProvider, ProjectArchive, AISettings } from './types';
 import { Scan, Sparkles, AlertCircle, Layers, Image as ImageIcon, User, Box, ArrowLeft, Upload, Plug, Wand2, RefreshCw, Star, Download, MonitorPlay, Cuboid, Save, FolderOpen, Trash2 } from 'lucide-react';
 
@@ -581,6 +581,36 @@ const App: React.FC = () => {
 
 
 
+  /**
+   * Background removal after completion.
+   * - Completions that are already transparent (OpenAI with background: 'transparent')
+   *   are used as they are, so BRIA RMBG is not needed.
+   * - Otherwise BRIA RMBG 2.0 removes the background of the completed image and of the
+   *   original crop (the latter only helps feature matching).
+   * `failed` is true when RMBG was needed but failed; the card then shows a warning.
+   */
+  const removeCompletionBackground = async (generatedUrl: string, cropUrl: string, tag: string) => {
+    if (await hasTransparentBackground(generatedUrl)) {
+      return { transparentUrl: generatedUrl, extractedTransparentUrl: undefined as string | undefined, failed: false };
+    }
+    let transparentUrl = generatedUrl;
+    let extractedTransparentUrl: string | undefined;
+    try {
+      const bgRemovedBlob = await removeBackgroundWithRembg(generatedUrl, hfToken, aiSettings.spaces.rmbg);
+      transparentUrl = URL.createObjectURL(bgRemovedBlob);
+    } catch (bgError) {
+      console.warn(`[${tag}] Background removal failed, keeping the completed image as is:`, bgError);
+      return { transparentUrl, extractedTransparentUrl, failed: true };
+    }
+    try {
+      const extractedBgRemovedBlob = await removeBackgroundWithRembg(cropUrl, hfToken, aiSettings.spaces.rmbg);
+      extractedTransparentUrl = URL.createObjectURL(extractedBgRemovedBlob);
+    } catch (extractBgError) {
+      console.warn(`[${tag}] Failed to remove BG from the extracted image:`, extractBgError);
+    }
+    return { transparentUrl, extractedTransparentUrl, failed: false };
+  };
+
   const handleCompleteBody = async (item: CroppedObject) => {
     if (!hasAIKeys) {
       openAISettings();
@@ -597,6 +627,7 @@ const App: React.FC = () => {
     let expansionRatio = 1;
     let detectedOriginalPartBox2d: [number, number, number, number] | undefined;
     let detectedTightBox2d: [number, number, number, number] | undefined;
+    let bgRemovalFailed = false;
 
     try {
       // Step 1: Estimate canvas expansion needed using the vision provider
@@ -639,21 +670,10 @@ const App: React.FC = () => {
 
         if (bgRemovalAfterCompletion) {
           const tBg = performance.now();
-          try {
-            // Remove background from completed image (BRIA RMBG 2.0)
-            const bgRemovedBlob = await removeBackgroundWithRembg(generatedImageUrl, hfToken, aiSettings.spaces.rmbg);
-            transparentUrl = URL.createObjectURL(bgRemovedBlob);
-
-            // Also remove background from extracted image for matching
-            try {
-              const extractedBgRemovedBlob = await removeBackgroundWithRembg(item.imageUrl, hfToken, aiSettings.spaces.rmbg);
-              extractedTransparentUrl = URL.createObjectURL(extractedBgRemovedBlob);
-            } catch (extractBgError) {
-              console.warn('[Complete Body] Failed to remove BG from extracted image:', extractBgError);
-            }
-          } catch (bgError) {
-            console.warn('[Complete Body] Background removal failed, keeping original:', bgError);
-          }
+          const bg = await removeCompletionBackground(generatedImageUrl, item.imageUrl, 'Complete Body');
+          transparentUrl = bg.transparentUrl;
+          extractedTransparentUrl = bg.extractedTransparentUrl;
+          bgRemovalFailed = bg.failed;
           const bgElapsed = (performance.now() - tBg) / 1000;
           setProcessingTimes(prev => new Map(prev).set(`Compl BG: ${item.label}`, bgElapsed));
         }
@@ -726,7 +746,7 @@ const App: React.FC = () => {
         id: newId,
         label: newLabel,
         imageUrl: finalImageUrl,
-        bgRemovalFailed: false,
+        bgRemovalFailed,
         completionExpansionRatio: expansionRatio,
         originalCroppedImageUrl: item.imageUrl,
         originalPartBox2d: detectedOriginalPartBox2d,
@@ -784,23 +804,13 @@ const App: React.FC = () => {
           let transparentUrl = generatedImageUrl;
           let extractedTransparentUrl: string | undefined;
 
+          let batchBgRemovalFailed = false;
           if (bgRemovalAfterCompletion) {
             const tBg2 = performance.now();
-            try {
-              // Remove background from completed image (BRIA RMBG 2.0)
-              const bgRemovedBlob = await removeBackgroundWithRembg(generatedImageUrl, hfToken, aiSettings.spaces.rmbg);
-              transparentUrl = URL.createObjectURL(bgRemovedBlob);
-
-              // Also remove background from extracted image for matching
-              try {
-                const extractedBgRemovedBlob = await removeBackgroundWithRembg(item.imageUrl, hfToken, aiSettings.spaces.rmbg);
-                extractedTransparentUrl = URL.createObjectURL(extractedBgRemovedBlob);
-              } catch (extractBgError) {
-                console.warn('[Batch Complete] Failed to remove BG from extracted:', extractBgError);
-              }
-            } catch (bgError) {
-              console.warn('[Batch Complete] Background removal failed, keeping original:', bgError);
-            }
+            const bg = await removeCompletionBackground(generatedImageUrl, item.imageUrl, 'Batch Complete');
+            transparentUrl = bg.transparentUrl;
+            extractedTransparentUrl = bg.extractedTransparentUrl;
+            batchBgRemovalFailed = bg.failed;
             const bgElapsed2 = (performance.now() - tBg2) / 1000;
             setProcessingTimes(prev => new Map(prev).set(`Compl BG: ${item.label}`, bgElapsed2));
           }
@@ -853,7 +863,7 @@ const App: React.FC = () => {
             id: newId,
             label: newLabel,
             imageUrl: transparentUrl,
-            bgRemovalFailed: false,
+            bgRemovalFailed: batchBgRemovalFailed,
             completionExpansionRatio: expansionRatio,
             originalCroppedImageUrl: item.imageUrl,
             originalPartBox2d: batchOriginalPartBox2d,

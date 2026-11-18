@@ -208,7 +208,7 @@ export const ResultCard: React.FC<ResultCardProps> = ({ item, onCompleteBody, on
           <div className="absolute top-2 left-2 right-2 flex justify-center pointer-events-none">
             <div className="bg-amber-100 text-amber-800 text-[10px] font-semibold px-2 py-1 rounded-full border border-amber-200 shadow-sm flex items-center gap-1 opacity-90">
               <AlertTriangle size={12} />
-              Original (Bg Removal Failed)
+              Background removal failed
             </div>
           </div>
         )}

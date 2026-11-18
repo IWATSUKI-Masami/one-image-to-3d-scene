@@ -91,6 +91,34 @@ export const cropObjectsFromImage = async (
   });
 };
 
+/**
+ * True if the image already has a transparent background, i.e. a noticeable
+ * share of its pixels is (partly) transparent. Used to skip background removal
+ * for completions that come back transparent (OpenAI with background: 'transparent').
+ */
+export const hasTransparentBackground = async (imageUrl: string, minShare = 0.02): Promise<boolean> => {
+  try {
+    const img = await loadImageElement(imageUrl);
+    const scale = Math.min(1, 256 / Math.max(img.width, img.height));
+    const w = Math.max(1, Math.round(img.width * scale));
+    const h = Math.max(1, Math.round(img.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return false;
+    ctx.drawImage(img, 0, 0, w, h);
+    const { data } = ctx.getImageData(0, 0, w, h);
+    let transparent = 0;
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i] < 250) transparent++;
+    }
+    return transparent / (w * h) >= minShare;
+  } catch {
+    return false;
+  }
+};
+
 export const removeBackgroundWithRembg = async (imageUrl: string, apiKey?: string, space: string = DEFAULT_SPACES.rmbg): Promise<Blob> => {
   space = space.trim() || DEFAULT_SPACES.rmbg; // an empty setting means the official Space
 
