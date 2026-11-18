@@ -89,8 +89,12 @@ Projects (images, depth map, models and scene layout) can be saved and loaded.
 │   └── ai/                 # Provider layer (Gemini / OpenAI) and default models
 ├── utils.ts                # Cropping, AKAZE matching, depth, 3D generation APIs
 ├── types.ts                # Type definitions
-└── docs/                   # Development history
+└── docs/                   # Development history and roadmap
 ```
+
+## Future work
+
+Local 3D generation with [ComfyUI](https://www.comfy.org/) (e.g. TRELLIS.2 on your own GPU) is planned. See [docs/roadmap.md](docs/roadmap.md).
 
 ## Citation
 

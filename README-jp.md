@@ -89,8 +89,12 @@ npm run dev
 │   └── ai/                 # プロバイダー層（Gemini / OpenAI）と既定のモデル
 ├── utils.ts                # 切り出し、AKAZEマッチング、深度推定、3D生成API
 ├── types.ts                # 型定義
-└── docs/                   # 開発の経緯
+└── docs/                   # 開発の経緯と今後の拡張
 ```
+
+## 今後の拡張
+
+[ComfyUI](https://www.comfy.org/) によるローカルでの3D生成（手元の GPU で TRELLIS.2 を動かすなど）を予定しています。詳しくは [docs/roadmap-jp.md](docs/roadmap-jp.md) を参照してください。
 
 ## 引用
 
