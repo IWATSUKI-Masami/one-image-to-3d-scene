@@ -87,7 +87,20 @@ Open `http://localhost:3000` in your browser.
 
 ## AI providers and models
 
-Click the AI button in the header to open **AI Settings**, where you choose the providers, enter API keys and change model IDs.
+**AI Settings** is the app's settings dialog. Open it with the round button at the top right of the screen, to the left of the HF Token field. The button reads **Set API Keys** (grey) until the API keys are set, and then shows the providers in use, e.g. **AI: Gemini / Gemini** (green). The dialog also opens automatically when you start a step that needs a missing key.
+
+In AI Settings you can set:
+
+| Section | What it sets |
+|---|---|
+| Object detection & checks | Provider for detection and checks (Gemini / OpenAI) |
+| Image completion | Provider for completion (Gemini / OpenAI) |
+| Background removal | Background-removal model (RMBG 3.0 / RMBG 2.0) |
+| API keys | Gemini and OpenAI API keys |
+| Models | Model IDs |
+| Hugging Face Spaces | Space IDs for background removal, depth estimation and 3D generation (e.g. your duplicated Spaces) |
+
+Default models:
 
 | Task | Providers | Default model |
 |---|---|---|

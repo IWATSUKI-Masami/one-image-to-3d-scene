@@ -87,7 +87,20 @@ npm run dev
 
 ## AIプロバイダーとモデル
 
-画面上部のAIボタンから **AI Settings** を開き、プロバイダーの選択、APIキーの入力、モデルIDの変更ができます。
+**AI Settings** はアプリの設定画面です。画面右上、HF Token の入力欄の左隣にある丸いボタンから開きます。ボタンの表示は、API キーが未設定のときは **Set API Keys**（灰色）、設定済みのときは **AI: Gemini / Gemini** のように使っているプロバイダー名（緑色）になります。API キーが必要な処理をキーなしで始めた場合も、自動で開きます。
+
+AI Settings では次の項目を設定できます。
+
+| 項目 | 内容 |
+|---|---|
+| Object detection & checks | 物体検出・チェックに使う AI（Gemini / OpenAI） |
+| Image completion | 画像補完に使う AI（Gemini / OpenAI） |
+| Background removal | 背景除去のモデル（RMBG 3.0 / RMBG 2.0） |
+| API keys | Gemini と OpenAI の API キー |
+| Models | 使うモデルの ID |
+| Hugging Face Spaces | 背景除去・深度推定・3D 生成で使う Space の ID（複製した Space など） |
+
+既定のモデルは次のとおりです。
 
 | 処理 | プロバイダー | 既定のモデル |
 |---|---|---|
