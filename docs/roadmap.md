@@ -63,6 +63,28 @@ This app loads models as GLB meshes, scales and offsets them from their mesh bou
 - **Maintenance**: workflow files may need updates when ComfyUI renames nodes.
 - **Testing**: needs a machine with a GPU (it cannot be tested in a CPU-only environment).
 
+## 3. Placing partially visible objects
+
+### Problem
+
+Objects of which only a small part is visible in the photo — the table (only the front edge of the top) and the chairs (thin strips at the image borders) in the sample — end up much too small in the 3D scene.
+
+### Cause
+
+1. The image model redraws the whole object during completion, so the visible part cannot be found in the completed image by feature matching (AKAZE finds almost no matching keypoints).
+2. The matching then falls back to the box of the whole object (tightBox2d).
+3. The whole 3D model is therefore scaled to fit the small box of the visible part in the photo.
+
+People, the vase and the cups are mostly visible and are placed correctly.
+
+### Ideas
+
+- **Ask the VLM where the visible part is**: when matching fails, give the crop and the completed image to the vision model (Gemini / OpenAI) and ask for the box of the crop's content in the completed image.
+- **Use the completion canvas**: before completion the crop is placed at a known position on a larger white canvas (`prepareImageForCompletion`). If the image model keeps that layout, the expected position can be derived from it; the result must be checked, because models often re-center the object.
+- **Size priors**: use typical real-world sizes per category (e.g. a dining chair seat at about 0.45 m) relative to the people in the scene to bound the scale.
+- **Silhouette fitting**: render the 3D model from the estimated camera and fit its scale and position so that its silhouette matches the visible mask in the photo.
+- **Pixel-aligned generation**: models such as Pixal3D (item 1) keep the front of the model aligned with the input image, which may make the visible part easier to locate.
+
 ## References
 
 - [ComfyUI Docs: Pixal3D](https://docs.comfy.org/tutorials/3d/pixal3d)
