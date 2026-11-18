@@ -96,7 +96,7 @@ export const removeBackgroundWithRembg = async (imageUrl: string, apiKey?: strin
   const { Client } = await import("@gradio/client");
   const options: any = {};
   if (apiKey) {
-    options.hf_token = apiKey as `hf_${string}`;
+    options.token = apiKey as `hf_${string}`;
   }
 
   try {
@@ -328,7 +328,7 @@ export const generateDepthMap = async (imageUrl: string, apiKey?: string): Promi
   const space = 'depth-anything/Depth-Anything-V2';
 
   try {
-    const client = await Client.connect(space, token ? { hf_token: token } as any : {});
+    const client = await Client.connect(space, token ? { token: token as `hf_${string}` } : {});
 
     const imageBlob = await (await fetch(imageUrl)).blob();
 
@@ -513,7 +513,7 @@ export const generate3DModelWithHunyuan3D = async (imageUrl: string, hfToken?: s
       throw new Error("Hugging Face token is required for Hunyuan3D-2.1. Please enter your HF Token in the settings.");
     }
 
-    const client: any = await Client.connect('tencent/Hunyuan3D-2.1', { hf_token: token } as any);
+    const client: any = await Client.connect('tencent/Hunyuan3D-2.1', { token: token as `hf_${string}` });
 
     const imageBlob = await (await fetch(imageUrl)).blob();
     const imageFile = new File([imageBlob], 'input.png', { type: imageBlob.type || 'image/png' });
@@ -560,7 +560,7 @@ export const generate3DModelWithTrellis = async (imageUrl: string, hfToken?: str
       throw new Error("Hugging Face token is required for TRELLIS.2. Please enter your HF Token in the settings.");
     }
 
-    const client: any = await Client.connect('microsoft/TRELLIS.2', { hf_token: token } as any);
+    const client: any = await Client.connect('microsoft/TRELLIS.2', { token: token as `hf_${string}` });
     await client.predict("/start_session", {});
 
     const img = await loadImageElement(imageUrl);
