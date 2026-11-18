@@ -109,15 +109,23 @@ export const detectObjectsInImage = async (file: File, settings: AISettings): Pr
 // Phase 3: image completion
 // ---------------------------------------------------------------------------
 
+/** Options of image completion */
+export interface CompletionOptions {
+  /** People: redraw a blurred or small face sharply instead of copying it (default true) */
+  redrawFace?: boolean;
+}
+
 export const generateCompletion = async (
   imageUrl: string,
   label: string,
   type: 'person' | 'object',
   settings: AISettings,
   description?: string,
+  options: CompletionOptions = {},
 ): Promise<string> => {
   try {
     const image = await loadImageData(imageUrl);
+    const redrawFace = options.redrawFace ?? true;
 
     let prompt = '';
     if (type === 'person') {
@@ -153,7 +161,7 @@ export const generateCompletion = async (
        - Do NOT straighten the body or make a sitting person stand up
        - The upper body angle and orientation MUST match the input EXACTLY
     
-    2. **PRESERVE ORIGINAL PIXELS**: Copy all visible parts of the person pixel-for-pixel from the input. Do NOT regenerate or modify any visible part.
+    2. **PRESERVE ORIGINAL PIXELS**: Copy all visible parts of the person pixel-for-pixel from the input. Do NOT regenerate or modify any visible part${redrawFace ? ', except the face (rule 6)' : ''}.
     
     3. **COMPLETE ALL CUT-OFF BODY PARTS AT EVERY EDGE**: 
        - If ARM is cut off at left/right edge: Complete the full arm including HAND and FINGERS
@@ -169,7 +177,13 @@ export const generateCompletion = async (
     
     5. **REMOVE FURNITURE BUT KEEP POSE**: Remove chairs/tables, but the person's body position must remain as if they were still seated/leaning.
     
-    6. **PURE WHITE BACKGROUND - CRITICAL**: 
+    ${redrawFace ? `6. **CLEAR, NATURAL FACE**:
+       - Keep the person's hairstyle, skin tone, apparent age, head direction and expression
+       - Render the face sharp and in focus with natural proportions: clearly defined eyes, nose, mouth and ears
+       - If the face is blurred, small, low-resolution or partly hidden in the input, redraw it cleanly instead of copying the blur or artifacts
+       - No distorted, melted, asymmetric or doll-like features
+    
+    7` : '6'}. **PURE WHITE BACKGROUND - CRITICAL**: 
        - Background MUST be RGB(255,255,255) - pure white, no gray
        - Do NOT use light gray, cream, or off-white - ONLY #FFFFFF
        - Every non-person pixel must be exactly R=255, G=255, B=255

@@ -658,7 +658,7 @@ const clearFaintAlpha = async (imageUrl: string): Promise<Blob> => {
   }
 };
 
-export const generate3DModelWithHunyuan3D = async (imageUrl: string, hfToken?: string, space: string = DEFAULT_SPACES.hunyuan3d): Promise<Blob> => {
+export const generate3DModelWithHunyuan3D = async (imageUrl: string, hfToken?: string, space: string = DEFAULT_SPACES.hunyuan3d, highDetail = false): Promise<Blob> => {
   space = space.trim() || DEFAULT_SPACES.hunyuan3d; // an empty setting means the official Space
   try {
     const { Client } = await import("@gradio/client");
@@ -683,7 +683,8 @@ export const generate3DModelWithHunyuan3D = async (imageUrl: string, hfToken?: s
       steps: 30,
       guidance_scale: 5.0,
       seed: 1234,
-      octree_resolution: 256,
+      // Finer shape for people (faces); the Space allows up to 512
+      octree_resolution: highDetail ? 384 : 256,
       // The input is already background-removed (RGBA, cleaned by clearFaintAlpha).
       // With rembg on, the Space would convert it to RGB first and segment it again.
       // With rembg off, RGBA input is used as is and RGB input is still rembg'd.
@@ -708,7 +709,7 @@ export const generate3DModelWithHunyuan3D = async (imageUrl: string, hfToken?: s
   }
 };
 
-export const generate3DModelWithTrellis = async (imageUrl: string, hfToken?: string, space: string = DEFAULT_SPACES.trellis): Promise<Blob> => {
+export const generate3DModelWithTrellis = async (imageUrl: string, hfToken?: string, space: string = DEFAULT_SPACES.trellis, highDetail = false): Promise<Blob> => {
   space = space.trim() || DEFAULT_SPACES.trellis; // an empty setting means the official Space
   try {
     const { Client } = await import("@gradio/client");
@@ -851,7 +852,8 @@ export const generate3DModelWithTrellis = async (imageUrl: string, hfToken?: str
     await client.predict("/image_to_3d", {
       image: imageFile,
       seed: randomSeed,
-      resolution: "1024",
+      // People get the highest resolution so that faces keep their relief
+      resolution: highDetail ? "1536" : "1024",
       ss_guidance_strength: 7.5,
       ss_guidance_rescale: 0.7,
       ss_sampling_steps: 12,
@@ -869,7 +871,7 @@ export const generate3DModelWithTrellis = async (imageUrl: string, hfToken?: str
     // Extract GLB
     const extractResult = await client.predict("/extract_glb", {
       decimation_target: 300000,
-      texture_size: 2048,
+      texture_size: highDetail ? 4096 : 2048,
     });
 
     const data = extractResult.data as any[];

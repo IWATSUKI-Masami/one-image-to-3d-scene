@@ -59,6 +59,7 @@ const App: React.FC = () => {
   const [isBatchCompleting, setIsBatchCompleting] = useState(false);
   const [completionTarget, setCompletionTarget] = useState<'person' | 'object'>('person');
   const [bgRemovalAfterCompletion, setBgRemovalAfterCompletion] = useState(true); // Default: ON, uses RMBG
+  const [redrawFaces, setRedrawFaces] = useState(true); // People: redraw blurred faces sharply during completion
 
   // 3D Generation states
   const [models3D, setModels3D] = useState<Model3D[]>([]);
@@ -417,9 +418,11 @@ const App: React.FC = () => {
     try {
       let glbBlob: Blob;
 
+      // People are generated at a higher resolution so that faces look natural
+      const highDetail = item.type === 'person';
       glbBlob = modelProvider === 'hunyuan3d'
-        ? await generate3DModelWithHunyuan3D(item.imageUrl, hfToken, aiSettings.spaces.hunyuan3d)
-        : await generate3DModelWithTrellis(item.imageUrl, hfToken, aiSettings.spaces.trellis);
+        ? await generate3DModelWithHunyuan3D(item.imageUrl, hfToken, aiSettings.spaces.hunyuan3d, highDetail)
+        : await generate3DModelWithTrellis(item.imageUrl, hfToken, aiSettings.spaces.trellis, highDetail);
 
       const glbUrl = URL.createObjectURL(glbBlob);
 
@@ -616,7 +619,7 @@ const App: React.FC = () => {
       // Prepare image (pad if needed to track expansion)
       const { imageUrl: preparedUrl, expansionRatio } = await prepareImageForCompletion(url);
 
-      const generatedUrl = await generateCompletion(preparedUrl, label, type, aiSettings);
+      const generatedUrl = await generateCompletion(preparedUrl, label, type, aiSettings, undefined, { redrawFace: redrawFaces });
 
       const newObject: CroppedObject = {
         id: `comp-${Date.now()}`,
@@ -721,7 +724,8 @@ const App: React.FC = () => {
           item.label,
           item.type,
           aiSettings,
-          item.description
+          item.description,
+          { redrawFace: redrawFaces }
         );
         const genElapsed = (performance.now() - tGen) / 1000;
         setProcessingTimes(prev => new Map(prev).set(`Generation: ${item.label}`, genElapsed));
@@ -857,7 +861,7 @@ const App: React.FC = () => {
           const { imageUrl: preparedUrl, expansionRatio } = await prepareImageForCompletion(item.imageUrl);
 
           const tGen2 = performance.now();
-          const generatedImageUrl = await generateCompletion(preparedUrl, item.label, item.type, aiSettings, item.description);
+          const generatedImageUrl = await generateCompletion(preparedUrl, item.label, item.type, aiSettings, item.description, { redrawFace: redrawFaces });
           const genElapsed2 = (performance.now() - tGen2) / 1000;
           setProcessingTimes(prev => new Map(prev).set(`Generation: ${item.label}`, genElapsed2));
 
@@ -1413,6 +1417,20 @@ const App: React.FC = () => {
                   </button>
                 </div>
 
+                {/* Redraw Faces Option (people only) */}
+                {completionTarget === 'person' && (
+                  <label className="flex items-center gap-2 text-xs text-slate-600 mb-2 cursor-pointer hover:text-slate-800"
+                    title="Redraw blurred or small faces sharply during completion. Off: the face is copied from the photo as it is.">
+                    <input
+                      type="checkbox"
+                      checked={redrawFaces}
+                      onChange={(e) => setRedrawFaces(e.target.checked)}
+                      className="w-3.5 h-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span>Redraw faces</span>
+                  </label>
+                )}
+
                 {/* BG Removal After Completion Option */}
                 <label className="flex items-center gap-2 text-xs text-slate-600 mb-4 cursor-pointer hover:text-slate-800">
                   <input
@@ -1849,8 +1867,16 @@ const App: React.FC = () => {
 
                       {activeTab === 'original' && croppedImages.length > 0 && (
                         <>
-
-
+                          <label className="flex items-center gap-2 text-xs font-medium text-slate-600 cursor-pointer hover:text-slate-800 transition-colors border border-slate-200 px-3 py-1.5 rounded-full bg-white hover:bg-slate-50"
+                            title="People: redraw blurred or small faces sharply during completion. Off: the face is copied from the photo as it is.">
+                            <input
+                              type="checkbox"
+                              checked={redrawFaces}
+                              onChange={(e) => setRedrawFaces(e.target.checked)}
+                              className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                            />
+                            Redraw faces
+                          </label>
                           <button
                             onClick={handleBatchCompleteExtracted}
                             disabled={isBatchCompleting || !hasAIKeys || filteredCroppedImages.length === 0}
