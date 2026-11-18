@@ -1,7 +1,7 @@
 import React from 'react';
 import { X, RotateCcw } from 'lucide-react';
 import { AIKeys, AIModels, AIProvider, AISettings, HFSpaces } from '../types';
-import { BG_REMOVAL_LABELS, BG_REMOVAL_SPACE_KEY, DEFAULT_MODELS, DEFAULT_SPACES, MODEL_SUGGESTIONS, PROVIDER_LABELS } from '../services/ai/models';
+import { BG_REMOVAL_LABELS, BG_REMOVAL_SPACE_KEY, DEFAULT_MODELS, DEFAULT_SPACES, MODEL_SUGGESTIONS, PROVIDER_LABELS, usesBgRemoval } from '../services/ai/models';
 
 interface Props {
   settings: AISettings;
@@ -10,13 +10,13 @@ interface Props {
 }
 
 const KEY_FIELDS: { key: keyof AIKeys; label: string; placeholder: string }[] = [
-  { key: 'gemini', label: 'Google Gemini API key', placeholder: 'AIza...' },
   { key: 'openai', label: 'OpenAI API key', placeholder: 'sk-...' },
+  { key: 'gemini', label: 'Google Gemini API key', placeholder: 'AIza...' },
 ];
 
 const SPACE_FIELDS: { key: keyof HFSpaces; label: string }[] = [
-  { key: 'rmbg', label: 'BRIA RMBG 3.0' },
   { key: 'rmbg2', label: 'BRIA RMBG 2.0' },
+  { key: 'rmbg', label: 'BRIA RMBG 3.0' },
   { key: 'depth', label: 'Depth estimation' },
   { key: 'trellis', label: 'TRELLIS.2' },
   { key: 'hunyuan3d', label: 'Hunyuan3D-2.1' },
@@ -24,24 +24,26 @@ const SPACE_FIELDS: { key: keyof HFSpaces; label: string }[] = [
 ];
 
 const MODEL_FIELDS: { key: keyof AIModels; label: string; provider: AIProvider; role: 'vision' | 'image' }[] = [
-  { key: 'geminiVision', label: 'Gemini (detection)', provider: 'gemini', role: 'vision' },
   { key: 'openaiVision', label: 'OpenAI (detection)', provider: 'openai', role: 'vision' },
-  { key: 'geminiImage', label: 'Gemini (completion)', provider: 'gemini', role: 'image' },
+  { key: 'geminiVision', label: 'Gemini (detection)', provider: 'gemini', role: 'vision' },
   { key: 'openaiImage', label: 'OpenAI (completion)', provider: 'openai', role: 'image' },
+  { key: 'geminiImage', label: 'Gemini (completion)', provider: 'gemini', role: 'image' },
 ];
 
-const SegmentedButtons = <T extends string>({ options, value, onSelect }: {
+const SegmentedButtons = <T extends string>({ options, value, onSelect, disabled = false }: {
   options: Record<T, string>;
   value: T;
   onSelect: (value: T) => void;
+  disabled?: boolean;
 }) => (
-  <div className="inline-flex bg-slate-100 rounded-lg p-0.5">
+  <div className={`inline-flex bg-slate-100 rounded-lg p-0.5 ${disabled ? 'opacity-50' : ''}`}>
     {(Object.keys(options) as T[]).map(option => (
       <button
         key={option}
         type="button"
+        disabled={disabled}
         onClick={() => onSelect(option)}
-        className={`px-3 py-1 text-sm rounded-md transition-colors ${value === option ? 'bg-white text-blue-700 font-medium shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+        className={`px-3 py-1 text-sm rounded-md transition-colors disabled:cursor-not-allowed ${value === option ? 'bg-white text-blue-700 font-medium shadow-sm' : 'text-slate-500 enabled:hover:text-slate-700'}`}
       >
         {options[option]}
       </button>
@@ -57,8 +59,9 @@ export const AISettingsDialog: React.FC<Props> = ({ settings, onChange, onClose 
 
   const neededKeys = new Set<AIProvider>([settings.visionProvider, settings.imageProvider]);
   // Only the Space of the selected background-removal model is used
+  const bgRemovalUsed = usesBgRemoval(settings);
   const isSpaceActive = (key: keyof HFSpaces) =>
-    (key !== 'rmbg' && key !== 'rmbg2') || key === BG_REMOVAL_SPACE_KEY[settings.bgRemoval];
+    (key !== 'rmbg' && key !== 'rmbg2') || (bgRemovalUsed && key === BG_REMOVAL_SPACE_KEY[settings.bgRemoval]);
   const isActive = (field: typeof MODEL_FIELDS[number]) =>
     field.role === 'vision' ? field.provider === settings.visionProvider : field.provider === settings.imageProvider;
 
@@ -102,9 +105,12 @@ export const AISettingsDialog: React.FC<Props> = ({ settings, onChange, onClose 
                 options={BG_REMOVAL_LABELS}
                 value={settings.bgRemoval}
                 onSelect={bgRemoval => update({ bgRemoval })}
+                disabled={!bgRemovalUsed}
               />
               <p className="mt-1 text-xs text-slate-500">
-                Used after Gemini completion (OpenAI completions are already transparent). RMBG 3.0 is the newer model; RMBG 2.0 is much lighter (a duplicate runs on a T4).
+                {bgRemovalUsed
+                  ? 'Used after Gemini completion. RMBG 2.0 is much lighter (a duplicate runs on a T4); RMBG 3.0 is the newer model.'
+                  : 'Not used: OpenAI completions already have a transparent background.'}
               </p>
             </div>
           </section>
@@ -185,7 +191,8 @@ export const AISettingsDialog: React.FC<Props> = ({ settings, onChange, onClose 
                   value={settings.spaces[field.key]}
                   placeholder={DEFAULT_SPACES[field.key]}
                   onChange={e => setSpace(field.key, e.target.value)}
-                  className="flex-1 min-w-0 px-2 py-1 text-sm border border-slate-300 rounded-md focus:outline-none focus:border-blue-500 font-mono"
+                  disabled={(field.key === 'rmbg' || field.key === 'rmbg2') && !bgRemovalUsed}
+                  className="flex-1 min-w-0 px-2 py-1 text-sm border border-slate-300 rounded-md focus:outline-none focus:border-blue-500 font-mono disabled:bg-slate-50 disabled:text-slate-400"
                 />
               </label>
             ))}

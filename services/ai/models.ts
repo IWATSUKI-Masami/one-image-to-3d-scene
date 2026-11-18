@@ -41,15 +41,23 @@ export const MODEL_SUGGESTIONS: Record<keyof AIModels, string[]> = {
   openaiImage: ['gpt-image-2.6-sunburst', 'gpt-image-2.6-flare', 'gpt-image-2'],
 };
 
+// Key order is the display order (OpenAI first: it is the default)
 export const PROVIDER_LABELS: Record<AIProvider, string> = {
-  gemini: 'Gemini',
   openai: 'OpenAI',
+  gemini: 'Gemini',
 };
 
+// Key order is the display order
 export const BG_REMOVAL_LABELS: Record<BgRemovalModel, string> = {
-  rmbg3: 'RMBG 3.0',
   rmbg2: 'RMBG 2.0',
+  rmbg3: 'RMBG 3.0',
 };
+
+/**
+ * True when background removal is used: only after Gemini completion.
+ * OpenAI completions already have a transparent background.
+ */
+export const usesBgRemoval = (settings: AISettings): boolean => settings.imageProvider !== 'openai';
 
 /** Space settings key of each background-removal model */
 export const BG_REMOVAL_SPACE_KEY: Record<BgRemovalModel, keyof HFSpaces> = {
@@ -91,8 +99,8 @@ const FORMER_DEFAULTS: { models: Partial<Record<keyof AIModels, string[]>>; spac
  */
 export const loadAISettings = (): AISettings => {
   const settings: AISettings = {
-    visionProvider: 'gemini',
-    imageProvider: 'gemini',
+    visionProvider: 'openai',
+    imageProvider: 'openai',
     bgRemoval: 'rmbg3',
     keys: {
       gemini: import.meta.env.VITE_GEMINI_API_KEY || '',

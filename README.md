@@ -25,9 +25,9 @@ The sample photo [`samples/two-people-at-table.webp`](samples/two-people-at-tabl
 
 | # | Phase | Method |
 |---|---|---|
-| 1 | Object detection | Vision-Language Model (Gemini or OpenAI) returns bounding boxes, labels and detailed descriptions (pose, action, clothing) |
+| 1 | Object detection | Vision-Language Model (OpenAI or Gemini) returns bounding boxes, labels and detailed descriptions (pose, action, clothing) |
 | 2 | Cropping | HTML5 Canvas API |
-| 3 | Image completion | Generative AI outpainting (Gemini or OpenAI image generation) restores occluded / cut-off parts while preserving pose, followed by background removal (BRIA RMBG 3.0 or 2.0) |
+| 3 | Image completion | Generative AI outpainting (OpenAI or Gemini image generation) restores occluded / cut-off parts while preserving pose. OpenAI returns a transparent background; Gemini completions go through background removal (BRIA RMBG 2.0 or 3.0) |
 | 4 | Feature matching | AKAZE (OpenCV.js) + Lowe's ratio test + RANSAC fit of a scale + translation, searched at several image scales, to localize the original crop inside the completed image (unreliable matches fall back to the whole object) |
 | 5 | Depth estimation | Depth Anything V2; object depth is the median depth inside the object mask |
 | 6 | 3D generation | TRELLIS.2 or Hunyuan3D-2.1 (Hugging Face Spaces) → textured GLB |
@@ -36,25 +36,27 @@ The sample photo [`samples/two-people-at-table.webp`](samples/two-people-at-tabl
 
 ### Walkthrough (sample photo)
 
+Results with OpenAI (detection and completion) and TRELLIS.2 (3D generation). The scene below uses orientation estimation and the paper's placement (without the perspective size correction).
+
 <table>
   <tr>
     <td width="50%"><img src="docs/images/step1-detection.webp" alt="Object detection"><br><sub><b>1. Detection</b> — 8 objects with labels and boxes (VLM)</sub></td>
     <td width="50%"><img src="docs/images/step2-extracted.webp" alt="Extracted objects"><br><sub><b>2. Cropping</b> — each object cut out of the photo</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/step3-completed.webp" alt="Completed objects"><br><sub><b>3. Completion</b> — hidden parts generated, background removed</sub></td>
+    <td width="50%"><img src="docs/images/step3-completed.webp" alt="Completed objects"><br><sub><b>3. Completion</b> — hidden parts generated with a transparent background (OpenAI); the green box marks the part visible in the photo</sub></td>
     <td width="50%"><img src="docs/images/step4-3d-models.webp" alt="3D models"><br><sub><b>6. 3D generation</b> — one textured 3D model per object (TRELLIS.2)</sub></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/images/step5-depth-map.webp" alt="Depth map"><br><sub><b>5. Depth estimation</b> — Depth Anything V2 (brighter = nearer)</sub></td>
-    <td width="50%"><img src="docs/images/scene-result.webp" alt="3D scene"><br><sub><b>7. Scene composition</b> — models placed at the depth of their PC Boxes (people, vase and cups)</sub></td>
+    <td width="50%"><img src="docs/images/scene-result.webp" alt="3D scene"><br><sub><b>7–8. Scene composition and orientation</b> — all 8 models placed at the depth of their PC Boxes and rotated by their estimated orientation</sub></td>
   </tr>
 </table>
 
 ## Requirements
 
 - Node.js 18 or later
-- **An API key for Google Gemini or OpenAI** (or both, if you use one for detection and the other for completion)
+- **An API key for OpenAI or Google Gemini** (or both, if you use one for detection and the other for completion)
 - **Hugging Face token** (required for 3D generation with TRELLIS.2 / Hunyuan3D-2.1; recommended for background removal and depth estimation, since ZeroGPU usage is counted against your own quota). Create a **Read** token in **Settings → Access Tokens** on Hugging Face and enter it in the **HF Token** field at the top right of the app; see [docs/hugging-face-spaces.md](docs/hugging-face-spaces.md)
 
 ## Setup
@@ -94,10 +96,10 @@ In AI Settings you can set:
 
 | Section | What it sets |
 |---|---|
-| Object detection & checks | Provider for detection and checks (Gemini / OpenAI) |
-| Image completion | Provider for completion (Gemini / OpenAI) |
-| Background removal | Background-removal model (RMBG 3.0 / RMBG 2.0) |
-| API keys | Gemini and OpenAI API keys |
+| Object detection & checks | Provider for detection and checks (OpenAI / Gemini; default OpenAI) |
+| Image completion | Provider for completion (OpenAI / Gemini; default OpenAI) |
+| Background removal | Background-removal model (RMBG 2.0 / RMBG 3.0). Only used with Gemini completion; disabled when OpenAI is selected |
+| API keys | OpenAI and Gemini API keys |
 | Models | Model IDs |
 | Hugging Face Spaces | Space IDs for background removal, depth estimation and 3D generation (e.g. your duplicated Spaces) |
 
@@ -105,11 +107,12 @@ Default models:
 
 | Task | Providers | Default model |
 |---|---|---|
-| Object detection, canvas expansion estimate, completion check | Gemini / OpenAI | `gemini-pro-latest` / `gpt-5.6-sol` |
-| Image completion (outpainting) | Gemini / OpenAI | `gemini-3-pro-image` / `gpt-image-2.6-sunburst` |
+| Object detection, canvas expansion estimate, completion check | OpenAI / Gemini | `gpt-5.6-sol` / `gemini-pro-latest` |
+| Image completion (outpainting) | OpenAI / Gemini | `gpt-image-2.6-sunburst` / `gemini-3-pro-image` |
 
 - OpenAI returns completions with a transparent background. Gemini cannot, so its completions go through background removal; a failed removal is marked on the completed card.
-- Background removal uses **BRIA RMBG 3.0** (default) or **BRIA RMBG 2.0**, selected under **Background removal** in AI Settings. Both Spaces have the same API; RMBG 2.0 is much lighter, so a duplicate of it runs on a T4.
+- OpenAI is the default for both detection and completion.
+- Background removal uses **BRIA RMBG 2.0** or **BRIA RMBG 3.0** (default), selected under **Background removal** in AI Settings. The choice is disabled while OpenAI does the completion, since it is not used then. Both Spaces have the same API; RMBG 2.0 is much lighter, so a duplicate of it runs on a T4.
 - Model IDs change often. If a model is retired, type a new ID in AI Settings; no code change is needed.
 - The results in the paper were obtained with `gemini-3-pro-preview` and `gemini-3-pro-image-preview` (both since shut down). Other providers and models use the same prompts, but detection accuracy and pose preservation may differ.
 - API keys are kept in memory only. Providers and model IDs are remembered in the browser.
@@ -156,7 +159,7 @@ Projects (images, depth map, models and scene layout) can be saved and loaded.
 ├── components/             # React components (3D viewers, cards, overlays)
 ├── services/
 │   ├── aiService.ts        # Prompts for detection, completion and checks
-│   └── ai/                 # Provider layer (Gemini / OpenAI) and default models
+│   └── ai/                 # Provider layer (OpenAI / Gemini) and default models
 ├── utils.ts                # Cropping, AKAZE matching, depth, 3D generation APIs
 ├── types.ts                # Type definitions
 ├── samples/                # Sample photo

@@ -25,9 +25,9 @@
 
 | # | フェーズ | 手法 |
 |---|---|---|
-| 1 | 物体検出 | VLM（Gemini または OpenAI）でバウンディングボックス、ラベル、詳細な説明（姿勢・動作・服装）を取得 |
+| 1 | 物体検出 | VLM（OpenAI または Gemini）でバウンディングボックス、ラベル、詳細な説明（姿勢・動作・服装）を取得 |
 | 2 | 切り出し | HTML5 Canvas API |
-| 3 | 画像補完 | 生成AI（Gemini または OpenAI の画像生成）によるアウトペインティングで、姿勢を保ったまま隠れた部分や切れた部分を復元し、背景を除去（BRIA RMBG 3.0 または 2.0） |
+| 3 | 画像補完 | 生成AI（OpenAI または Gemini の画像生成）によるアウトペインティングで、姿勢を保ったまま隠れた部分や切れた部分を復元。OpenAI は透明背景で返し、Gemini の場合は背景を除去（BRIA RMBG 2.0 または 3.0） |
 | 4 | 特徴点マッチング | AKAZE（OpenCV.js）、Lowe's Ratio Test、RANSAC による拡大率と移動量の推定（複数の縮小率で探索）で、元の切り出し画像が補完画像のどこにあたるかを特定（信頼できない場合は物体全体の枠を使用） |
 | 5 | 深度推定 | Depth Anything V2。物体の深度はマスク内の深度の中央値 |
 | 6 | 3D生成 | TRELLIS.2 または Hunyuan3D-2.1（Hugging Face Spaces）でテクスチャ付きGLBを生成 |
@@ -36,25 +36,27 @@
 
 ### 処理の流れ（サンプル画像）
 
+OpenAI（物体検出と画像補完）と TRELLIS.2（3D生成）を使った結果です。下の3Dシーンは、向きの推定を適用し、論文の配置（遠近による大きさの補正なし）で表示しています。
+
 <table>
   <tr>
     <td width="50%"><img src="docs/images/step1-detection.webp" alt="物体検出"><br><sub><b>1. 物体検出</b>：VLM が8物体のラベルと枠を取得</sub></td>
     <td width="50%"><img src="docs/images/step2-extracted.webp" alt="切り出し"><br><sub><b>2. 切り出し</b>：物体ごとに写真から切り出す</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/step3-completed.webp" alt="画像補完"><br><sub><b>3. 画像補完</b>：隠れた部分を生成し、背景を除去</sub></td>
+    <td width="50%"><img src="docs/images/step3-completed.webp" alt="画像補完"><br><sub><b>3. 画像補完</b>：隠れた部分を透明背景で生成（OpenAI）。緑の枠は写真に写っていた部分</sub></td>
     <td width="50%"><img src="docs/images/step4-3d-models.webp" alt="3Dモデル"><br><sub><b>6. 3D生成</b>：物体ごとにテクスチャ付き3Dモデルを生成（TRELLIS.2）</sub></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/images/step5-depth-map.webp" alt="深度マップ"><br><sub><b>5. 深度推定</b>：Depth Anything V2（明るいほど手前）</sub></td>
-    <td width="50%"><img src="docs/images/scene-result.webp" alt="3Dシーン"><br><sub><b>7. シーン合成</b>：各モデルを PC Box の奥行きに配置（人物、花瓶、カップ）</sub></td>
+    <td width="50%"><img src="docs/images/scene-result.webp" alt="3Dシーン"><br><sub><b>7〜8. シーン合成と向きの推定</b>：8つのモデルを PC Box の奥行きに配置し、推定した向きに回転</sub></td>
   </tr>
 </table>
 
 ## 必要な環境
 
 - Node.js 18以上
-- **Google Gemini または OpenAI の APIキー**（物体検出と画像補完で別々のプロバイダーを使う場合は両方）
+- **OpenAI または Google Gemini の APIキー**（物体検出と画像補完で別々のプロバイダーを使う場合は両方）
 - **Hugging Face トークン**（TRELLIS.2 / Hunyuan3D-2.1 による3D生成では必須。背景除去と深度推定でも推奨。ZeroGPUの利用分が各自の枠で計上されます）。Hugging Face の **Settings → Access Tokens** で **Read** のトークンを作り、アプリの画面右上の **HF Token** 欄に入力します。詳しくは [docs/hugging-face-spaces-jp.md](docs/hugging-face-spaces-jp.md) を参照してください
 
 ## セットアップ
@@ -94,10 +96,10 @@ AI Settings では次の項目を設定できます。
 
 | 項目 | 内容 |
 |---|---|
-| Object detection & checks | 物体検出・チェックに使う AI（Gemini / OpenAI） |
-| Image completion | 画像補完に使う AI（Gemini / OpenAI） |
-| Background removal | 背景除去のモデル（RMBG 3.0 / RMBG 2.0） |
-| API keys | Gemini と OpenAI の API キー |
+| Object detection & checks | 物体検出・チェックに使う AI（OpenAI / Gemini。既定は OpenAI） |
+| Image completion | 画像補完に使う AI（OpenAI / Gemini。既定は OpenAI） |
+| Background removal | 背景除去のモデル（RMBG 2.0 / RMBG 3.0）。Gemini で補完するときだけ使い、OpenAI を選んでいる間は選択できない |
+| API keys | OpenAI と Gemini の API キー |
 | Models | 使うモデルの ID |
 | Hugging Face Spaces | 背景除去・深度推定・3D 生成で使う Space の ID（複製した Space など） |
 
@@ -105,11 +107,12 @@ AI Settings では次の項目を設定できます。
 
 | 処理 | プロバイダー | 既定のモデル |
 |---|---|---|
-| 物体検出、キャンバス拡張量の推定、補完結果のチェック | Gemini / OpenAI | `gemini-pro-latest` / `gpt-5.6-sol` |
-| 画像補完（アウトペインティング） | Gemini / OpenAI | `gemini-3-pro-image` / `gpt-image-2.6-sunburst` |
+| 物体検出、キャンバス拡張量の推定、補完結果のチェック | OpenAI / Gemini | `gpt-5.6-sol` / `gemini-pro-latest` |
+| 画像補完（アウトペインティング） | OpenAI / Gemini | `gpt-image-2.6-sunburst` / `gemini-3-pro-image` |
 
 - OpenAI は補完画像を透明背景で返します。Gemini は透明背景を出力できないため、補完後に背景除去を行います。背景除去に失敗した場合は、補完画像のカードに表示されます。
-- 背景除去には **BRIA RMBG 3.0**（既定）または **BRIA RMBG 2.0** を使います。AI Settings の **Background removal** で選べます。どちらの Space も API は同じです。RMBG 2.0 はずっと軽く、複製すれば T4 で動きます。
+- 物体検出と画像補完の既定は、どちらも OpenAI です。
+- 背景除去には **BRIA RMBG 2.0** または **BRIA RMBG 3.0**（既定）を使います。AI Settings の **Background removal** で選べます。OpenAI で補完している間は背景除去を使わないので、選択できなくなります。どちらの Space も API は同じです。RMBG 2.0 はずっと軽く、複製すれば T4 で動きます。
 - モデルIDは頻繁に変わります。モデルが提供終了になった場合は、AI Settings で新しいIDを入力してください。コードの変更は不要です。
 - 論文の結果は `gemini-3-pro-preview` と `gemini-3-pro-image-preview`（どちらも提供終了）で得たものです。他のプロバイダーやモデルでも同じプロンプトを使いますが、検出精度や姿勢の保持には差が出る可能性があります。
 - APIキーはメモリ上にだけ保持します。プロバイダーとモデルIDはブラウザに記憶されます。
@@ -156,7 +159,7 @@ AI Settings では次の項目を設定できます。
 ├── components/             # Reactコンポーネント（3Dビューア、カード、オーバーレイ）
 ├── services/
 │   ├── aiService.ts        # 物体検出・補完・チェックのプロンプト
-│   └── ai/                 # プロバイダー層（Gemini / OpenAI）と既定のモデル
+│   └── ai/                 # プロバイダー層（OpenAI / Gemini）と既定のモデル
 ├── utils.ts                # 切り出し、AKAZEマッチング、深度推定、3D生成API
 ├── types.ts                # 型定義
 ├── samples/                # サンプル画像
