@@ -12,6 +12,7 @@
   "dependencies": {
     "@google/genai": "^3.4.0",
     "@gradio/client": "^2.0.0",
+    "@techstark/opencv-js": "4.10.0-release.1",
     "lucide-react": "^0.555.0",
     "openai": "^7.59.0",
     "react": "^19.2.0",

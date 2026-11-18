@@ -1,7 +1,5 @@
 import { CroppedObject, DetectedObject } from './types';
-
-// OpenCV.js is loaded globally from index.html
-declare const cv: any;
+import openCVUrl from '@techstark/opencv-js/dist/opencv.js?url';
 
 export const blobUrlToDataUrl = async (blobUrl: string): Promise<string> => {
   const response = await fetch(blobUrl);
@@ -135,26 +133,44 @@ export const removeBackgroundWithRembg = async (imageUrl: string, apiKey?: strin
 
 // --- AKAZE feature matching (Phase 4) ---
 
-const isOpenCVReady = (): boolean =>
-  typeof window.cv !== 'undefined' && typeof window.cv.Mat !== 'undefined';
+/**
+ * OpenCV.js 4.10.0, shipped with the app from npm (@techstark/opencv-js, pinned)
+ * and loaded on first use as a classic <script> (the file is about 10 MB).
+ *
+ * It is not imported as an ES module: the Emscripten module has a `then`
+ * method, so awaiting the module namespace never settles. For the same reason
+ * the global `cv` is returned wrapped in an object, and readiness is detected
+ * by polling for `cv.Mat`.
+ */
+let openCVPromise: Promise<{ cv: any } | null> | null = null;
 
-/** OpenCV.js is loaded asynchronously; wait until it is ready. */
-const waitForOpenCV = async (timeoutMs = 20000): Promise<boolean> => {
-  if (isOpenCVReady()) return true;
-
-  return new Promise((resolve) => {
-    const startTime = Date.now();
-    const interval = setInterval(() => {
-      if (isOpenCVReady()) {
-        clearInterval(interval);
-        resolve(true);
-      } else if (Date.now() - startTime > timeoutMs) {
-        clearInterval(interval);
-        console.error("OpenCV load timed out");
-        resolve(false);
+const loadOpenCV = (timeoutMs = 60000): Promise<{ cv: any } | null> => {
+  openCVPromise ??= (async () => {
+    try {
+      const w = window as any;
+      if (!w.cv) {
+        await new Promise<void>((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = openCVUrl;
+          script.async = true;
+          script.onload = () => resolve();
+          script.onerror = () => reject(new Error('Failed to load ' + openCVUrl));
+          document.head.appendChild(script);
+        });
       }
-    }, 100);
-  });
+      const start = Date.now();
+      while (!(w.cv && w.cv.Mat)) {
+        if (Date.now() - start > timeoutMs) throw new Error('OpenCV.js initialization timed out');
+        await new Promise(r => setTimeout(r, 50));
+      }
+      return { cv: w.cv };
+    } catch (e) {
+      console.error('Failed to load OpenCV.js:', e);
+      openCVPromise = null; // allow a retry later
+      return null;
+    }
+  })();
+  return openCVPromise;
 };
 
 const loadImageElement = (src: string): Promise<HTMLImageElement> =>
@@ -177,10 +193,12 @@ export const findBestMatchPosition = async (
   largeImageUrl: string,
   templateImageUrl: string
 ): Promise<[number, number, number, number] | null> => {
-  if (!(await waitForOpenCV())) {
+  const opencv = await loadOpenCV();
+  if (!opencv) {
     console.warn("AKAZE: OpenCV.js is not available.");
     return null;
   }
+  const { cv } = opencv;
 
   let largeImg: HTMLImageElement, templateImg: HTMLImageElement;
   try {

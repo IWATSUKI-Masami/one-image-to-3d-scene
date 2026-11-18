@@ -74,8 +74,3 @@ export interface AISettings {
   models: AIModels;
 }
 
-declare global {
-  interface Window {
-    cv?: any;
-  }
-}
