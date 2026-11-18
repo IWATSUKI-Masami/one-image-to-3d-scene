@@ -4,6 +4,7 @@ All notable changes to this project. Versions up to v1.18.1 were developed in th
 
 
 ## Unreleased
+- **Added** `docs/hugging-face-spaces.md` (EN/JP): Hugging Face token, accepting the terms of gated models, the `HF_TOKEN` Space secret, GPU per Space, the file changes a Hunyuan3D-2.1 duplicate needs to run on a dedicated GPU, and common errors.
 - **Added** OpenAI as an AI provider. Object detection/checks and image completion can each use Gemini or OpenAI. Choose providers, enter API keys and change model IDs in the new **AI Settings** dialog.
 - **Changed** default Gemini models: `gemini-3-pro-preview` → `gemini-pro-latest`, `gemini-3-pro-image-preview` (shut down) → `gemini-3-pro-image`.
 - **Changed** JSON output of all vision tasks is now enforced with each provider's structured-output feature. The detection result is wrapped as `{"objects": [...]}`.
