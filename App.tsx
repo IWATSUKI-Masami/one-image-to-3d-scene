@@ -7,7 +7,7 @@ import { Model3DCard } from './components/Model3DCard';
 import { DepthOnlyScene } from './components/DepthOnlyScene';
 import { BoundingBoxOverlay } from './components/BoundingBoxOverlay';
 import { detectObjectsInImage, generateCompletion, estimateCanvasExpansion, verifyCompletion } from './services/aiService';
-import { loadAISettings, saveAISettings, hasRequiredKeys, PROVIDER_LABELS } from './services/ai/models';
+import { loadAISettings, saveAISettings, hasRequiredKeys, bgRemovalSpace, PROVIDER_LABELS } from './services/ai/models';
 import { AISettingsDialog } from './components/AISettingsDialog';
 import { cropObjectsFromImage, removeBackgroundWithRembg, findBestMatchPosition, hasTransparentBackground, generate3DModelWithHunyuan3D, generate3DModelWithTrellis, blobUrlToDataUrl, dataUrlToBlobUrl, generateDepthMap, prepareImageForCompletion, calculateTightBoundingBox } from './utils';
 import { DetectedObject, CroppedObject, Model3D, ModelProvider, ProjectArchive, AISettings } from './types';
@@ -606,7 +606,7 @@ const App: React.FC = () => {
    * Background removal after completion.
    * - Completions that are already transparent (OpenAI with background: 'transparent')
    *   are used as they are, so BRIA RMBG is not needed.
-   * - Otherwise BRIA RMBG (3.0 by default) removes the background of the completed image and of the
+   * - Otherwise BRIA RMBG (3.0 or 2.0, chosen in AI Settings) removes the background of the completed image and of the
    *   original crop (the latter only helps feature matching).
    * `failed` is true when RMBG was needed but failed; the card then shows a warning.
    */
@@ -617,14 +617,14 @@ const App: React.FC = () => {
     let transparentUrl = generatedUrl;
     let extractedTransparentUrl: string | undefined;
     try {
-      const bgRemovedBlob = await removeBackgroundWithRembg(generatedUrl, hfToken, aiSettings.spaces.rmbg);
+      const bgRemovedBlob = await removeBackgroundWithRembg(generatedUrl, hfToken, bgRemovalSpace(aiSettings));
       transparentUrl = URL.createObjectURL(bgRemovedBlob);
     } catch (bgError) {
       console.warn(`[${tag}] Background removal failed, keeping the completed image as is:`, bgError);
       return { transparentUrl, extractedTransparentUrl, failed: true };
     }
     try {
-      const extractedBgRemovedBlob = await removeBackgroundWithRembg(cropUrl, hfToken, aiSettings.spaces.rmbg);
+      const extractedBgRemovedBlob = await removeBackgroundWithRembg(cropUrl, hfToken, bgRemovalSpace(aiSettings));
       extractedTransparentUrl = URL.createObjectURL(extractedBgRemovedBlob);
     } catch (extractBgError) {
       console.warn(`[${tag}] Failed to remove BG from the extracted image:`, extractBgError);

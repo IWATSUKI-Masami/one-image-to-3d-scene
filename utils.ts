@@ -119,8 +119,11 @@ export const hasTransparentBackground = async (imageUrl: string, minShare = 0.02
   }
 };
 
-export const removeBackgroundWithRembg = async (imageUrl: string, apiKey?: string, space: string = DEFAULT_SPACES.rmbg): Promise<Blob> => {
-  space = space.trim() || DEFAULT_SPACES.rmbg; // an empty setting means the official Space
+/**
+ * Background removal with a BRIA RMBG Space (3.0 or 2.0; both have the same API:
+ * /image -> [ImageSlider, transparent PNG]). `space` is resolved by bgRemovalSpace().
+ */
+export const removeBackgroundWithRembg = async (imageUrl: string, apiKey: string | undefined, space: string): Promise<Blob> => {
 
   const { Client } = await import("@gradio/client");
   const options: any = {};

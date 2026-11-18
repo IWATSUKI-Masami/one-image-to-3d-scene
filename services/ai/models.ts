@@ -1,4 +1,4 @@
-import { AIModels, AIProvider, AISettings, HFSpaces } from '../../types';
+import { AIModels, AIProvider, AISettings, BgRemovalModel, HFSpaces } from '../../types';
 
 /**
  * Default model IDs.
@@ -26,6 +26,7 @@ export const DEFAULT_MODELS: AIModels = {
  */
 export const DEFAULT_SPACES: HFSpaces = {
   rmbg: 'briaai/BRIA-RMBG-3.0',
+  rmbg2: 'briaai/BRIA-RMBG-2.0',
   depth: 'depth-anything/Depth-Anything-V2',
   trellis: 'microsoft/TRELLIS.2',
   hunyuan3d: 'tencent/Hunyuan3D-2.1',
@@ -44,6 +45,25 @@ export const PROVIDER_LABELS: Record<AIProvider, string> = {
   openai: 'OpenAI',
 };
 
+export const BG_REMOVAL_LABELS: Record<BgRemovalModel, string> = {
+  rmbg3: 'RMBG 3.0',
+  rmbg2: 'RMBG 2.0',
+};
+
+/** Space settings key of each background-removal model */
+export const BG_REMOVAL_SPACE_KEY: Record<BgRemovalModel, keyof HFSpaces> = {
+  rmbg3: 'rmbg',
+  rmbg2: 'rmbg2',
+};
+
+/** Space ID of the selected background-removal model (an empty setting means the official Space) */
+export const bgRemovalSpace = (settings: AISettings): string => {
+  const key = BG_REMOVAL_SPACE_KEY[settings.bgRemoval];
+  return settings.spaces[key].trim() || DEFAULT_SPACES[key];
+};
+
+const isBgRemovalModel = (value: unknown): value is BgRemovalModel => value === 'rmbg3' || value === 'rmbg2';
+
 const isProvider = (value: unknown): value is AIProvider => value === 'gemini' || value === 'openai';
 
 /** True when the keys for both the selected vision and image providers are set. */
@@ -56,7 +76,8 @@ const STORAGE_KEY = 'one-image-to-3d-scene:ai-settings';
 /**
  * Former default values. Earlier versions stored every value, including
  * untouched defaults, so a stored former default is treated as "not set" and
- * replaced by the current default.
+ * replaced by the current default. (RMBG 2.0 is now selected with
+ * `bgRemoval: 'rmbg2'`, whose Space is `spaces.rmbg2`.)
  */
 const FORMER_DEFAULTS: { models: Partial<Record<keyof AIModels, string[]>>; spaces: Partial<Record<keyof HFSpaces, string[]>> } = {
   models: {},
@@ -71,6 +92,7 @@ export const loadAISettings = (): AISettings => {
   const settings: AISettings = {
     visionProvider: 'gemini',
     imageProvider: 'gemini',
+    bgRemoval: 'rmbg3',
     keys: {
       gemini: import.meta.env.VITE_GEMINI_API_KEY || '',
       openai: import.meta.env.VITE_OPENAI_API_KEY || '',
@@ -84,6 +106,7 @@ export const loadAISettings = (): AISettings => {
       // Unknown providers (e.g. 'claude' from an earlier version) fall back to the default
       if (isProvider(saved.visionProvider)) settings.visionProvider = saved.visionProvider;
       if (isProvider(saved.imageProvider)) settings.imageProvider = saved.imageProvider;
+      if (isBgRemovalModel(saved.bgRemoval)) settings.bgRemoval = saved.bgRemoval;
       for (const k of Object.keys(DEFAULT_MODELS) as (keyof AIModels)[]) {
         const v = typeof saved.models?.[k] === 'string' ? saved.models[k].trim() : '';
         if (v && !FORMER_DEFAULTS.models[k]?.includes(v)) settings.models[k] = v;
@@ -107,7 +130,7 @@ const overrides = <T extends object>(values: T, defaults: T): Partial<T> =>
   ) as Partial<T>;
 
 /**
- * Remember providers, and model / Space IDs that were changed (API keys are
+ * Remember providers, the background-removal model, and model / Space IDs that were changed (API keys are
  * intentionally not stored). Untouched defaults are not stored, so a new
  * default in a later version takes effect.
  */
@@ -116,6 +139,7 @@ export const saveAISettings = (settings: AISettings): void => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       visionProvider: settings.visionProvider,
       imageProvider: settings.imageProvider,
+      bgRemoval: settings.bgRemoval,
       models: overrides(settings.models, DEFAULT_MODELS),
       spaces: overrides(settings.spaces, DEFAULT_SPACES),
     }));

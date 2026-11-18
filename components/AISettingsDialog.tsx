@@ -1,7 +1,7 @@
 import React from 'react';
 import { X, RotateCcw } from 'lucide-react';
 import { AIKeys, AIModels, AIProvider, AISettings, HFSpaces } from '../types';
-import { DEFAULT_MODELS, DEFAULT_SPACES, MODEL_SUGGESTIONS, PROVIDER_LABELS } from '../services/ai/models';
+import { BG_REMOVAL_LABELS, BG_REMOVAL_SPACE_KEY, DEFAULT_MODELS, DEFAULT_SPACES, MODEL_SUGGESTIONS, PROVIDER_LABELS } from '../services/ai/models';
 
 interface Props {
   settings: AISettings;
@@ -15,7 +15,8 @@ const KEY_FIELDS: { key: keyof AIKeys; label: string; placeholder: string }[] = 
 ];
 
 const SPACE_FIELDS: { key: keyof HFSpaces; label: string }[] = [
-  { key: 'rmbg', label: 'Background removal' },
+  { key: 'rmbg', label: 'BRIA RMBG 3.0' },
+  { key: 'rmbg2', label: 'BRIA RMBG 2.0' },
   { key: 'depth', label: 'Depth estimation' },
   { key: 'trellis', label: 'TRELLIS.2' },
   { key: 'hunyuan3d', label: 'Hunyuan3D-2.1' },
@@ -54,6 +55,9 @@ export const AISettingsDialog: React.FC<Props> = ({ settings, onChange, onClose 
   const setSpace = (key: keyof HFSpaces, value: string) => update({ spaces: { ...settings.spaces, [key]: value } });
 
   const neededKeys = new Set<AIProvider>([settings.visionProvider, settings.imageProvider]);
+  // Only the Space of the selected background-removal model is used
+  const isSpaceActive = (key: keyof HFSpaces) =>
+    (key !== 'rmbg' && key !== 'rmbg2') || key === BG_REMOVAL_SPACE_KEY[settings.bgRemoval];
   const isActive = (field: typeof MODEL_FIELDS[number]) =>
     field.role === 'vision' ? field.provider === settings.visionProvider : field.provider === settings.imageProvider;
 
@@ -90,6 +94,17 @@ export const AISettingsDialog: React.FC<Props> = ({ settings, onChange, onClose 
                 value={settings.imageProvider}
                 onSelect={imageProvider => update({ imageProvider })}
               />
+            </div>
+            <div>
+              <div className="text-sm font-semibold text-slate-700 mb-1">Background removal</div>
+              <SegmentedButtons
+                options={BG_REMOVAL_LABELS}
+                value={settings.bgRemoval}
+                onSelect={bgRemoval => update({ bgRemoval })}
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                Used after Gemini completion (OpenAI completions are already transparent). RMBG 3.0 is the newer model; RMBG 2.0 is much lighter (a duplicate runs on a T4).
+              </p>
             </div>
           </section>
 
@@ -161,7 +176,9 @@ export const AISettingsDialog: React.FC<Props> = ({ settings, onChange, onClose 
             </div>
             {SPACE_FIELDS.map(field => (
               <label key={field.key} className="flex items-center gap-2">
-                <span className="w-40 shrink-0 text-xs text-slate-700">{field.label}</span>
+                <span className={`w-40 shrink-0 text-xs ${isSpaceActive(field.key) ? 'text-slate-700 font-medium' : 'text-slate-400'}`}>
+                  {field.label}
+                </span>
                 <input
                   type="text"
                   value={settings.spaces[field.key]}

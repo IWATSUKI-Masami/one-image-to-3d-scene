@@ -74,15 +74,22 @@ export interface AIModels {
  * running on dedicated (paid) GPUs, which have no ZeroGPU quota.
  */
 export interface HFSpaces {
+  /** BRIA RMBG 3.0 (the key is kept as `rmbg` so that stored settings stay valid) */
   rmbg: string;
+  /** BRIA RMBG 2.0 */
+  rmbg2: string;
   depth: string;
   trellis: string;
   hunyuan3d: string;
 }
 
+/** Background-removal model; both Spaces have the same API */
+export type BgRemovalModel = 'rmbg3' | 'rmbg2';
+
 export interface AISettings {
   visionProvider: VisionProvider;
   imageProvider: ImageProvider;
+  bgRemoval: BgRemovalModel;
   keys: AIKeys;
   models: AIModels;
   spaces: HFSpaces;
