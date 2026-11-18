@@ -158,7 +158,7 @@ Faces of the 3D models of people look unnatural (uncanny).
 4. **Not modelling the face**: blur the face texture or fill it with the skin color ("mannequin" look). This removes the uncanny effect and may be enough for scene reconstruction.
 5. **Human-specific 3D generators** (e.g. PSHuman, LHM, based on a human body model): best quality, but availability as a Space and licenses need checking.
 
-**Status**: 1 (the **Redraw faces** completion option) and 2 are implemented (also octree resolution 384 for Hunyuan3D-2.1). Next, if faces still look uncanny: 4 as an option, then 3 or 5.
+**Status**: 1, 2 and 4 are implemented as the **Face** completion option (Calm / Redraw / Mannequin / As in photo) and the higher resolution for people (also octree resolution 384 for Hunyuan3D-2.1). Redraw alone still looked uncanny on the sample, mainly because of open mouths with teeth, so **Calm** (closed mouth) is the default. Next, if needed: 3 or 5.
 
 ## References
 

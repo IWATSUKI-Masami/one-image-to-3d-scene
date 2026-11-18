@@ -109,10 +109,39 @@ export const detectObjectsInImage = async (file: File, settings: AISettings): Pr
 // Phase 3: image completion
 // ---------------------------------------------------------------------------
 
+/**
+ * Face of people in completion:
+ * - keep: copy the face from the photo as it is
+ * - redraw: redraw a blurred or small face sharply, keeping the expression
+ * - calm: like redraw, with a relaxed closed-mouth expression (teeth and open mouths look uncanny in 3D)
+ * - mannequin: smooth face without painted features, like a store mannequin
+ */
+export type FaceStyle = 'keep' | 'redraw' | 'calm' | 'mannequin';
+
+const FACE_RULES: Record<Exclude<FaceStyle, 'keep'>, string> = {
+  redraw: `**CLEAR, NATURAL FACE**:
+       - Keep the person's hairstyle, skin tone, apparent age, head direction and expression
+       - Render the face sharp and in focus with natural proportions: clearly defined eyes, nose, mouth and ears
+       - If the face is blurred, small, low-resolution or partly hidden in the input, redraw it cleanly instead of copying the blur or artifacts
+       - No distorted, melted, asymmetric or doll-like features`,
+  calm: `**CLEAR, CALM FACE**:
+       - Keep the person's hairstyle, skin tone, apparent age and head direction
+       - Give the face a relaxed, gentle expression with the MOUTH CLOSED: a slight closed-lip smile at most, NO visible teeth, no open mouth
+       - Eyes naturally open and relaxed, looking in the same direction as in the input; no squinting, no raised eyebrows
+       - Render the face sharp and in focus with natural proportions; redraw a blurred, small or low-resolution face cleanly
+       - Soft, even lighting on the face without strong shadows or highlights
+       - No distorted, melted, asymmetric or doll-like features`,
+  mannequin: `**MANNEQUIN FACE**:
+       - Render the face like a smooth store mannequin or artist's figure: a uniform skin-colored surface with only the gentle shape of the brow, nose, cheeks and chin
+       - NO painted or detailed eyes, eyebrows, lips, teeth or makeup
+       - Keep the hair, ears, head shape, skin tone and head direction exactly as in the input
+       - Keep the rest of the body, the clothing and the pose unchanged`,
+};
+
 /** Options of image completion */
 export interface CompletionOptions {
-  /** People: redraw a blurred or small face sharply instead of copying it (default true) */
-  redrawFace?: boolean;
+  /** People: how to render the face (default 'calm') */
+  faceStyle?: FaceStyle;
 }
 
 export const generateCompletion = async (
@@ -125,7 +154,8 @@ export const generateCompletion = async (
 ): Promise<string> => {
   try {
     const image = await loadImageData(imageUrl);
-    const redrawFace = options.redrawFace ?? true;
+    const faceStyle: FaceStyle = options.faceStyle ?? 'calm';
+    const faceRule = faceStyle === 'keep' ? null : FACE_RULES[faceStyle];
 
     let prompt = '';
     if (type === 'person') {
@@ -161,7 +191,7 @@ export const generateCompletion = async (
        - Do NOT straighten the body or make a sitting person stand up
        - The upper body angle and orientation MUST match the input EXACTLY
     
-    2. **PRESERVE ORIGINAL PIXELS**: Copy all visible parts of the person pixel-for-pixel from the input. Do NOT regenerate or modify any visible part${redrawFace ? ', except the face (rule 6)' : ''}.
+    2. **PRESERVE ORIGINAL PIXELS**: Copy all visible parts of the person pixel-for-pixel from the input. Do NOT regenerate or modify any visible part${faceRule ? ', except the face (rule 6)' : ''}.
     
     3. **COMPLETE ALL CUT-OFF BODY PARTS AT EVERY EDGE**: 
        - If ARM is cut off at left/right edge: Complete the full arm including HAND and FINGERS
@@ -177,11 +207,7 @@ export const generateCompletion = async (
     
     5. **REMOVE FURNITURE BUT KEEP POSE**: Remove chairs/tables, but the person's body position must remain as if they were still seated/leaning.
     
-    ${redrawFace ? `6. **CLEAR, NATURAL FACE**:
-       - Keep the person's hairstyle, skin tone, apparent age, head direction and expression
-       - Render the face sharp and in focus with natural proportions: clearly defined eyes, nose, mouth and ears
-       - If the face is blurred, small, low-resolution or partly hidden in the input, redraw it cleanly instead of copying the blur or artifacts
-       - No distorted, melted, asymmetric or doll-like features
+    ${faceRule ? `6. ${faceRule}
     
     7` : '6'}. **PURE WHITE BACKGROUND - CRITICAL**: 
        - Background MUST be RGB(255,255,255) - pure white, no gray

@@ -6,7 +6,16 @@ import { Model3DCard } from './components/Model3DCard';
 
 import { DepthOnlyScene } from './components/DepthOnlyScene';
 import { BoundingBoxOverlay } from './components/BoundingBoxOverlay';
-import { detectObjectsInImage, generateCompletion, estimateCanvasExpansion, verifyCompletion } from './services/aiService';
+import { detectObjectsInImage, generateCompletion, estimateCanvasExpansion, verifyCompletion, FaceStyle } from './services/aiService';
+
+/** Face styles for the completion of people */
+const FACE_STYLE_OPTIONS: { value: FaceStyle; label: string }[] = [
+  { value: 'calm', label: 'Calm' },
+  { value: 'redraw', label: 'Redraw' },
+  { value: 'mannequin', label: 'Mannequin' },
+  { value: 'keep', label: 'As in photo' },
+];
+const FACE_STYLE_HINT = 'Faces of people in completion. Calm: sharp face, relaxed expression with the mouth closed (open mouths and teeth look uncanny in 3D). Redraw: sharp face, same expression. Mannequin: smooth face without painted features. As in photo: copied as it is.';
 import { loadAISettings, saveAISettings, hasRequiredKeys, bgRemovalSpace, DEFAULT_SPACES, PROVIDER_LABELS } from './services/ai/models';
 import { estimateModelOrientation, MIN_ORIENTATION_CONFIDENCE } from './services/orientation';
 import { AISettingsDialog } from './components/AISettingsDialog';
@@ -59,7 +68,7 @@ const App: React.FC = () => {
   const [isBatchCompleting, setIsBatchCompleting] = useState(false);
   const [completionTarget, setCompletionTarget] = useState<'person' | 'object'>('person');
   const [bgRemovalAfterCompletion, setBgRemovalAfterCompletion] = useState(true); // Default: ON, uses RMBG
-  const [redrawFaces, setRedrawFaces] = useState(true); // People: redraw blurred faces sharply during completion
+  const [faceStyle, setFaceStyle] = useState<FaceStyle>('calm'); // People: how faces are rendered during completion
 
   // 3D Generation states
   const [models3D, setModels3D] = useState<Model3D[]>([]);
@@ -619,7 +628,7 @@ const App: React.FC = () => {
       // Prepare image (pad if needed to track expansion)
       const { imageUrl: preparedUrl, expansionRatio } = await prepareImageForCompletion(url);
 
-      const generatedUrl = await generateCompletion(preparedUrl, label, type, aiSettings, undefined, { redrawFace: redrawFaces });
+      const generatedUrl = await generateCompletion(preparedUrl, label, type, aiSettings, undefined, { faceStyle });
 
       const newObject: CroppedObject = {
         id: `comp-${Date.now()}`,
@@ -725,7 +734,7 @@ const App: React.FC = () => {
           item.type,
           aiSettings,
           item.description,
-          { redrawFace: redrawFaces }
+          { faceStyle }
         );
         const genElapsed = (performance.now() - tGen) / 1000;
         setProcessingTimes(prev => new Map(prev).set(`Generation: ${item.label}`, genElapsed));
@@ -861,7 +870,7 @@ const App: React.FC = () => {
           const { imageUrl: preparedUrl, expansionRatio } = await prepareImageForCompletion(item.imageUrl);
 
           const tGen2 = performance.now();
-          const generatedImageUrl = await generateCompletion(preparedUrl, item.label, item.type, aiSettings, item.description, { redrawFace: redrawFaces });
+          const generatedImageUrl = await generateCompletion(preparedUrl, item.label, item.type, aiSettings, item.description, { faceStyle });
           const genElapsed2 = (performance.now() - tGen2) / 1000;
           setProcessingTimes(prev => new Map(prev).set(`Generation: ${item.label}`, genElapsed2));
 
@@ -1417,17 +1426,17 @@ const App: React.FC = () => {
                   </button>
                 </div>
 
-                {/* Redraw Faces Option (people only) */}
+                {/* Face Style Option (people only) */}
                 {completionTarget === 'person' && (
-                  <label className="flex items-center gap-2 text-xs text-slate-600 mb-2 cursor-pointer hover:text-slate-800"
-                    title="Redraw blurred or small faces sharply during completion. Off: the face is copied from the photo as it is.">
-                    <input
-                      type="checkbox"
-                      checked={redrawFaces}
-                      onChange={(e) => setRedrawFaces(e.target.checked)}
-                      className="w-3.5 h-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                    />
-                    <span>Redraw faces</span>
+                  <label className="flex items-center gap-2 text-xs text-slate-600 mb-2" title={FACE_STYLE_HINT}>
+                    <span>Face</span>
+                    <select
+                      value={faceStyle}
+                      onChange={(e) => setFaceStyle(e.target.value as FaceStyle)}
+                      className="text-xs border border-slate-200 rounded-md px-1.5 py-0.5 bg-white"
+                    >
+                      {FACE_STYLE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
                   </label>
                 )}
 
@@ -1867,15 +1876,16 @@ const App: React.FC = () => {
 
                       {activeTab === 'original' && croppedImages.length > 0 && (
                         <>
-                          <label className="flex items-center gap-2 text-xs font-medium text-slate-600 cursor-pointer hover:text-slate-800 transition-colors border border-slate-200 px-3 py-1.5 rounded-full bg-white hover:bg-slate-50"
-                            title="People: redraw blurred or small faces sharply during completion. Off: the face is copied from the photo as it is.">
-                            <input
-                              type="checkbox"
-                              checked={redrawFaces}
-                              onChange={(e) => setRedrawFaces(e.target.checked)}
-                              className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-                            />
-                            Redraw faces
+                          <label className="flex items-center gap-2 text-xs font-medium text-slate-600 border border-slate-200 px-3 py-1 rounded-full bg-white"
+                            title={FACE_STYLE_HINT}>
+                            Face
+                            <select
+                              value={faceStyle}
+                              onChange={(e) => setFaceStyle(e.target.value as FaceStyle)}
+                              className="text-xs bg-transparent focus:outline-none cursor-pointer"
+                            >
+                              {FACE_STYLE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                            </select>
                           </label>
                           <button
                             onClick={handleBatchCompleteExtracted}
