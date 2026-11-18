@@ -1,4 +1,4 @@
-import { AIModels, AISettings, ImageProvider, VisionProvider } from '../../types';
+import { AIModels, AIProvider, AISettings } from '../../types';
 
 /**
  * Default model IDs.
@@ -15,7 +15,6 @@ export const DEFAULT_MODELS: AIModels = {
   geminiVision: 'gemini-pro-latest',
   // GA successor of gemini-3-pro-image-preview ("Nano Banana Pro")
   geminiImage: 'gemini-3-pro-image',
-  claudeVision: 'claude-opus-5-5',
   openaiVision: 'gpt-5.6-sol',
   openaiImage: 'gpt-image-2.6-sunburst',
 };
@@ -24,30 +23,21 @@ export const DEFAULT_MODELS: AIModels = {
 export const MODEL_SUGGESTIONS: Record<keyof AIModels, string[]> = {
   geminiVision: ['gemini-pro-latest', 'gemini-4-argon', 'gemini-3.1-pro-preview', 'gemini-3.8-flash', 'gemini-flash-latest'],
   geminiImage: ['gemini-3-pro-image', 'gemini-3.1-flash-image', 'gemini-nano-banana-2.1'],
-  claudeVision: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-2'],
   openaiVision: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.5'],
   openaiImage: ['gpt-image-2.6-sunburst', 'gpt-image-2.6-flare', 'gpt-image-2'],
 };
 
-export const VISION_PROVIDER_LABELS: Record<VisionProvider, string> = {
-  gemini: 'Gemini',
-  claude: 'Claude',
-  openai: 'OpenAI',
-};
-
-export const IMAGE_PROVIDER_LABELS: Record<ImageProvider, string> = {
+export const PROVIDER_LABELS: Record<AIProvider, string> = {
   gemini: 'Gemini',
   openai: 'OpenAI',
 };
 
-/** Which API key a provider needs. */
-export const keyNameFor = (provider: VisionProvider | ImageProvider): keyof AISettings['keys'] =>
-  provider === 'claude' ? 'anthropic' : provider;
+const isProvider = (value: unknown): value is AIProvider => value === 'gemini' || value === 'openai';
 
 /** True when the keys for both the selected vision and image providers are set. */
 export const hasRequiredKeys = (settings: AISettings): boolean =>
-  !!settings.keys[keyNameFor(settings.visionProvider)]?.trim() &&
-  !!settings.keys[keyNameFor(settings.imageProvider)]?.trim();
+  !!settings.keys[settings.visionProvider]?.trim() &&
+  !!settings.keys[settings.imageProvider]?.trim();
 
 const STORAGE_KEY = 'one-image-to-3d-scene:ai-settings';
 
@@ -61,7 +51,6 @@ export const loadAISettings = (): AISettings => {
     imageProvider: 'gemini',
     keys: {
       gemini: import.meta.env.VITE_GEMINI_API_KEY || '',
-      anthropic: import.meta.env.VITE_ANTHROPIC_API_KEY || '',
       openai: import.meta.env.VITE_OPENAI_API_KEY || '',
     },
     models: { ...DEFAULT_MODELS },
@@ -69,8 +58,9 @@ export const loadAISettings = (): AISettings => {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
     if (saved) {
-      if (['gemini', 'claude', 'openai'].includes(saved.visionProvider)) settings.visionProvider = saved.visionProvider;
-      if (['gemini', 'openai'].includes(saved.imageProvider)) settings.imageProvider = saved.imageProvider;
+      // Unknown providers (e.g. 'claude' from an earlier version) fall back to the default
+      if (isProvider(saved.visionProvider)) settings.visionProvider = saved.visionProvider;
+      if (isProvider(saved.imageProvider)) settings.imageProvider = saved.imageProvider;
       for (const k of Object.keys(DEFAULT_MODELS) as (keyof AIModels)[]) {
         if (typeof saved.models?.[k] === 'string' && saved.models[k].trim()) settings.models[k] = saved.models[k].trim();
       }

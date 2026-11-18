@@ -1,7 +1,7 @@
 import React from 'react';
 import { X, RotateCcw } from 'lucide-react';
-import { AIKeys, AIModels, AISettings, ImageProvider, VisionProvider } from '../types';
-import { DEFAULT_MODELS, IMAGE_PROVIDER_LABELS, MODEL_SUGGESTIONS, VISION_PROVIDER_LABELS, keyNameFor } from '../services/ai/models';
+import { AIKeys, AIModels, AIProvider, AISettings } from '../types';
+import { DEFAULT_MODELS, MODEL_SUGGESTIONS, PROVIDER_LABELS } from '../services/ai/models';
 
 interface Props {
   settings: AISettings;
@@ -11,13 +11,11 @@ interface Props {
 
 const KEY_FIELDS: { key: keyof AIKeys; label: string; placeholder: string }[] = [
   { key: 'gemini', label: 'Google Gemini API key', placeholder: 'AIza...' },
-  { key: 'anthropic', label: 'Anthropic (Claude) API key', placeholder: 'sk-ant-...' },
   { key: 'openai', label: 'OpenAI API key', placeholder: 'sk-...' },
 ];
 
-const MODEL_FIELDS: { key: keyof AIModels; label: string; provider: VisionProvider | ImageProvider; role: 'vision' | 'image' }[] = [
+const MODEL_FIELDS: { key: keyof AIModels; label: string; provider: AIProvider; role: 'vision' | 'image' }[] = [
   { key: 'geminiVision', label: 'Gemini (detection)', provider: 'gemini', role: 'vision' },
-  { key: 'claudeVision', label: 'Claude (detection)', provider: 'claude', role: 'vision' },
   { key: 'openaiVision', label: 'OpenAI (detection)', provider: 'openai', role: 'vision' },
   { key: 'geminiImage', label: 'Gemini (completion)', provider: 'gemini', role: 'image' },
   { key: 'openaiImage', label: 'OpenAI (completion)', provider: 'openai', role: 'image' },
@@ -47,7 +45,7 @@ export const AISettingsDialog: React.FC<Props> = ({ settings, onChange, onClose 
   const setKey = (key: keyof AIKeys, value: string) => update({ keys: { ...settings.keys, [key]: value } });
   const setModel = (key: keyof AIModels, value: string) => update({ models: { ...settings.models, [key]: value } });
 
-  const neededKeys = new Set([keyNameFor(settings.visionProvider), keyNameFor(settings.imageProvider)]);
+  const neededKeys = new Set<AIProvider>([settings.visionProvider, settings.imageProvider]);
   const isActive = (field: typeof MODEL_FIELDS[number]) =>
     field.role === 'vision' ? field.provider === settings.visionProvider : field.provider === settings.imageProvider;
 
@@ -72,7 +70,7 @@ export const AISettingsDialog: React.FC<Props> = ({ settings, onChange, onClose 
             <div>
               <div className="text-sm font-semibold text-slate-700 mb-1">Object detection & checks</div>
               <SegmentedButtons
-                options={VISION_PROVIDER_LABELS}
+                options={PROVIDER_LABELS}
                 value={settings.visionProvider}
                 onSelect={visionProvider => update({ visionProvider })}
               />
@@ -80,11 +78,10 @@ export const AISettingsDialog: React.FC<Props> = ({ settings, onChange, onClose 
             <div>
               <div className="text-sm font-semibold text-slate-700 mb-1">Image completion</div>
               <SegmentedButtons
-                options={IMAGE_PROVIDER_LABELS}
+                options={PROVIDER_LABELS}
                 value={settings.imageProvider}
                 onSelect={imageProvider => update({ imageProvider })}
               />
-              <p className="text-xs text-slate-500 mt-1">Claude cannot generate images, so it is not available for completion.</p>
             </div>
           </section>
 

@@ -14,7 +14,7 @@
 
 | # | フェーズ | 手法 |
 |---|---|---|
-| 1 | 物体検出 | VLM（Gemini、Claude、OpenAIのいずれか）でバウンディングボックス、ラベル、詳細な説明（姿勢・動作・服装）を取得 |
+| 1 | 物体検出 | VLM（Gemini または OpenAI）でバウンディングボックス、ラベル、詳細な説明（姿勢・動作・服装）を取得 |
 | 2 | 切り出し | HTML5 Canvas API |
 | 3 | 画像補完 | 生成AI（Gemini または OpenAI の画像生成）によるアウトペインティングで、姿勢を保ったまま隠れた部分や切れた部分を復元し、背景を除去（BRIA RMBG 2.0） |
 | 4 | 特徴点マッチング | AKAZE（OpenCV.js）、Lowe's Ratio Test、RANSACによるホモグラフィ推定で、元の切り出し画像が補完画像のどこにあたるかを特定 |
@@ -25,7 +25,7 @@
 ## 必要な環境
 
 - Node.js 18以上
-- **AIプロバイダーのAPIキー**（Google Gemini、Anthropic（Claude）、OpenAI のうち使うもの）。画像補完には Gemini か OpenAI が必要です。
+- **Google Gemini または OpenAI の APIキー**（物体検出と画像補完で別々のプロバイダーを使う場合は両方）
 - **Hugging Face トークン**（TRELLIS.2では必須。他のHugging Face Spacesでも推奨。ZeroGPUの利用分が各自の枠で計上されます）
 - 任意: ローカルの [TripoSR](https://github.com/VAST-AI-Research/TripoSR) Gradioサーバー（既定値 `http://127.0.0.1:7860/`）
 
@@ -64,10 +64,9 @@ npm run dev
 
 | 処理 | プロバイダー | 既定のモデル |
 |---|---|---|
-| 物体検出、キャンバス拡張量の推定、補完結果のチェック | Gemini / Claude / OpenAI | `gemini-pro-latest` / `claude-opus-5-5` / `gpt-5.6-sol` |
+| 物体検出、キャンバス拡張量の推定、補完結果のチェック | Gemini / OpenAI | `gemini-pro-latest` / `gpt-5.6-sol` |
 | 画像補完（アウトペインティング） | Gemini / OpenAI | `gemini-3-pro-image` / `gpt-image-2.6-sunburst` |
 
-- Claude は画像を生成できないため、物体検出とチェックにだけ使えます。
 - モデルIDは頻繁に変わります。モデルが提供終了になった場合は、AI Settings で新しいIDを入力してください。コードの変更は不要です。
 - 論文の結果は `gemini-3-pro-preview` と `gemini-3-pro-image-preview`（どちらも提供終了）で得たものです。他のプロバイダーやモデルでも同じプロンプトを使いますが、検出精度や姿勢の保持には差が出る可能性があります。
 - APIキーはメモリ上にだけ保持します。プロバイダーとモデルIDはブラウザに記憶されます。
@@ -88,7 +87,7 @@ npm run dev
 ├── components/             # Reactコンポーネント（3Dビューア、カード、オーバーレイ）
 ├── services/
 │   ├── aiService.ts        # 物体検出・補完・チェックのプロンプト
-│   └── ai/                 # プロバイダー層（Gemini / Claude / OpenAI）と既定のモデル
+│   └── ai/                 # プロバイダー層（Gemini / OpenAI）と既定のモデル
 ├── utils.ts                # 切り出し、AKAZEマッチング、深度推定、3D生成API
 ├── types.ts                # 型定義
 └── docs/                   # 開発の経緯
@@ -117,7 +116,7 @@ npm run dev
 
 [MIT](LICENSE)
 
-このリポジトリに含まれるのはアプリケーションのコードのみです。呼び出している外部のモデルやAPI（Gemini、Claude、OpenAI、TRELLIS.2、TripoSR、Depth Anything V2、BRIA RMBG 2.0 など）には、それぞれのライセンスと利用規約が適用されます。特に商用で利用する場合は、事前に確認してください。
+このリポジトリに含まれるのはアプリケーションのコードのみです。呼び出している外部のモデルやAPI（Gemini、OpenAI、TRELLIS.2、TripoSR、Depth Anything V2、BRIA RMBG 2.0 など）には、それぞれのライセンスと利用規約が適用されます。特に商用で利用する場合は、事前に確認してください。
 
 ## 更新履歴
 

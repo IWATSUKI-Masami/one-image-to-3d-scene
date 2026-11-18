@@ -6,6 +6,28 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { Spinner } from './Spinner';
 import { DetectedObject, Model3D } from '../types';
+import { Box2D, DepthRange, ObjectMask, loadObjectMask, medianDepthInBox, sameBox } from './depthSampling';
+
+/**
+ * Alpha masks for Eq. (4): the background-removed image of each model.
+ * A completed image is larger than the original crop; `originalPartBox2d`
+ * (found by AKAZE) tells which part of it matches the object's box in the scene.
+ * Without that alignment the mask cannot be placed, so none is used.
+ */
+const loadModelMasks = async (models: Model3D[]): Promise<Map<string, ObjectMask>> => {
+    const masks = new Map<string, ObjectMask>();
+    await Promise.all(models.map(async (model) => {
+        const region: Box2D | null = model.originalPartBox2d
+            ?? (model.completionExpansionRatio === undefined ? [0, 0, 1, 1] : null);
+        if (!region || !model.posterUrl) return;
+        try {
+            masks.set(model.id, await loadObjectMask(model.posterUrl, region));
+        } catch (e) {
+            console.warn(`Failed to load mask for ${model.label}; using all pixels in the box`, e);
+        }
+    }));
+    return masks;
+};
 
 interface DepthOnlySceneProps {
     imageUrl: string;
@@ -477,11 +499,15 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     points.visible = showPointCloudRef.current;
                 }
 
-                // Create bounding boxes for detected objects
-                createBoundingBoxes(depthData, width, height, depthMin, depthMax, aspectCorrection);
+                // Alpha masks of the models' background-removed images (Eq. (4))
+                const depthRange: DepthRange = { min: depthMin, max: depthMax };
+                const masks = await loadModelMasks(positionedModels);
+
+                // Create PC Boxes for detected objects
+                createBoundingBoxes(depthData, depthRange, aspectCorrection, masks);
 
                 // Load 3D models and position them
-                loadModels(depthData, width, height, depthMin, depthMax, aspectCorrection);
+                loadModels(depthData, depthRange, aspectCorrection, masks);
 
                 // Adjust camera to view the point cloud
                 const box = new THREE.Box3().setFromObject(points);
@@ -502,11 +528,9 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
 
         const createBoundingBoxes = (
             depthData: ImageData,
-            width: number,
-            height: number,
-            depthMin: number,
-            depthMax: number,
-            aspectCorrection: number
+            depthRange: DepthRange,
+            aspectCorrection: number,
+            masks: Map<string, ObjectMask>
         ) => {
             if (!sceneRef.current?.boundingBoxGroup || detectedObjects.length === 0) return;
 
@@ -519,36 +543,10 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             detectedObjects.forEach((obj) => {
                 const [ymin, xmin, ymax, xmax] = obj.box_2d;
 
-                // Convert normalized coordinates to pixel coordinates
-                const pxMin = Math.floor(xmin * width);
-                const pxMax = Math.floor(xmax * width);
-                const pyMin = Math.floor(ymin * height);
-                const pyMax = Math.floor(ymax * height);
-
-                // Sample depth at multiple points within the bounding box
-                const depthSamples: number[] = [];
-                const samplePoints = [
-                    { x: (pxMin + pxMax) / 2, y: (pyMin + pyMax) / 2 }, // Center
-                    { x: (pxMin + pxMax) / 2, y: pyMax }, // Bottom center
-                    { x: pxMin, y: pyMin }, // Top-left
-                    { x: pxMax, y: pyMin }, // Top-right
-                    { x: pxMin, y: pyMax }, // Bottom-left
-                    { x: pxMax, y: pyMax }, // Bottom-right
-                ];
-
-                samplePoints.forEach(point => {
-                    const px = Math.floor(Math.min(Math.max(point.x, 0), width - 1));
-                    const py = Math.floor(Math.min(Math.max(point.y, 0), height - 1));
-                    const idx = (py * width + px) * 4;
-                    const depthValue = depthData.data[idx];
-                    const normalizedDepth = 1.0 - (depthValue / 255.0);
-                    const z = depthMin + normalizedDepth * (depthMax - depthMin);
-                    depthSamples.push(z);
-                });
-
-                // Use median depth for the bounding box
-                depthSamples.sort((a, b) => a - b);
-                const medianDepth = depthSamples[Math.floor(depthSamples.length / 2)];
+                // Eq. (4): median depth of the object's mask. The mask comes from the
+                // 3D model generated from this object (same box), if there is one.
+                const model = positionedModels.find(m => m.box_2d && sameBox(m.box_2d, obj.box_2d));
+                const medianDepth = medianDepthInBox(depthData, obj.box_2d, depthRange, model ? masks.get(model.id) : null).z;
                 const zPos = -medianDepth * depthScale;
 
                 // Calculate 3D position and size
@@ -580,11 +578,9 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         // Load 3D models and position them using the same coordinate system as bounding boxes
         const loadModels = (
             depthData: ImageData,
-            width: number,
-            height: number,
-            depthMin: number,
-            depthMax: number,
-            aspectCorrection: number
+            depthRange: DepthRange,
+            aspectCorrection: number,
+            masks: Map<string, ObjectMask>
         ) => {
             if (!sceneRef.current?.modelsGroup || !sceneRef.current?.modelBoxesGroup || !sceneRef.current?.wholeModelBoxesGroup || positionedModels.length === 0) return;
 
@@ -618,245 +614,178 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 // Use model's box_2d directly (it's the source of truth for this model's position)
                 let [ds_ymin, ds_xmin, ds_ymax, ds_xmax] = model.box_2d || [0, 0, 1, 1];
 
-                // Convert to pixel coordinates
-                const pxMin = Math.floor(ds_xmin * width);
-                const pxMax = Math.floor(ds_xmax * width);
-                const pyMin = Math.floor(ds_ymin * height);
-                const pyMax = Math.floor(ds_ymax * height);
+                // Eq. (4): median depth of the non-transparent pixels of the model's
+                // background-removed image (same Z as the object's PC Box)
+                const medianDepth = medianDepthInBox(depthData, [ds_ymin, ds_xmin, ds_ymax, ds_xmax], depthRange, masks.get(model.id)).z;
+                const zPos = -medianDepth * depthScale;
 
-                // Helper function to sample depth from non-transparent pixels
-                const sampleDepthFromNonTransparentPixels = async (): Promise<number> => {
-                    // If model has a processedUrl (background-removed image), use it for accurate sampling
-                    if (model.processedUrl) {
-                        try {
-                            const processedImg = await loadImageAsync(model.processedUrl);
+                // Calculate 3D position (same as bounding boxes)
+                const x3dMin = ((ds_xmin) - 0.5) * 2 * aspectCorrection;
+                const x3dMax = ((ds_xmax) - 0.5) * 2 * aspectCorrection;
+                const y3dMin = -((ds_ymax) - 0.5) * 2;
+                const y3dMax = -((ds_ymin) - 0.5) * 2;
 
-                            // Create canvas for the processed image at same resolution as depth map
-                            const processedCanvas = document.createElement('canvas');
-                            processedCanvas.width = width;
-                            processedCanvas.height = height;
-                            const processedCtx = processedCanvas.getContext('2d')!;
-                            processedCtx.drawImage(processedImg, 0, 0, width, height);
-                            const processedData = processedCtx.getImageData(0, 0, width, height);
+                const boxWidth = x3dMax - x3dMin;
+                const boxHeight = y3dMax - y3dMin;
+                const xCenter = (x3dMin + x3dMax) / 2;
+                const yCenter = (y3dMin + y3dMax) / 2;
 
-                            // Collect depth values only from non-transparent pixels within bounding box
-                            const depthValues: number[] = [];
-                            for (let py = pyMin; py <= pyMax; py++) {
-                                for (let px = pxMin; px <= pxMax; px++) {
-                                    const idx = (py * width + px) * 4;
-                                    const alpha = processedData.data[idx + 3]; // Alpha channel
+                // Load and position the model
+                loader.load(model.glbUrl, (gltf) => {
+                    // Skip if a newer load has been initiated (prevents model duplication)
+                    if (thisLoadVersion !== loadVersionRef.current) return;
 
-                                    // Only sample if pixel is not transparent (alpha > 128)
-                                    if (alpha > 128) {
-                                        const depthValue = depthData.data[idx];
-                                        const normalizedDepth = 1.0 - (depthValue / 255.0);
-                                        const z = depthMin + normalizedDepth * (depthMax - depthMin);
-                                        depthValues.push(z);
-                                    }
+                    const mesh = gltf.scene;
+                    const meshContainer = new THREE.Group();
+
+                    // Step 1: Get original mesh bounds and center at origin
+                    mesh.updateMatrixWorld(true);
+                    const meshBox = new THREE.Box3().setFromObject(mesh);
+                    const meshSize = new THREE.Vector3();
+                    meshBox.getSize(meshSize);
+                    const meshCenter = new THREE.Vector3();
+                    meshBox.getCenter(meshCenter);
+
+                    // Center mesh at origin
+                    mesh.position.sub(meshCenter);
+                    // Apply rotation based on provider - TRELLIS.2 models don't need rotation
+                    if (model.provider !== 'trellis') {
+                        mesh.rotation.y = Math.PI; // Face camera for other providers
+                    }
+
+                    // Fix texture color space for proper color rendering
+                    mesh.traverse((child) => {
+                        if ((child as THREE.Mesh).isMesh) {
+                            const meshChild = child as THREE.Mesh;
+                            // Handle both single material and material array
+                            const materials = Array.isArray(meshChild.material)
+                                ? meshChild.material
+                                : [meshChild.material];
+
+                            materials.forEach((mat) => {
+                                const material = mat as THREE.MeshStandardMaterial;
+                                if (!material) return;
+
+                                // Fix color textures to sRGB
+                                if (material.map) {
+                                    material.map.colorSpace = THREE.SRGBColorSpace;
+                                    material.map.needsUpdate = true;
                                 }
-                            }
+                                if (material.emissiveMap) {
+                                    material.emissiveMap.colorSpace = THREE.SRGBColorSpace;
+                                    material.emissiveMap.needsUpdate = true;
+                                }
 
-                            // Use median of non-transparent pixels if we have enough samples
-                            if (depthValues.length >= 10) {
-                                depthValues.sort((a, b) => a - b);
-                                return depthValues[Math.floor(depthValues.length / 2)];
-                            }
-                        } catch (e) {
-                            console.warn('Failed to load processed image for depth sampling, using fallback:', e);
+                                // Force material update
+                                material.needsUpdate = true;
+                            });
+                        }
+                    });
+
+                    mesh.updateMatrixWorld(true);
+                    meshContainer.add(mesh);
+
+                    // Step 2: Calculate green box on centered mesh (BEFORE any scaling)
+                    const centeredBox = new THREE.Box3().setFromObject(mesh);
+                    const centeredSize = new THREE.Vector3();
+                    centeredBox.getSize(centeredSize);
+                    const cWidth = centeredSize.x;
+                    const cHeight = centeredSize.y;
+                    const cDepth = centeredSize.z;
+                    const centeredCenter = new THREE.Vector3();
+                    centeredBox.getCenter(centeredCenter);
+
+                    // Calculate green box dimensions (relative to mesh)
+                    let gLocalMinX = centeredBox.min.x;
+                    let gLocalMaxX = centeredBox.max.x;
+                    let gLocalMinY = centeredBox.min.y;
+                    let gLocalMaxY = centeredBox.max.y;
+
+                    if (model.originalPartBox2d && model.tightBox2d) {
+                        const [tymin, txmin, tymax, txmax] = model.tightBox2d;
+                        const [gymin, gxmin, gymax, gxmax] = model.originalPartBox2d;
+
+                        const meshGlobalWidth = txmax - txmin;
+                        const meshGlobalHeight = tymax - tymin;
+
+                        if (meshGlobalWidth > 1e-5 && meshGlobalHeight > 1e-5) {
+                            const relXMin = (gxmin - txmin) / meshGlobalWidth;
+                            const relXMax = (gxmax - txmin) / meshGlobalWidth;
+                            const relYMeanTop = (gymin - tymin) / meshGlobalHeight;
+                            const relYMeanBottom = (gymax - tymin) / meshGlobalHeight;
+
+                            // SingleModelViewer logic
+                            gLocalMaxY = centeredBox.max.y - (cHeight * relYMeanTop);
+                            gLocalMinY = centeredBox.max.y - (cHeight * relYMeanBottom);
+                            gLocalMinX = centeredBox.min.x + (cWidth * relXMin);
+                            gLocalMaxX = centeredBox.min.x + (cWidth * relXMax);
                         }
                     }
 
-                    // Fallback: sample at center and bottom-center
-                    const fallbackSamples: number[] = [];
-                    const fallbackPoints = [
-                        { x: (pxMin + pxMax) / 2, y: (pyMin + pyMax) / 2 },
-                        { x: (pxMin + pxMax) / 2, y: pyMax },
-                    ];
-                    fallbackPoints.forEach(point => {
-                        const px = Math.floor(Math.min(Math.max(point.x, 0), width - 1));
-                        const py = Math.floor(Math.min(Math.max(point.y, 0), height - 1));
-                        const idx = (py * width + px) * 4;
-                        const depthValue = depthData.data[idx];
-                        const normalizedDepth = 1.0 - (depthValue / 255.0);
-                        const z = depthMin + normalizedDepth * (depthMax - depthMin);
-                        fallbackSamples.push(z);
+                    const gWidth = gLocalMaxX - gLocalMinX;
+                    const gHeight = gLocalMaxY - gLocalMinY;
+
+                    // Step 3: Scale container so GREEN box matches Depth Scene box
+                    const scaleX = boxWidth / gWidth;
+                    const scaleY = boxHeight / gHeight;
+                    const scale = Math.min(scaleX, scaleY);
+                    meshContainer.scale.set(scale, scale, scale);
+
+                    // Step 4: Position container so GREEN box front face aligns with PC box
+                    // Shift backward by half the scaled depth so the front face aligns
+                    const greenLocalCenterX = (gLocalMinX + gLocalMaxX) / 2;
+                    const greenLocalCenterY = (gLocalMinY + gLocalMaxY) / 2;
+                    const halfDepthOffset = (cDepth * scale) / 2; // Half of scaled depth
+                    meshContainer.position.set(
+                        xCenter - greenLocalCenterX * scale,
+                        yCenter - greenLocalCenterY * scale,
+                        zPos - centeredCenter.z * scale - halfDepthOffset
+                    );
+
+                    group.add(meshContainer);
+
+                    // Store meshContainer reference and set index for selection
+                    const modelIndex = meshContainersRef.current.length;
+                    meshContainer.userData.modelIndex = modelIndex;
+                    // Propagate modelIndex to all child objects for raycast detection
+                    meshContainer.traverse((child) => {
+                        child.userData.modelIndex = modelIndex;
                     });
-                    fallbackSamples.sort((a, b) => a - b);
-                    return fallbackSamples[Math.floor(fallbackSamples.length / 2)];
-                };
+                    meshContainersRef.current.push(meshContainer);
 
-                // Use async depth sampling
-                sampleDepthFromNonTransparentPixels().then(medianDepth => {
-                    const zPos = -medianDepth * depthScale;
+                    // Create green box at the same position as PC box (using boxWidth, boxHeight, xCenter, yCenter)
+                    // This ensures Model Box matches PC Box exactly
+                    const greenBoxDepth = cDepth * scale * 1.01;
+                    const greenGeo = new THREE.BoxGeometry(boxWidth, boxHeight, greenBoxDepth);
+                    const greenEdges = new THREE.EdgesGeometry(greenGeo);
+                    const greenLine = new THREE.LineSegments(greenEdges, new THREE.LineBasicMaterial({ color: 0x22c55e }));
+                    greenLine.position.set(xCenter, yCenter, zPos);
+                    boxGroup.add(greenLine);
 
-                    // Calculate 3D position (same as bounding boxes)
-                    const x3dMin = ((ds_xmin) - 0.5) * 2 * aspectCorrection;
-                    const x3dMax = ((ds_xmax) - 0.5) * 2 * aspectCorrection;
-                    const y3dMin = -((ds_ymax) - 0.5) * 2;
-                    const y3dMax = -((ds_ymin) - 0.5) * 2;
-
-                    const boxWidth = x3dMax - x3dMin;
-                    const boxHeight = y3dMax - y3dMin;
-                    const xCenter = (x3dMin + x3dMax) / 2;
-                    const yCenter = (y3dMin + y3dMax) / 2;
-
-                    // Load and position the model
-                    loader.load(model.glbUrl, (gltf) => {
-                        // Skip if a newer load has been initiated (prevents model duplication)
-                        if (thisLoadVersion !== loadVersionRef.current) return;
-
-                        const mesh = gltf.scene;
-                        const meshContainer = new THREE.Group();
-
-                        // Step 1: Get original mesh bounds and center at origin
-                        mesh.updateMatrixWorld(true);
-                        const meshBox = new THREE.Box3().setFromObject(mesh);
-                        const meshSize = new THREE.Vector3();
-                        meshBox.getSize(meshSize);
-                        const meshCenter = new THREE.Vector3();
-                        meshBox.getCenter(meshCenter);
-
-                        // Center mesh at origin
-                        mesh.position.sub(meshCenter);
-                        // Apply rotation based on provider - TRELLIS.2 models don't need rotation
-                        if (model.provider !== 'trellis') {
-                            mesh.rotation.y = Math.PI; // Face camera for other providers
-                        }
-
-                        // Fix texture color space for proper color rendering
-                        mesh.traverse((child) => {
-                            if ((child as THREE.Mesh).isMesh) {
-                                const meshChild = child as THREE.Mesh;
-                                // Handle both single material and material array
-                                const materials = Array.isArray(meshChild.material)
-                                    ? meshChild.material
-                                    : [meshChild.material];
-
-                                materials.forEach((mat) => {
-                                    const material = mat as THREE.MeshStandardMaterial;
-                                    if (!material) return;
-
-                                    // Fix color textures to sRGB
-                                    if (material.map) {
-                                        material.map.colorSpace = THREE.SRGBColorSpace;
-                                        material.map.needsUpdate = true;
-                                    }
-                                    if (material.emissiveMap) {
-                                        material.emissiveMap.colorSpace = THREE.SRGBColorSpace;
-                                        material.emissiveMap.needsUpdate = true;
-                                    }
-
-                                    // Force material update
-                                    material.needsUpdate = true;
-                                });
-                            }
-                        });
-
-                        mesh.updateMatrixWorld(true);
-                        meshContainer.add(mesh);
-
-                        // Step 2: Calculate green box on centered mesh (BEFORE any scaling)
-                        const centeredBox = new THREE.Box3().setFromObject(mesh);
-                        const centeredSize = new THREE.Vector3();
-                        centeredBox.getSize(centeredSize);
-                        const cWidth = centeredSize.x;
-                        const cHeight = centeredSize.y;
-                        const cDepth = centeredSize.z;
-                        const centeredCenter = new THREE.Vector3();
-                        centeredBox.getCenter(centeredCenter);
-
-                        // Calculate green box dimensions (relative to mesh)
-                        let gLocalMinX = centeredBox.min.x;
-                        let gLocalMaxX = centeredBox.max.x;
-                        let gLocalMinY = centeredBox.min.y;
-                        let gLocalMaxY = centeredBox.max.y;
-
-                        if (model.originalPartBox2d && model.tightBox2d) {
-                            const [tymin, txmin, tymax, txmax] = model.tightBox2d;
-                            const [gymin, gxmin, gymax, gxmax] = model.originalPartBox2d;
-
-                            const meshGlobalWidth = txmax - txmin;
-                            const meshGlobalHeight = tymax - tymin;
-
-                            if (meshGlobalWidth > 1e-5 && meshGlobalHeight > 1e-5) {
-                                const relXMin = (gxmin - txmin) / meshGlobalWidth;
-                                const relXMax = (gxmax - txmin) / meshGlobalWidth;
-                                const relYMeanTop = (gymin - tymin) / meshGlobalHeight;
-                                const relYMeanBottom = (gymax - tymin) / meshGlobalHeight;
-
-                                // SingleModelViewer logic
-                                gLocalMaxY = centeredBox.max.y - (cHeight * relYMeanTop);
-                                gLocalMinY = centeredBox.max.y - (cHeight * relYMeanBottom);
-                                gLocalMinX = centeredBox.min.x + (cWidth * relXMin);
-                                gLocalMaxX = centeredBox.min.x + (cWidth * relXMax);
-                            }
-                        }
-
-                        const gWidth = gLocalMaxX - gLocalMinX;
-                        const gHeight = gLocalMaxY - gLocalMinY;
-
-                        // Step 3: Scale container so GREEN box matches Depth Scene box
-                        const scaleX = boxWidth / gWidth;
-                        const scaleY = boxHeight / gHeight;
-                        const scale = Math.min(scaleX, scaleY);
-                        meshContainer.scale.set(scale, scale, scale);
-
-                        // Step 4: Position container so GREEN box front face aligns with PC box
-                        // Shift backward by half the scaled depth so the front face aligns
-                        const greenLocalCenterX = (gLocalMinX + gLocalMaxX) / 2;
-                        const greenLocalCenterY = (gLocalMinY + gLocalMaxY) / 2;
-                        const halfDepthOffset = (cDepth * scale) / 2; // Half of scaled depth
-                        meshContainer.position.set(
-                            xCenter - greenLocalCenterX * scale,
-                            yCenter - greenLocalCenterY * scale,
-                            zPos - centeredCenter.z * scale - halfDepthOffset
-                        );
-
-                        group.add(meshContainer);
-
-                        // Store meshContainer reference and set index for selection
-                        const modelIndex = meshContainersRef.current.length;
-                        meshContainer.userData.modelIndex = modelIndex;
-                        // Propagate modelIndex to all child objects for raycast detection
-                        meshContainer.traverse((child) => {
-                            child.userData.modelIndex = modelIndex;
-                        });
-                        meshContainersRef.current.push(meshContainer);
-
-                        // Create green box at the same position as PC box (using boxWidth, boxHeight, xCenter, yCenter)
-                        // This ensures Model Box matches PC Box exactly
-                        const greenBoxDepth = cDepth * scale * 1.01;
-                        const greenGeo = new THREE.BoxGeometry(boxWidth, boxHeight, greenBoxDepth);
-                        const greenEdges = new THREE.EdgesGeometry(greenGeo);
-                        const greenLine = new THREE.LineSegments(greenEdges, new THREE.LineBasicMaterial({ color: 0x22c55e }));
-                        greenLine.position.set(xCenter, yCenter, zPos);
-                        boxGroup.add(greenLine);
-
-                        // Create orange box for entire model (wholeModelBoxesGroup)
-                        const wholeBoxContainer = new THREE.Group();
-                        const wholeGeo = new THREE.BoxGeometry(cWidth, cHeight, cDepth * 1.01);
-                        const wholeEdges = new THREE.EdgesGeometry(wholeGeo);
-                        const wholeLine = new THREE.LineSegments(wholeEdges, new THREE.LineBasicMaterial({ color: 0xf97316 })); // Orange color
-                        wholeLine.position.set(
-                            centeredCenter.x,
-                            centeredCenter.y,
-                            centeredCenter.z
-                        );
-                        wholeBoxContainer.add(wholeLine);
-                        wholeBoxContainer.scale.set(scale, scale, scale);
-                        wholeBoxContainer.position.set(
-                            xCenter - greenLocalCenterX * scale,
-                            yCenter - greenLocalCenterY * scale,
-                            zPos - centeredCenter.z * scale - halfDepthOffset
-                        );
-                        // Mark for selection - store modelIndex
-                        wholeBoxContainer.userData.modelIndex = modelIndex;
-                        wholeBoxContainer.userData.isSelectableBox = true;
-                        wholeBoxContainer.userData.originalColor = 0xf97316; // Store original orange color
-                        wholeBoxContainersRef.current.push(wholeBoxContainer);
-                        wholeBoxGroup.add(wholeBoxContainer);
-                    });
-                }); // Close .then() for sampleDepthFromNonTransparentPixels
+                    // Create orange box for entire model (wholeModelBoxesGroup)
+                    const wholeBoxContainer = new THREE.Group();
+                    const wholeGeo = new THREE.BoxGeometry(cWidth, cHeight, cDepth * 1.01);
+                    const wholeEdges = new THREE.EdgesGeometry(wholeGeo);
+                    const wholeLine = new THREE.LineSegments(wholeEdges, new THREE.LineBasicMaterial({ color: 0xf97316 })); // Orange color
+                    wholeLine.position.set(
+                        centeredCenter.x,
+                        centeredCenter.y,
+                        centeredCenter.z
+                    );
+                    wholeBoxContainer.add(wholeLine);
+                    wholeBoxContainer.scale.set(scale, scale, scale);
+                    wholeBoxContainer.position.set(
+                        xCenter - greenLocalCenterX * scale,
+                        yCenter - greenLocalCenterY * scale,
+                        zPos - centeredCenter.z * scale - halfDepthOffset
+                    );
+                    // Mark for selection - store modelIndex
+                    wholeBoxContainer.userData.modelIndex = modelIndex;
+                    wholeBoxContainer.userData.isSelectableBox = true;
+                    wholeBoxContainer.userData.originalColor = 0xf97316; // Store original orange color
+                    wholeBoxContainersRef.current.push(wholeBoxContainer);
+                    wholeBoxGroup.add(wholeBoxContainer);
+                });
             });
         };
 

@@ -1,10 +1,10 @@
 /**
  * AI tasks of the pipeline, independent of the provider:
  *
- * - detectObjectsInImage   (Phase 1: VLM object detection)        Gemini / Claude / OpenAI
- * - estimateCanvasExpansion (Phase 3: canvas size before completion) Gemini / Claude / OpenAI
+ * - detectObjectsInImage   (Phase 1: VLM object detection)        Gemini / OpenAI
+ * - estimateCanvasExpansion (Phase 3: canvas size before completion) Gemini / OpenAI
  * - generateCompletion      (Phase 3: image completion/outpainting)  Gemini / OpenAI
- * - verifyCompletion        (Phase 3: check the completed image)     Gemini / Claude / OpenAI
+ * - verifyCompletion        (Phase 3: check the completed image)     Gemini / OpenAI
  *
  * The prompts are the ones used in the paper (KBSE2025-61); only the JSON output
  * format is now enforced with each provider's structured-output feature.
@@ -13,7 +13,7 @@ import { AISettings, DetectedObject } from "../types";
 import { analyzeImageJson, generateImage, loadImageData, JsonSchema } from "./ai/providers";
 
 // ---------------------------------------------------------------------------
-// JSON schemas (compatible with Gemini, Claude and OpenAI strict mode)
+// JSON schemas (compatible with Gemini and OpenAI strict mode)
 // ---------------------------------------------------------------------------
 
 const DETECTION_SCHEMA: JsonSchema = {

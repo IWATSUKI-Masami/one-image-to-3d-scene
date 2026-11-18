@@ -2,17 +2,16 @@
  * Thin provider layer: the same two operations for every AI provider.
  *
  * - analyzeImageJson: send one image + prompt, get JSON that matches a schema
- *   (Gemini / Claude / OpenAI)
  * - generateImage: send one image + prompt, get a generated image
- *   (Gemini / OpenAI; Claude cannot generate images)
+ *
+ * Providers: Gemini and OpenAI.
  *
  * All calls are made directly from the browser with the user's own API keys.
  */
 import { GoogleGenAI } from '@google/genai';
-import Anthropic from '@anthropic-ai/sdk';
 import OpenAI, { toFile } from 'openai';
-import { AISettings } from '../../types';
-import { VISION_PROVIDER_LABELS, IMAGE_PROVIDER_LABELS, keyNameFor } from './models';
+import { AIProvider, AISettings } from '../../types';
+import { PROVIDER_LABELS } from './models';
 
 export interface ImageData {
   base64: string;
@@ -26,7 +25,7 @@ export interface AnalyzeOptions {
   schemaName: string;
   /** Use deterministic sampling where the provider supports it (Gemini) */
   deterministic?: boolean;
-  /** Reasoning effort for Claude / OpenAI. Higher is slower but more careful. */
+  /** Reasoning effort for OpenAI. Higher is slower but more careful. */
   effort?: 'low' | 'medium' | 'high';
 }
 
@@ -58,11 +57,10 @@ const convertToPng = async (blob: Blob): Promise<Blob> => {
     canvas.toBlob(b => (b ? resolve(b) : reject(new Error('PNG conversion failed'))), 'image/png'));
 };
 
-const requireKey = (settings: AISettings, provider: AISettings['visionProvider'] | AISettings['imageProvider']): string => {
-  const key = settings.keys[keyNameFor(provider)]?.trim();
+const requireKey = (settings: AISettings, provider: AIProvider): string => {
+  const key = settings.keys[provider]?.trim();
   if (!key) {
-    const label = { ...VISION_PROVIDER_LABELS, ...IMAGE_PROVIDER_LABELS }[provider];
-    throw new Error(`${label} API key is not set. Open AI Settings and enter the key.`);
+    throw new Error(`${PROVIDER_LABELS[provider]} API key is not set. Open AI Settings and enter the key.`);
   }
   return key;
 };
@@ -105,43 +103,6 @@ export const analyzeImageJson = async <T>(
       },
     });
     return parseJson<T>(response.text, 'Gemini');
-  }
-
-  if (provider === 'claude') {
-    const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
-    const response = await client.beta.messages.create({
-      model: settings.models.claudeVision,
-      max_tokens: 16000,
-      // If a safety classifier declines, the API retries on a fallback model in the same call
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
-      output_config: {
-        effort: options.effort ?? 'medium',
-        format: { type: 'json_schema', schema },
-      },
-      messages: [{
-        role: 'user',
-        content: [
-          {
-            type: 'image',
-            source: {
-              type: 'base64',
-              media_type: image.mimeType as 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif',
-              data: image.base64,
-            },
-          },
-          { type: 'text', text: prompt },
-        ],
-      }],
-    });
-    if (response.stop_reason === 'refusal') {
-      throw new Error(`Claude declined the request${response.stop_details?.explanation ? `: ${response.stop_details.explanation}` : ''}`);
-    }
-    if (response.stop_reason === 'max_tokens') {
-      throw new Error('Claude response was cut off (max_tokens reached)');
-    }
-    const text = response.content.map(b => (b.type === 'text' ? b.text : '')).join('');
-    return parseJson<T>(text, 'Claude');
   }
 
   // OpenAI

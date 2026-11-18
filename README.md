@@ -14,7 +14,7 @@ This is the reference implementation of the paper listed in [Citation](#citation
 
 | # | Phase | Method |
 |---|---|---|
-| 1 | Object detection | Vision-Language Model (Gemini, Claude or OpenAI) returns bounding boxes, labels and detailed descriptions (pose, action, clothing) |
+| 1 | Object detection | Vision-Language Model (Gemini or OpenAI) returns bounding boxes, labels and detailed descriptions (pose, action, clothing) |
 | 2 | Cropping | HTML5 Canvas API |
 | 3 | Image completion | Generative AI outpainting (Gemini or OpenAI image generation) restores occluded / cut-off parts while preserving pose, followed by background removal (BRIA RMBG 2.0) |
 | 4 | Feature matching | AKAZE (OpenCV.js) + Lowe's ratio test + RANSAC homography to localize the original crop inside the completed image |
@@ -25,7 +25,7 @@ This is the reference implementation of the paper listed in [Citation](#citation
 ## Requirements
 
 - Node.js 18 or later
-- **An API key for at least one AI provider**: Google Gemini, Anthropic (Claude) or OpenAI. Gemini or OpenAI is needed for image completion.
+- **An API key for Google Gemini or OpenAI** (or both, if you use one for detection and the other for completion)
 - **Hugging Face token** (required for TRELLIS.2; recommended for the other Hugging Face Spaces, since ZeroGPU usage is counted against your own quota)
 - Optional: a local [TripoSR](https://github.com/VAST-AI-Research/TripoSR) Gradio server (default `http://127.0.0.1:7860/`)
 
@@ -64,10 +64,9 @@ Click the AI button in the header to open **AI Settings**, where you choose the 
 
 | Task | Providers | Default model |
 |---|---|---|
-| Object detection, canvas expansion estimate, completion check | Gemini / Claude / OpenAI | `gemini-pro-latest` / `claude-opus-5-5` / `gpt-5.6-sol` |
+| Object detection, canvas expansion estimate, completion check | Gemini / OpenAI | `gemini-pro-latest` / `gpt-5.6-sol` |
 | Image completion (outpainting) | Gemini / OpenAI | `gemini-3-pro-image` / `gpt-image-2.6-sunburst` |
 
-- Claude cannot generate images, so it is available only for detection and checks.
 - Model IDs change often. If a model is retired, type a new ID in AI Settings; no code change is needed.
 - The results in the paper were obtained with `gemini-3-pro-preview` and `gemini-3-pro-image-preview` (both since shut down). Other providers and models use the same prompts, but detection accuracy and pose preservation may differ.
 - API keys are kept in memory only. Providers and model IDs are remembered in the browser.
@@ -88,7 +87,7 @@ Projects (images, depth map, models and scene layout) can be saved and loaded.
 ├── components/             # React components (3D viewers, cards, overlays)
 ├── services/
 │   ├── aiService.ts        # Prompts for detection, completion and checks
-│   └── ai/                 # Provider layer (Gemini / Claude / OpenAI) and default models
+│   └── ai/                 # Provider layer (Gemini / OpenAI) and default models
 ├── utils.ts                # Cropping, AKAZE matching, depth, 3D generation APIs
 ├── types.ts                # Type definitions
 └── docs/                   # Development history
@@ -115,7 +114,7 @@ If you use this software in your research, please cite:
 
 [MIT](LICENSE)
 
-This repository contains only the application code. The external models and APIs it calls (Gemini, Claude, OpenAI, TRELLIS.2, TripoSR, Depth Anything V2, BRIA RMBG 2.0, etc.) are governed by their own licenses and terms of use; check them before use, especially for commercial purposes.
+This repository contains only the application code. The external models and APIs it calls (Gemini, OpenAI, TRELLIS.2, TripoSR, Depth Anything V2, BRIA RMBG 2.0, etc.) are governed by their own licenses and terms of use; check them before use, especially for commercial purposes.
 
 ## Changelog
 

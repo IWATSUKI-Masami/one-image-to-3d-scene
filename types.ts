@@ -48,21 +48,18 @@ export interface ProjectArchive {
 
 // ---- AI provider settings ----
 
+export type AIProvider = 'gemini' | 'openai';
 /** Provider for image understanding: object detection, canvas expansion estimate, completion check */
-export type VisionProvider = 'gemini' | 'claude' | 'openai';
-/** Provider for image completion (outpainting). Claude cannot generate images. */
-export type ImageProvider = 'gemini' | 'openai';
+export type VisionProvider = AIProvider;
+/** Provider for image completion (outpainting) */
+export type ImageProvider = AIProvider;
 
-export interface AIKeys {
-  gemini: string;
-  anthropic: string;
-  openai: string;
-}
+/** API key per provider */
+export type AIKeys = Record<AIProvider, string>;
 
 export interface AIModels {
   geminiVision: string;
   geminiImage: string;
-  claudeVision: string;
   openaiVision: string;
   openaiImage: string;
 }

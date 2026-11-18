@@ -7,7 +7,7 @@ import { Model3DCard } from './components/Model3DCard';
 import { DepthOnlyScene } from './components/DepthOnlyScene';
 import { BoundingBoxOverlay } from './components/BoundingBoxOverlay';
 import { detectObjectsInImage, generateCompletion, estimateCanvasExpansion, verifyCompletion } from './services/aiService';
-import { loadAISettings, saveAISettings, hasRequiredKeys, VISION_PROVIDER_LABELS, IMAGE_PROVIDER_LABELS } from './services/ai/models';
+import { loadAISettings, saveAISettings, hasRequiredKeys, PROVIDER_LABELS } from './services/ai/models';
 import { AISettingsDialog } from './components/AISettingsDialog';
 import { cropObjectsFromImage, removeBackgroundWithRembg, findBestMatchPosition, generate3DModelWithTripoSRLocal, generate3DModelWithTrellis, blobUrlToDataUrl, dataUrlToBlobUrl, generateDepthMap, prepareImageForCompletion, calculateTightBoundingBox } from './utils';
 import { DetectedObject, CroppedObject, Model3D, ProjectArchive, AISettings } from './types';
@@ -1181,7 +1181,7 @@ const App: React.FC = () => {
                   >
                     <div className={`w-1.5 h-1.5 rounded-full ${hasAIKeys ? 'bg-green-500' : 'bg-slate-300'}`} />
                     {hasAIKeys
-                      ? `AI: ${VISION_PROVIDER_LABELS[aiSettings.visionProvider]} / ${IMAGE_PROVIDER_LABELS[aiSettings.imageProvider]}`
+                      ? `AI: ${PROVIDER_LABELS[aiSettings.visionProvider]} / ${PROVIDER_LABELS[aiSettings.imageProvider]}`
                       : 'Set API Keys'}
                   </button>
 
@@ -1262,7 +1262,7 @@ const App: React.FC = () => {
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 text-center max-w-lg mx-auto">
                 <h3 className="text-lg font-bold text-amber-800 mb-2">API Key Required</h3>
                 <p className="text-amber-700 mb-4 text-sm">
-                  Object detection and image completion use Gemini, Claude or OpenAI. Choose the providers and enter the API keys in AI Settings.
+                  Object detection and image completion use Gemini or OpenAI. Choose the providers and enter the API keys in AI Settings.
                 </p>
                 <button
                   onClick={openAISettings}

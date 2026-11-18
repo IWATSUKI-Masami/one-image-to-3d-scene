@@ -4,11 +4,12 @@ All notable changes to this project. Versions up to v1.18.1 were developed in th
 
 
 ## Unreleased
-- **Added** Claude (Anthropic) and OpenAI as AI providers. Object detection and checks can use Gemini, Claude or OpenAI; image completion can use Gemini or OpenAI. Choose providers, enter API keys and change model IDs in the new **AI Settings** dialog.
+- **Added** OpenAI as an AI provider. Object detection/checks and image completion can each use Gemini or OpenAI. Choose providers, enter API keys and change model IDs in the new **AI Settings** dialog.
 - **Changed** default Gemini models: `gemini-3-pro-preview` → `gemini-pro-latest`, `gemini-3-pro-image-preview` (shut down) → `gemini-3-pro-image`.
 - **Changed** JSON output of all vision tasks is now enforced with each provider's structured-output feature. The detection result is wrapped as `{"objects": [...]}`.
 - **Changed** the Gemini API key can now be entered in the app (previously only via `.env.local` or Google AI Studio). Removed the Google AI Studio key-selection integration.
-- **Updated** `@google/genai` 1.30 → 3.4; added `@anthropic-ai/sdk` and `openai`; removed the unused `@google/generative-ai`.
+- **Updated** `@google/genai` 1.30 → 3.4; added `openai`; removed the unused `@google/generative-ai`.
+- **Fixed** PC Box depth now follows Eq. (4) of the paper: the median depth of the non-transparent pixels (alpha > 128) of the object's background-removed image, mapped into the scene with the AKAZE result (`originalPartBox2d`). This code path had never run before; the boxes and 3D models were placed using the depth at a few fixed points of the bounding box (2 points for models, 6 for PC Boxes). Without a usable mask, the median of all pixels in the box is used.
 - **Fixed** person/object classification of detected objects now uses the VLM's `type` (it used to guess from label words, so e.g. "woman" matched "man").
 - **Fixed** AKAZE matching: OpenCV objects are always released (some were leaked), the bounding box of projected corners is computed correctly (`Number.MIN_VALUE` was used as -∞), and matching waits for OpenCV.js to finish loading instead of giving up.
 - **Cleanup** `index.html`: removed the Google AI Studio import map, the missing `/index.css` and the unused `<model-viewer>` script.
