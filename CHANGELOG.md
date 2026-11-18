@@ -9,6 +9,11 @@ All notable changes to this project. Versions up to v1.18.1 were developed in th
 - **Changed** JSON output of all vision tasks is now enforced with each provider's structured-output feature. The detection result is wrapped as `{"objects": [...]}`.
 - **Changed** the Gemini API key can now be entered in the app (previously only via `.env.local` or Google AI Studio). Removed the Google AI Studio key-selection integration.
 - **Updated** `@google/genai` 1.30 → 3.4; added `@anthropic-ai/sdk` and `openai`; removed the unused `@google/generative-ai`.
+- **Fixed** person/object classification of detected objects now uses the VLM's `type` (it used to guess from label words, so e.g. "woman" matched "man").
+- **Fixed** AKAZE matching: OpenCV objects are always released (some were leaked), the bounding box of projected corners is computed correctly (`Number.MIN_VALUE` was used as -∞), and matching waits for OpenCV.js to finish loading instead of giving up.
+- **Cleanup** `index.html`: removed the Google AI Studio import map, the missing `/index.css` and the unused `<model-viewer>` script.
+- **Cleanup** removed unused code: utility functions (`trimTransparentEdges`, `refineOverlaps`, `refineSingleOverlap`, etc.), unused types, state, handlers, component props and the never-wired card actions (Finalize / Refine Overlap / Remove BG); removed debug `console.log` output (processing times are still recorded and exported as CSV).
+- **Cleanup** TypeScript now reports unused variables and parameters (`noUnusedLocals`, `noUnusedParameters`); added `npm run typecheck`.
 - **Removed** the automatic fallback from the official Hugging Face Spaces (BRIA RMBG 2.0, Depth Anything V2, TRELLIS.2) to the author's private duplicate Spaces.
 - **Removed** the commercial API integrations: Stability AI API (3D generation) and Remove.bg (background removal). Background removal now always uses BRIA RMBG 2.0.
 - **Removed** Stable Fast 3D (it depended on the author's private Space). 3D generation now uses TRELLIS.2 or a local TripoSR server.

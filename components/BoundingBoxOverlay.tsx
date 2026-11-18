@@ -1,8 +1,11 @@
 import React from 'react';
 import { DetectedObject } from '../types';
 
+/** A box to draw; `colorOverride` sets the color of this box only. */
+export type OverlayBox = Pick<DetectedObject, 'label' | 'box_2d' | 'type'> & { colorOverride?: string };
+
 interface BoundingBoxOverlayProps {
-  objects: DetectedObject[];
+  objects: OverlayBox[];
   color?: string;
 }
 
@@ -12,8 +15,7 @@ export const BoundingBoxOverlay: React.FC<BoundingBoxOverlayProps> = ({ objects,
       {objects.map((obj, idx) => {
         const [ymin, xmin, ymax, xmax] = obj.box_2d;
 
-        // Use object-specific color if available (cast to any to avoid changing global types for now)
-        const boxColor = (obj as any).colorOverride || color;
+        const boxColor = obj.colorOverride || color;
 
         // Convert normalized coordinates to percentages
         const top = ymin * 100;

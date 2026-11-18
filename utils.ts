@@ -1,42 +1,7 @@
 import { CroppedObject, DetectedObject } from './types';
 
-// Declare cv globally for OpenCV.js
+// OpenCV.js is loaded globally from index.html
 declare const cv: any;
-
-export const fileToGenerativePart = async (file: File): Promise<{ inlineData: { data: string; mimeType: string } }> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const base64String = reader.result as string;
-      const base64Data = base64String.split(',')[1];
-      resolve({
-        inlineData: {
-          data: base64Data,
-          mimeType: file.type
-        }
-      });
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-};
-
-export const urlToBase64 = async (url: string): Promise<string> => {
-  if (url.startsWith('data:')) {
-    return url.split(',')[1];
-  }
-  const response = await fetch(url);
-  const blob = await response.blob();
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const base64String = reader.result as string;
-      resolve(base64String.split(',')[1]);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-};
 
 export const blobUrlToDataUrl = async (blobUrl: string): Promise<string> => {
   const response = await fetch(blobUrl);
@@ -57,20 +22,9 @@ export const dataUrlToBlobUrl = async (dataUrl: string): Promise<string> => {
   return URL.createObjectURL(blob);
 };
 
-
-export const loadImage = (src: string): Promise<HTMLImageElement> => {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = src;
-  });
-};
-
 export const cropObjectsFromImage = async (
   imageUrl: string,
-  objects: any[]
+  objects: DetectedObject[]
 ): Promise<CroppedObject[]> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -106,7 +60,7 @@ export const cropObjectsFromImage = async (
           label: obj.label,
           imageUrl: croppedUrl,
           box_2d: obj.box_2d,
-          type: obj.label.toLowerCase().includes('person') || obj.label.toLowerCase().includes('man') || obj.label.toLowerCase().includes('woman') ? 'person' : 'object',
+          type: obj.type ?? (/\b(person|man|woman|boy|girl|child)\b/i.test(obj.label) ? 'person' : 'object'),
           description: obj.description
         };
       }).filter(Boolean) as CroppedObject[];
@@ -138,8 +92,6 @@ export const cropObjectsFromImage = async (
   });
 };
 
-
-
 export const removeBackgroundWithRembg = async (imageUrl: string, apiKey?: string): Promise<Blob> => {
   const space = 'briaai/BRIA-RMBG-2.0';
 
@@ -150,7 +102,6 @@ export const removeBackgroundWithRembg = async (imageUrl: string, apiKey?: strin
   }
 
   try {
-    console.log(`[RMBG] Connecting to ${space}...`);
     const client = await Client.connect(space, options);
 
     const response = await fetch(imageUrl);
@@ -182,97 +133,13 @@ export const removeBackgroundWithRembg = async (imageUrl: string, apiKey?: strin
   }
 };
 
-export const trimTransparentEdges = async (imageUrl: string, alphaThreshold: number = 50, maintainAspectRatio: boolean = false): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        resolve(imageUrl);
-        return;
-      }
-      ctx.drawImage(img, 0, 0);
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const data = imageData.data;
-      let minX = canvas.width, minY = canvas.height, maxX = 0, maxY = 0;
-      let found = false;
+// --- AKAZE feature matching (Phase 4) ---
 
-      for (let y = 0; y < canvas.height; y++) {
-        for (let x = 0; x < canvas.width; x++) {
-          const alpha = data[(y * canvas.width + x) * 4 + 3];
-          if (alpha > alphaThreshold) {
-            if (x < minX) minX = x;
-            if (x > maxX) maxX = x;
-            if (y < minY) minY = y;
-            if (y > maxY) maxY = y;
-            found = true;
-          }
-        }
-      }
+const isOpenCVReady = (): boolean =>
+  typeof window.cv !== 'undefined' && typeof window.cv.Mat !== 'undefined';
 
-      if (!found) {
-        resolve(imageUrl); // Return original if completely transparent
-        return;
-      }
-
-      const contentW = maxX - minX + 1;
-      const contentH = maxY - minY + 1;
-
-      let finalW = contentW;
-      let finalH = contentH;
-      let offsetX = 0;
-      let offsetY = 0;
-
-      if (maintainAspectRatio) {
-        const targetRatio = img.width / img.height;
-        const contentRatio = contentW / contentH;
-
-        if (contentRatio > targetRatio) {
-          // Content is wider than target, need to increase height
-          finalH = contentW / targetRatio;
-          offsetY = (finalH - contentH) / 2;
-        } else {
-          // Content is taller than target, need to increase width
-          finalW = contentH * targetRatio;
-          offsetX = (finalW - contentW) / 2;
-        }
-      }
-
-      const cutCanvas = document.createElement('canvas');
-      cutCanvas.width = finalW;
-      cutCanvas.height = finalH;
-      const cutCtx = cutCanvas.getContext('2d');
-      if (!cutCtx) {
-        resolve(imageUrl);
-        return;
-      }
-
-      // Draw the content from the original canvas to the new canvas, centered
-      cutCtx.drawImage(canvas, minX, minY, contentW, contentH, offsetX, offsetY, contentW, contentH);
-      resolve(cutCanvas.toDataURL());
-    };
-    img.onerror = () => resolve(imageUrl);
-    img.src = imageUrl;
-  });
-};
-
-// --- AKAZE Implementation ---
-
-/**
- * Checks if OpenCV is fully initialized.
- */
-export const isOpenCVReady = (): boolean => {
-  return typeof window.cv !== 'undefined' && typeof window.cv.Mat !== 'undefined';
-};
-
-/**
- * Waits for OpenCV to be injected and ready.
- */
-export const waitForOpenCV = async (timeoutMs = 20000): Promise<boolean> => {
+/** OpenCV.js is loaded asynchronously; wait until it is ready. */
+const waitForOpenCV = async (timeoutMs = 20000): Promise<boolean> => {
   if (isOpenCVReady()) return true;
 
   return new Promise((resolve) => {
@@ -290,211 +157,148 @@ export const waitForOpenCV = async (timeoutMs = 20000): Promise<boolean> => {
   });
 };
 
-
-export const findBestMatchPositionAKAZE = async (
-  largeImageUrl: string,
-  templateImageUrl: string
-): Promise<[number, number, number, number] | null> => {
-  return new Promise((resolve, reject) => {
-    // Check if OpenCV is loaded
-    if (typeof cv === 'undefined' || !cv.Mat) {
-      console.warn("OpenCV.js not loaded, falling back to SSD.");
-      resolve(null);
-      return;
-    }
-
-    const largeImg = new Image();
-    largeImg.crossOrigin = "anonymous";
-    const templateImg = new Image();
-    templateImg.crossOrigin = "anonymous";
-
-    let loadedCount = 0;
-    const onLoaded = () => {
-      loadedCount++;
-      if (loadedCount < 2) return;
-
-      try {
-
-        // Helper to get Mat from Image via Canvas (more reliable than imread)
-        const getMatFromImage = (img: HTMLImageElement) => {
-          const canvas = document.createElement('canvas');
-          canvas.width = img.width;
-          canvas.height = img.height;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) throw new Error("Canvas context failed");
-          ctx.drawImage(img, 0, 0);
-          const imageData = ctx.getImageData(0, 0, img.width, img.height);
-          return cv.matFromImageData(imageData);
-        };
-
-        const img1 = getMatFromImage(templateImg);
-        const img2 = getMatFromImage(largeImg);
-
-        // Convert to grayscale
-        const gray1 = new cv.Mat();
-        const gray2 = new cv.Mat();
-        cv.cvtColor(img1, gray1, cv.COLOR_RGBA2GRAY, 0);
-        cv.cvtColor(img2, gray2, cv.COLOR_RGBA2GRAY, 0);
-
-        // Initialize AKAZE
-        const akaze = new cv.AKAZE();
-
-        // Detect keypoints and compute descriptors
-        const kp1 = new cv.KeyPointVector();
-        const kp2 = new cv.KeyPointVector();
-        const des1 = new cv.Mat();
-        const des2 = new cv.Mat();
-
-        akaze.detectAndCompute(gray1, new cv.Mat(), kp1, des1);
-        akaze.detectAndCompute(gray2, new cv.Mat(), kp2, des2);
-
-        if (kp1.size() === 0 || kp2.size() === 0) {
-          console.warn("No keypoints detected.");
-          img1.delete(); img2.delete(); gray1.delete(); gray2.delete();
-          kp1.delete(); kp2.delete(); des1.delete(); des2.delete();
-          akaze.delete();
-          resolve(null);
-          return;
-        }
-
-        // Match descriptors using BFMatcher
-        const bf = new cv.BFMatcher(cv.NORM_HAMMING, false);
-        const matches = new cv.DMatchVectorVector();
-        bf.knnMatch(des1, des2, matches, 2);
-
-        // Filter matches using Ratio Test
-        const goodMatches = new cv.DMatchVector();
-        const ratio = 0.8; // Relaxed ratio slightly
-        for (let i = 0; i < matches.size(); ++i) {
-          const m = matches.get(i).get(0);
-          const n = matches.get(i).get(1);
-          if (m.distance < ratio * n.distance) {
-            goodMatches.push_back(m);
-          }
-        }
-
-        if (goodMatches.size() < 4) {
-          console.warn("AKAZE: Not enough matches found (< 4).");
-          img1.delete(); img2.delete(); gray1.delete(); gray2.delete();
-          kp1.delete(); kp2.delete(); des1.delete(); des2.delete();
-          matches.delete(); goodMatches.delete(); akaze.delete(); bf.delete();
-          resolve(null);
-          return;
-        }
-
-        // Find Homography
-        const srcPoints = [];
-        const dstPoints = [];
-        for (let i = 0; i < goodMatches.size(); ++i) {
-          const m = goodMatches.get(i);
-          const p1 = kp1.get(m.queryIdx).pt;
-          const p2 = kp2.get(m.trainIdx).pt;
-          srcPoints.push(p1.x); srcPoints.push(p1.y);
-          dstPoints.push(p2.x); dstPoints.push(p2.y);
-        }
-
-        const srcMat = cv.matFromArray(srcPoints.length / 2, 1, cv.CV_32FC2, srcPoints);
-        const dstMat = cv.matFromArray(dstPoints.length / 2, 1, cv.CV_32FC2, dstPoints);
-
-        const H = cv.findHomography(srcMat, dstMat, cv.RANSAC, 5.0);
-
-        if (H.empty()) {
-          console.warn("AKAZE: Homography matrix is empty.");
-          img1.delete(); img2.delete(); gray1.delete(); gray2.delete();
-          kp1.delete(); kp2.delete(); des1.delete(); des2.delete();
-          matches.delete(); goodMatches.delete(); akaze.delete(); bf.delete();
-          srcMat.delete(); dstMat.delete(); H.delete();
-          resolve(null);
-          return;
-        }
-
-        // Project corners of the template to the scene
-        const objCorners = cv.matFromArray(4, 1, cv.CV_32FC2, [
-          0, 0,
-          templateImg.width, 0,
-          templateImg.width, templateImg.height,
-          0, templateImg.height
-        ]);
-        const sceneCorners = new cv.Mat();
-        cv.perspectiveTransform(objCorners, sceneCorners, H);
-
-        // Calculate bounding box from projected corners
-        let minX = Number.MAX_VALUE, minY = Number.MAX_VALUE;
-        let maxX = Number.MIN_VALUE, maxY = Number.MIN_VALUE;
-
-        for (let i = 0; i < 4; ++i) {
-          const x = sceneCorners.data32F[i * 2];
-          const y = sceneCorners.data32F[i * 2 + 1];
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
-        }
-
-        // Normalize coordinates
-        const normMinX = Math.max(0, minX / largeImg.width);
-        const normMinY = Math.max(0, minY / largeImg.height);
-        const normMaxX = Math.min(1, maxX / largeImg.width);
-        const normMaxY = Math.min(1, maxY / largeImg.height);
-
-        // Sanity check: verify the detected box size is reasonable
-        // If the detected box is much smaller than the template, AKAZE likely found a partial match
-        const detectedWidth = normMaxX - normMinX;
-        const detectedHeight = normMaxY - normMinY;
-        const templateAspect = templateImg.width / templateImg.height;
-        const largeAspect = largeImg.width / largeImg.height;
-
-        // Calculate expected template footprint in large image (normalized)
-        const expectedMinSize = 0.3; // Detected box should be at least 30% of the large image dimension
-
-        // If detected box is too small, reject the match
-        if (detectedWidth < expectedMinSize && detectedHeight < expectedMinSize) {
-          console.warn(`AKAZE: Detected box too small (${(detectedWidth * 100).toFixed(1)}% x ${(detectedHeight * 100).toFixed(1)}%), rejecting match`);
-          // Cleanup
-          img1.delete(); img2.delete(); gray1.delete(); gray2.delete();
-          kp1.delete(); kp2.delete(); des1.delete(); des2.delete();
-          matches.delete(); goodMatches.delete(); akaze.delete(); bf.delete();
-          srcMat.delete(); dstMat.delete(); H.delete(); objCorners.delete(); sceneCorners.delete();
-          resolve(null);
-          return;
-        }
-
-        // Cleanup
-        img1.delete(); img2.delete(); gray1.delete(); gray2.delete();
-        kp1.delete(); kp2.delete(); des1.delete(); des2.delete();
-        matches.delete(); goodMatches.delete(); akaze.delete(); bf.delete();
-        srcMat.delete(); dstMat.delete(); H.delete(); objCorners.delete(); sceneCorners.delete();
-
-        resolve([normMinY, normMinX, normMaxY, normMaxX]);
-
-      } catch (e) {
-        console.error("AKAZE execution failed:", e);
-        resolve(null);
-      }
-    };
-
-    largeImg.onload = onLoaded;
-    templateImg.onload = onLoaded;
-    largeImg.onerror = () => resolve(null);
-    templateImg.onerror = () => resolve(null);
-
-    largeImg.src = largeImageUrl;
-    templateImg.src = templateImageUrl;
+const loadImageElement = (src: string): Promise<HTMLImageElement> =>
+  new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
   });
-};
 
+/**
+ * Locate the template image (original crop) inside the large image (completed image)
+ * with AKAZE + Lowe's ratio test + RANSAC homography.
+ *
+ * Returns the normalized box [ymin, xmin, ymax, xmax] in the large image, or null
+ * if no reliable match was found (the caller then falls back to tightBox2d).
+ */
 export const findBestMatchPosition = async (
   largeImageUrl: string,
   templateImageUrl: string
 ): Promise<[number, number, number, number] | null> => {
-  // Try AKAZE only - if it fails, caller should use tightBox2d fallback
-  const akazeResult = await findBestMatchPositionAKAZE(largeImageUrl, templateImageUrl);
-  if (akazeResult) {
-    return akazeResult;
+  if (!(await waitForOpenCV())) {
+    console.warn("AKAZE: OpenCV.js is not available.");
+    return null;
   }
 
-  console.warn("AKAZE match failed, returning null (caller should use tightBox2d fallback)");
-  return null;
+  let largeImg: HTMLImageElement, templateImg: HTMLImageElement;
+  try {
+    [largeImg, templateImg] = await Promise.all([loadImageElement(largeImageUrl), loadImageElement(templateImageUrl)]);
+  } catch {
+    return null;
+  }
+
+  // Every OpenCV object is tracked here and released in `finally`
+  const allocated: { delete: () => void }[] = [];
+  const track = <T extends { delete: () => void }>(obj: T): T => { allocated.push(obj); return obj; };
+
+  const matFromImage = (img: HTMLImageElement) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error("Canvas context failed");
+    ctx.drawImage(img, 0, 0);
+    return track(cv.matFromImageData(ctx.getImageData(0, 0, img.width, img.height)));
+  };
+
+  try {
+    // Grayscale images
+    const gray1 = track(new cv.Mat());
+    const gray2 = track(new cv.Mat());
+    cv.cvtColor(matFromImage(templateImg), gray1, cv.COLOR_RGBA2GRAY, 0);
+    cv.cvtColor(matFromImage(largeImg), gray2, cv.COLOR_RGBA2GRAY, 0);
+
+    // Keypoints and descriptors
+    const akaze = track(new cv.AKAZE());
+    const kp1 = track(new cv.KeyPointVector());
+    const kp2 = track(new cv.KeyPointVector());
+    const des1 = track(new cv.Mat());
+    const des2 = track(new cv.Mat());
+    const noMask = track(new cv.Mat());
+    akaze.detectAndCompute(gray1, noMask, kp1, des1);
+    akaze.detectAndCompute(gray2, noMask, kp2, des2);
+
+    if (kp1.size() === 0 || kp2.size() === 0) {
+      console.warn("AKAZE: No keypoints detected.");
+      return null;
+    }
+
+    // k-NN matching (k = 2) with Lowe's ratio test
+    const bf = track(new cv.BFMatcher(cv.NORM_HAMMING, false));
+    const matches = track(new cv.DMatchVectorVector());
+    bf.knnMatch(des1, des2, matches, 2);
+
+    const ratio = 0.8;
+    const srcPoints: number[] = [];
+    const dstPoints: number[] = [];
+    for (let i = 0; i < matches.size(); ++i) {
+      const pair = matches.get(i);
+      if (pair.size() < 2) continue;
+      const m = pair.get(0);
+      const n = pair.get(1);
+      if (m.distance < ratio * n.distance) {
+        const p1 = kp1.get(m.queryIdx).pt;
+        const p2 = kp2.get(m.trainIdx).pt;
+        srcPoints.push(p1.x, p1.y);
+        dstPoints.push(p2.x, p2.y);
+      }
+    }
+
+    if (srcPoints.length / 2 < 4) {
+      console.warn("AKAZE: Not enough matches found (< 4).");
+      return null;
+    }
+
+    // Homography with RANSAC
+    const srcMat = track(cv.matFromArray(srcPoints.length / 2, 1, cv.CV_32FC2, srcPoints));
+    const dstMat = track(cv.matFromArray(dstPoints.length / 2, 1, cv.CV_32FC2, dstPoints));
+    const H = track(cv.findHomography(srcMat, dstMat, cv.RANSAC, 5.0));
+    if (H.empty()) {
+      console.warn("AKAZE: Homography matrix is empty.");
+      return null;
+    }
+
+    // Project the template corners into the large image
+    const objCorners = track(cv.matFromArray(4, 1, cv.CV_32FC2, [
+      0, 0,
+      templateImg.width, 0,
+      templateImg.width, templateImg.height,
+      0, templateImg.height
+    ]));
+    const sceneCorners = track(new cv.Mat());
+    cv.perspectiveTransform(objCorners, sceneCorners, H);
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (let i = 0; i < 4; ++i) {
+      const x = sceneCorners.data32F[i * 2];
+      const y = sceneCorners.data32F[i * 2 + 1];
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+    }
+
+    const normMinX = Math.max(0, minX / largeImg.width);
+    const normMinY = Math.max(0, minY / largeImg.height);
+    const normMaxX = Math.min(1, maxX / largeImg.width);
+    const normMaxY = Math.min(1, maxY / largeImg.height);
+
+    // A box much smaller than the large image means AKAZE matched only a part of it
+    const minSize = 0.3;
+    const detectedWidth = normMaxX - normMinX;
+    const detectedHeight = normMaxY - normMinY;
+    if (detectedWidth < minSize && detectedHeight < minSize) {
+      console.warn(`AKAZE: Detected box too small (${(detectedWidth * 100).toFixed(1)}% x ${(detectedHeight * 100).toFixed(1)}%), rejecting match`);
+      return null;
+    }
+
+    return [normMinY, normMinX, normMaxY, normMaxX];
+  } catch (e) {
+    console.error("AKAZE execution failed:", e);
+    return null;
+  } finally {
+    allocated.forEach(obj => obj.delete());
+  }
 };
 
 export const generateDepthMap = async (imageUrl: string, apiKey?: string): Promise<string> => {
@@ -506,7 +310,6 @@ export const generateDepthMap = async (imageUrl: string, apiKey?: string): Promi
   const space = 'depth-anything/Depth-Anything-V2';
 
   try {
-    console.log(`[DepthMap] Connecting to ${space}...`);
     const client = await Client.connect(space, token ? { hf_token: token } as any : {});
 
     const imageBlob = await (await fetch(imageUrl)).blob();
@@ -548,172 +351,6 @@ export const generateDepthMap = async (imageUrl: string, apiKey?: string): Promi
     let errorMsg = e.message || "Unknown error";
     if (e.original_msg) errorMsg = e.original_msg;
     throw new Error(`Depth Map Failed: ${errorMsg}`);
-  }
-};
-
-/**
- * Refines overlaps by masking out pixels where other objects' non-transparent pixels exist.
- * Directly compares pixels between images using bbox coordinate transformation.
- */
-export const refineOverlaps = async (objects: CroppedObject[], sceneWidth: number, sceneHeight: number, sceneUrl?: string): Promise<CroppedObject[]> => {
-  if (objects.length < 2) return objects;
-
-  // Load all images first
-  const loadedImages: Map<string, { img: HTMLImageElement, data: ImageData }> = new Map();
-  for (const obj of objects) {
-    try {
-      const img = await loadImageForMask(obj.imageUrl);
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = img.width;
-      tempCanvas.height = img.height;
-      const tempCtx = tempCanvas.getContext('2d');
-      if (tempCtx) {
-        tempCtx.drawImage(img, 0, 0);
-        const data = tempCtx.getImageData(0, 0, img.width, img.height);
-        loadedImages.set(obj.id, { img, data });
-      }
-    } catch (e) {
-      console.warn(`Failed to load image for ${obj.label}`, e);
-    }
-  }
-
-  const refinedObjects: CroppedObject[] = [];
-
-  for (const currentObj of objects) {
-    const current = loadedImages.get(currentObj.id);
-    if (!current) {
-      refinedObjects.push(currentObj);
-      continue;
-    }
-
-    // Current bbox (normalized coordinates)
-    const [cymin, cxmin, cymax, cxmax] = currentObj.box_2d;
-    const cw = cxmax - cxmin;
-    const ch = cymax - cymin;
-
-    // Create canvas for result
-    const canvas = document.createElement('canvas');
-    canvas.width = current.img.width;
-    canvas.height = current.img.height;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      refinedObjects.push(currentObj);
-      continue;
-    }
-
-    ctx.drawImage(current.img, 0, 0);
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-    let modified = false;
-
-    // Check against each other object
-    for (const otherObj of objects) {
-      if (otherObj.id === currentObj.id) continue;
-
-      const other = loadedImages.get(otherObj.id);
-      if (!other) continue;
-
-      const [oymin, oxmin, oymax, oxmax] = otherObj.box_2d;
-      const ow = oxmax - oxmin;
-      const oh = oymax - oymin;
-
-      // Check if bboxes overlap (in normalized coordinates)
-      if (cxmax <= oxmin || oxmax <= cxmin || cymax <= oymin || oymax <= cymin) continue;
-
-      // For each pixel in current image
-      for (let py = 0; py < current.img.height; py++) {
-        for (let px = 0; px < current.img.width; px++) {
-          const idx = (py * current.img.width + px) * 4;
-
-          // Skip already transparent pixels
-          if (imageData.data[idx + 3] < 128) continue;
-
-          // This pixel's position in normalized scene coordinates
-          const normX = cxmin + (px / current.img.width) * cw;
-          const normY = cymin + (py / current.img.height) * ch;
-
-          // Check if this point is inside other's bbox
-          if (normX < oxmin || normX >= oxmax || normY < oymin || normY >= oymax) continue;
-
-          // Calculate corresponding pixel in other image
-          const ox = Math.floor(((normX - oxmin) / ow) * other.img.width);
-          const oy = Math.floor(((normY - oymin) / oh) * other.img.height);
-
-          if (ox < 0 || ox >= other.img.width || oy < 0 || oy >= other.img.height) continue;
-
-          const otherIdx = (oy * other.img.width + ox) * 4;
-          const otherAlpha = other.data.data[otherIdx + 3];
-
-          // Only proceed if other has non-transparent pixel here
-          if (otherAlpha > 128) {
-            // Compare pixel colors - only remove if colors match (same object visible in both)
-            const r1 = imageData.data[idx];
-            const g1 = imageData.data[idx + 1];
-            const b1 = imageData.data[idx + 2];
-
-            const r2 = other.data.data[otherIdx];
-            const g2 = other.data.data[otherIdx + 1];
-            const b2 = other.data.data[otherIdx + 2];
-
-            // Calculate color difference
-            const colorDiff = Math.abs(r1 - r2) + Math.abs(g1 - g2) + Math.abs(b1 - b2);
-
-            // Only make transparent if colors are very similar (threshold: 40 for sum of RGB differences)
-            if (colorDiff < 40) {
-              imageData.data[idx + 3] = 0;
-              modified = true;
-            }
-          }
-        }
-      }
-    }
-
-    if (modified) {
-      ctx.putImageData(imageData, 0, 0);
-      refinedObjects.push({
-        ...currentObj,
-        imageUrl: canvas.toDataURL('image/png'),
-        isRefined: true
-      });
-    } else {
-      refinedObjects.push(currentObj);
-    }
-  }
-
-  return refinedObjects;
-};
-
-
-
-const loadImageForMask = (url: string): Promise<HTMLImageElement> => {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    // Only set crossOrigin for external URLs
-    // Data URLs and Blob URLs are same-origin and don't need crossOrigin
-    const isLocalUrl = url.startsWith('data:') || url.startsWith('blob:');
-    if (!isLocalUrl) {
-      img.crossOrigin = "anonymous";
-    }
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = url;
-  });
-};
-
-export const refineSingleOverlap = async (target: CroppedObject, all: CroppedObject[], width: number, height: number, sceneUrl?: string): Promise<CroppedObject> => {
-  if (!sceneUrl) return target;
-
-  // Use the wrapper function which tries AKAZE then SSD
-  const matchBox = await findBestMatchPosition(sceneUrl, target.imageUrl);
-
-  if (matchBox) {
-    return {
-      ...target,
-      box_2d: matchBox
-    };
-  } else {
-    console.warn(`No match found for ${target.label}`);
-    return target;
   }
 };
 
@@ -817,7 +454,6 @@ export const calculateTightBoundingBox = async (imageUrl: string): Promise<[numb
         }
       }
 
-
       if (!found) {
         // Fallback to full image if nothing found (e.g. empty or all white)
         resolve([0, 0, 1, 1]);
@@ -903,25 +539,10 @@ export const generate3DModelWithTrellis = async (imageUrl: string, hfToken?: str
       throw new Error("Hugging Face token is required for TRELLIS.2. Please enter your HF Token in the settings.");
     }
 
-    const space = 'microsoft/TRELLIS.2';
-    console.log(`[TRELLIS] Connecting to ${space}...`);
-    const client: any = await Client.connect(space, { hf_token: token } as any);
-    // Test connection with start_session
+    const client: any = await Client.connect('microsoft/TRELLIS.2', { hf_token: token } as any);
     await client.predict("/start_session", {});
-    console.log(`[TRELLIS] Connected to ${space} successfully`);
 
-    // Convert to PNG and create File object (matching how Gradio UI sends files)
-    const response = await fetch(imageUrl);
-    const originalBlob = await response.blob();
-
-    // Convert to PNG via canvas to ensure proper format
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    await new Promise<void>((resolve, reject) => {
-      img.onload = () => resolve();
-      img.onerror = reject;
-      img.src = imageUrl;
-    });
+    const img = await loadImageElement(imageUrl);
 
     // TRELLIS.2 Official Preprocessing (from trellis2/pipelines/trellis2_image_to_3d.py)
     // 1. Find foreground bounding box using alpha channel
@@ -956,11 +577,8 @@ export const generate3DModelWithTrellis = async (imageUrl: string, hfToken?: str
 
     // Handle case where no foreground found
     if (minX >= maxX || minY >= maxY) {
-      console.log('TRELLIS.2: No foreground found, using full image');
       minX = 0; minY = 0; maxX = img.width; maxY = img.height;
     }
-
-    console.log(`TRELLIS.2 foreground bbox: (${minX},${minY}) to (${maxX},${maxY})`);
 
     // Step 2: Calculate square crop centered on foreground
     const bboxWidth = maxX - minX;
@@ -973,8 +591,6 @@ export const generate3DModelWithTrellis = async (imageUrl: string, hfToken?: str
     const cropX = Math.floor(centerX - cropSize / 2);
     const cropY = Math.floor(centerY - cropSize / 2);
 
-    console.log(`TRELLIS.2 square crop: ${cropSize}x${cropSize} centered at (${centerX.toFixed(0)},${centerY.toFixed(0)})`);
-
     // Step 3: Create 1024x1024 output canvas with foreground centered
     // Square crop centered on foreground, then resize to 1024x1024
     const targetSize = 1024;
@@ -984,12 +600,7 @@ export const generate3DModelWithTrellis = async (imageUrl: string, hfToken?: str
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Canvas context failed');
 
-    // Clear canvas (transparent padding)
-    ctx.clearRect(0, 0, targetSize, targetSize);
-
-    // Use cropSize, cropX, cropY already calculated in Step 2 above
-
-    // Handle cases where crop extends beyond image bounds  
+    // Handle cases where crop extends beyond image bounds (padding stays transparent)
     const srcX = Math.max(0, cropX);
     const srcY = Math.max(0, cropY);
     const srcW = Math.min(cropSize, img.width - srcX);
@@ -1044,8 +655,6 @@ export const generate3DModelWithTrellis = async (imageUrl: string, hfToken?: str
     }
     ctx.putImageData(outputData, 0, 0);
 
-    console.log(`TRELLIS.2 preprocessing: white bg converted to transparent, alpha-premultiplied`);
-
     const pngBlob = await new Promise<Blob>((resolve, reject) => {
       canvas.toBlob((blob) => {
         if (blob) resolve(blob);
@@ -1055,12 +664,10 @@ export const generate3DModelWithTrellis = async (imageUrl: string, hfToken?: str
 
     // Create File object (Gradio expects File, not Blob)
     const imageFile = new File([pngBlob], 'input.png', { type: 'image/png' });
-    console.log(`TRELLIS.2 sending as File: ${targetSize}x${targetSize}, type=${imageFile.type}, size=${imageFile.size} bytes`);
 
-    // Step 2: Image to 3D with default parameters (using random seed like Gradio UI)
+    // Image to 3D with default parameters (random seed, like the Gradio UI)
     const randomSeed = Math.floor(Math.random() * 2147483647);
-    console.log(`TRELLIS.2 using seed: ${randomSeed}`);
-    const result = await client.predict("/image_to_3d", {
+    await client.predict("/image_to_3d", {
       image: imageFile,
       seed: randomSeed,
       resolution: "1024",
@@ -1078,21 +685,15 @@ export const generate3DModelWithTrellis = async (imageUrl: string, hfToken?: str
       tex_slat_rescale_t: 3,
     });
 
-    console.log("TRELLIS.2 /image_to_3d result:", result.data);
-
-    // Step 3: Extract GLB
+    // Extract GLB
     const extractResult = await client.predict("/extract_glb", {
       decimation_target: 300000,
       texture_size: 2048,
     });
 
     const data = extractResult.data as any[];
-    console.log("TRELLIS.2 /extract_glb result:", data);
 
     if (data && data.length > 0) {
-      console.log("TRELLIS.2 /extract_glb data[0]:", JSON.stringify(data[0], null, 2));
-      console.log("TRELLIS.2 /extract_glb data[1]:", JSON.stringify(data[1], null, 2));
-
       // Try data[1] first (download button/file) as it may have the full GLB
       // Then fall back to data[0] (Model3D viewer)
       const candidates = [data[1], data[0]];
@@ -1113,12 +714,8 @@ export const generate3DModelWithTrellis = async (imageUrl: string, hfToken?: str
         }
 
         if (glbUrl) {
-          console.log("TRELLIS.2 using GLB URL:", glbUrl);
           // Include auth header for authenticated file access
-          const fetchOptions: RequestInit = token ? {
-            headers: { 'Authorization': `Bearer ${token}` }
-          } : {};
-          const response = await fetch(glbUrl, fetchOptions);
+          const response = await fetch(glbUrl, { headers: { 'Authorization': `Bearer ${token}` } });
           if (!response.ok) {
             console.error("GLB fetch failed:", response.status, response.statusText);
             continue; // Try next candidate

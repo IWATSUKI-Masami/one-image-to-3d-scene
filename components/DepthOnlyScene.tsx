@@ -12,7 +12,6 @@ interface DepthOnlySceneProps {
     depthMapUrl: string;
     originalAspectRatio?: number;
     detectedObjects?: DetectedObject[];
-    showBoundingBoxes?: boolean;
     positionedModels?: Model3D[];
     showModels?: boolean;
 }
@@ -22,7 +21,6 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     depthMapUrl,
     originalAspectRatio = 1,
     detectedObjects = [],
-    showBoundingBoxes = true,
     positionedModels = [],
     showModels = true
 }) => {
@@ -518,7 +516,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 group.remove(group.children[0]);
             }
 
-            detectedObjects.forEach((obj, index) => {
+            detectedObjects.forEach((obj) => {
                 const [ymin, xmin, ymax, xmax] = obj.box_2d;
 
                 // Convert normalized coordinates to pixel coordinates

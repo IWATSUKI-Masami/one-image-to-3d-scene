@@ -9,15 +9,14 @@ import { BoundingBoxOverlay } from './components/BoundingBoxOverlay';
 import { detectObjectsInImage, generateCompletion, estimateCanvasExpansion, verifyCompletion } from './services/aiService';
 import { loadAISettings, saveAISettings, hasRequiredKeys, VISION_PROVIDER_LABELS, IMAGE_PROVIDER_LABELS } from './services/ai/models';
 import { AISettingsDialog } from './components/AISettingsDialog';
-import { cropObjectsFromImage, removeBackgroundWithRembg, refineOverlaps, refineSingleOverlap, trimTransparentEdges, generate3DModelWithTripoSRLocal, generate3DModelWithTrellis, blobUrlToDataUrl, dataUrlToBlobUrl, generateDepthMap, prepareImageForCompletion, calculateTightBoundingBox } from './utils';
+import { cropObjectsFromImage, removeBackgroundWithRembg, findBestMatchPosition, generate3DModelWithTripoSRLocal, generate3DModelWithTrellis, blobUrlToDataUrl, dataUrlToBlobUrl, generateDepthMap, prepareImageForCompletion, calculateTightBoundingBox } from './utils';
 import { DetectedObject, CroppedObject, Model3D, ProjectArchive, AISettings } from './types';
-import { Scan, Sparkles, AlertCircle, Layers, Image as ImageIcon, Key, User, Box, ArrowLeft, Upload, Eraser, Plug, Wand2, RefreshCw, Star, Download, LayoutGrid, MonitorPlay, Cuboid, Save, FolderOpen, Eye, Trash2, Scissors } from 'lucide-react';
+import { Scan, Sparkles, AlertCircle, Layers, Image as ImageIcon, User, Box, ArrowLeft, Upload, Plug, Wand2, RefreshCw, Star, Download, MonitorPlay, Cuboid, Save, FolderOpen, Trash2 } from 'lucide-react';
 
 type AppMode = 'landing' | 'analyze' | 'batch-remove' | 'complete-body' | 'generate-3d';
 
 const App: React.FC = () => {
   const [mode, setMode] = useState<AppMode>('landing');
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [originalImageDimensions, setOriginalImageDimensions] = useState<{ width: number, height: number } | null>(null);
 
@@ -115,9 +114,6 @@ const App: React.FC = () => {
 
   // Bounding Box Display State  
   const [showBoundingBoxes, setShowBoundingBoxes] = useState(false);
-
-  // Scene View State
-  const [showScene, setShowScene] = useState(false);
 
   // Delete Confirmation State
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -259,7 +255,6 @@ const App: React.FC = () => {
     }
 
     setMode('analyze');
-    setSelectedFile(file);
 
     // Convert to Data URL for persistence
     const reader = new FileReader();
@@ -311,7 +306,6 @@ const App: React.FC = () => {
       setError(`Failed to analyze image: ${err instanceof Error ? err.message : String(err)}. Check the API key and model in AI Settings.`);
     } finally {
       const elapsed = (performance.now() - t0) / 1000;
-      console.log(`[Timer] Object Detection: ${elapsed.toFixed(1)}s`);
       setProcessingTimes(prev => new Map(prev).set('Object Detection', elapsed));
       setIsAnalyzing(false);
     }
@@ -337,26 +331,12 @@ const App: React.FC = () => {
       alert("Failed to generate depth map: " + e.message);
     } finally {
       const elapsed = (performance.now() - t0) / 1000;
-      console.log(`[Timer] Depth Map Generation: ${elapsed.toFixed(1)}s`);
       setProcessingTimes(prev => new Map(prev).set('Depth Map', elapsed));
       setIsGeneratingDepth(false);
     }
   };
 
 
-
-  const handleFinalizeImage = (item: CroppedObject) => {
-    // Just move to completed without changes if user is happy with it
-    const newId = `finalized-${item.id}-${Date.now()}`;
-    const newObject: CroppedObject = {
-      ...item,
-      id: newId,
-      label: `${item.label} (Finalized)`,
-    };
-    setCompletedImages(prev => [newObject, ...prev]);
-    addToSelection('completed', [newId]);
-    setActiveTab('completed');
-  };
 
   const handleGenerate3D = async (item: CroppedObject) => {
     setActiveTab('3d');
@@ -426,7 +406,6 @@ const App: React.FC = () => {
       if (mode === 'generate-3d') setIsGenerating3DGlobal(false);
     } finally {
       const elapsed = (performance.now() - t0) / 1000;
-      console.log(`[Timer] 3D Generation (${item.label}): ${elapsed.toFixed(1)}s`);
       setProcessingTimes(prev => new Map(prev).set(`3D Gen: ${item.label}`, elapsed));
       setIsGenerating3DGlobal(false);
       setProcessingIds(prev => { const newSet = new Set(prev); newSet.delete(item.id); return newSet; });
@@ -465,7 +444,6 @@ const App: React.FC = () => {
       }
     } finally {
       const elapsed = (performance.now() - t0) / 1000;
-      console.log(`[Timer] Batch 3D Generation: ${elapsed.toFixed(1)}s`);
       setProcessingTimes(prev => new Map(prev).set('Batch 3D Generation', elapsed));
       setIsBatchGenerating3D(false);
     }
@@ -477,7 +455,6 @@ const App: React.FC = () => {
     if (files.length === 0) return;
 
     setMode('batch-remove');
-    setSelectedFile(null);
     setPreviewUrl(null);
     setOriginalImageDimensions(null);
     setDetectedObjects([]);
@@ -625,7 +602,6 @@ const App: React.FC = () => {
 
     try {
       // Step 1: Estimate canvas expansion needed using the vision provider
-      console.log('[Complete Body] Estimating canvas expansion...');
       const { verticalRatio, horizontalRatio } = await estimateCanvasExpansion(
         item.imageUrl,
         item.label,
@@ -635,7 +611,6 @@ const App: React.FC = () => {
 
       while (attempt <= MAX_RETRIES) {
         attempt++;
-        console.log(`[Complete Body] Attempt ${attempt}/${MAX_RETRIES + 1}`);
 
         // Step 2: Prepare image with estimated (or increased) expansion
         const adjustedVerticalRatio = verticalRatio * (1 + (attempt - 1) * 0.3); // Increase by 30% each retry
@@ -658,7 +633,6 @@ const App: React.FC = () => {
           item.description
         );
         const genElapsed = (performance.now() - tGen) / 1000;
-        console.log(`[Timer] Generation (${item.label}): ${genElapsed.toFixed(1)}s`);
         setProcessingTimes(prev => new Map(prev).set(`Generation: ${item.label}`, genElapsed));
 
         // Step 3.5: Run background removal FIRST, then AKAZE matching on transparent images
@@ -671,13 +645,11 @@ const App: React.FC = () => {
             // Remove background from completed image (BRIA RMBG 2.0)
             const bgRemovedBlob = await removeBackgroundWithRembg(generatedImageUrl, hfToken);
             transparentUrl = URL.createObjectURL(bgRemovedBlob);
-            console.log('[Complete Body] Background removed using RMBG');
 
             // Also remove background from extracted image for matching
             try {
               const extractedBgRemovedBlob = await removeBackgroundWithRembg(item.imageUrl, hfToken);
               extractedTransparentUrl = URL.createObjectURL(extractedBgRemovedBlob);
-              console.log('[Complete Body] Background removed from extracted image for matching');
             } catch (extractBgError) {
               console.warn('[Complete Body] Failed to remove BG from extracted image:', extractBgError);
             }
@@ -685,20 +657,17 @@ const App: React.FC = () => {
             console.warn('[Complete Body] Background removal failed, keeping original:', bgError);
           }
           const bgElapsed = (performance.now() - tBg) / 1000;
-          console.log(`[Timer] BG Removal in Completion (${item.label}): ${bgElapsed.toFixed(1)}s`);
           setProcessingTimes(prev => new Map(prev).set(`Compl BG: ${item.label}`, bgElapsed));
         }
 
         // Step 3.6: Calculate tightBox2d for the completed image first
         const tMatch = performance.now();
         try {
-          const { findBestMatchPosition, calculateTightBoundingBox } = await import('./utils');
 
           // Always calculate tightBox2d for the completed image
           const tightBox = await calculateTightBoundingBox(transparentUrl);
           if (tightBox) {
             detectedTightBox2d = tightBox;
-            console.log('[Complete Body] Calculated tightBox2d:', tightBox);
           }
 
           // Then try AKAZE matching for originalPartBox2d
@@ -707,10 +676,8 @@ const App: React.FC = () => {
           const matchedBox = await findBestMatchPosition(targetImage, templateImage);
           if (matchedBox) {
             detectedOriginalPartBox2d = matchedBox;
-            console.log('[Complete Body] AKAZE matching completed:', matchedBox);
           } else {
             // Fallback: use tightBox2d as originalPartBox2d
-            console.log('[Complete Body] AKAZE failed, using tightBox2d as fallback for originalPartBox2d');
             if (tightBox) {
               detectedOriginalPartBox2d = tightBox;
             }
@@ -719,19 +686,16 @@ const App: React.FC = () => {
           console.warn('[Complete Body] Matching failed:', matchError);
           // Fallback: try to use tightBox2d
           try {
-            const { calculateTightBoundingBox } = await import('./utils');
             const tightBox = await calculateTightBoundingBox(transparentUrl);
             if (tightBox) {
               detectedOriginalPartBox2d = tightBox;
               detectedTightBox2d = tightBox; // Also save as tightBox2d
-              console.log('[Complete Body] Using tightBox2d fallback after error:', tightBox);
             }
           } catch (tightBoxError) {
             console.warn('[Complete Body] tightBox2d fallback also failed:', tightBoxError);
           }
         }
         const matchElapsed = (performance.now() - tMatch) / 1000;
-        console.log(`[Timer] AKAZE Matching (${item.label}): ${matchElapsed.toFixed(1)}s`);
         setProcessingTimes(prev => new Map(prev).set(`AKAZE: ${item.label}`, matchElapsed));
 
 
@@ -746,13 +710,13 @@ const App: React.FC = () => {
         if (isComplete || attempt > MAX_RETRIES) {
           finalImageUrl = transparentUrl;
           if (!isComplete) {
-            console.log(`[Complete Body] Still incomplete after ${MAX_RETRIES + 1} attempts, using best result`);
+            console.warn(`[Complete Body] Still incomplete after ${MAX_RETRIES + 1} attempts, using best result`);
           }
           break;
         }
 
         // Not complete yet - retry with ORIGINAL image but larger canvas
-        console.log(`[Complete Body] Incomplete (missing: ${missingParts.join(', ')}), retrying with larger canvas...`);
+        console.warn(`[Complete Body] Incomplete (missing: ${missingParts.join(', ')}), retrying with larger canvas...`);
         // Loop continues with same item.imageUrl but increased adjustedVerticalRatio/adjustedHorizontalRatio
       }
 
@@ -781,7 +745,6 @@ const App: React.FC = () => {
       alert("Failed to generate image completion. You may need to reconnect your Google API Key.");
     } finally {
       const elapsed = (performance.now() - t0) / 1000;
-      console.log(`[Timer] Completion (${item.label}): ${elapsed.toFixed(1)}s`);
       setProcessingTimes(prev => new Map(prev).set(`Completion: ${item.label}`, elapsed));
       // Remove from processing IDs
       setProcessingIds(prev => { const newSet = new Set(prev); newSet.delete(item.id); return newSet; });
@@ -816,7 +779,6 @@ const App: React.FC = () => {
           const tGen2 = performance.now();
           const generatedImageUrl = await generateCompletion(preparedUrl, item.label, item.type, aiSettings, item.description);
           const genElapsed2 = (performance.now() - tGen2) / 1000;
-          console.log(`[Timer] Generation (${item.label}): ${genElapsed2.toFixed(1)}s`);
           setProcessingTimes(prev => new Map(prev).set(`Generation: ${item.label}`, genElapsed2));
 
           // Run RMBG first, then AKAZE matching on transparent images
@@ -842,7 +804,6 @@ const App: React.FC = () => {
               console.warn('[Batch Complete] Background removal failed, keeping original:', bgError);
             }
             const bgElapsed2 = (performance.now() - tBg2) / 1000;
-            console.log(`[Timer] BG Removal in Completion (${item.label}): ${bgElapsed2.toFixed(1)}s`);
             setProcessingTimes(prev => new Map(prev).set(`Compl BG: ${item.label}`, bgElapsed2));
           }
 
@@ -850,13 +811,11 @@ const App: React.FC = () => {
           let batchTightBox2d: [number, number, number, number] | undefined;
           const tMatch2 = performance.now();
           try {
-            const { findBestMatchPosition, calculateTightBoundingBox } = await import('./utils');
 
             // Always calculate tightBox2d first
             const tightBox = await calculateTightBoundingBox(transparentUrl);
             if (tightBox) {
               batchTightBox2d = tightBox;
-              console.log('[Batch Complete] Calculated tightBox2d:', tightBox);
             }
 
             // Then try AKAZE matching for originalPartBox2d
@@ -865,19 +824,16 @@ const App: React.FC = () => {
             const matchedBox = await findBestMatchPosition(targetImage, templateImage);
             if (matchedBox) {
               batchOriginalPartBox2d = matchedBox;
-              console.log('[Batch Complete] AKAZE matching completed:', matchedBox);
             } else {
               // Fallback: use tightBox2d as originalPartBox2d
               if (tightBox) {
                 batchOriginalPartBox2d = tightBox;
-                console.log('[Batch Complete] Using tightBox2d fallback for originalPartBox2d');
               }
             }
           } catch (matchError) {
             console.warn('[Batch Complete] Matching failed:', matchError);
             // Fallback: try tightBox2d
             try {
-              const { calculateTightBoundingBox } = await import('./utils');
               const tightBox = await calculateTightBoundingBox(transparentUrl);
               if (tightBox) {
                 batchOriginalPartBox2d = tightBox;
@@ -888,7 +844,6 @@ const App: React.FC = () => {
             }
           }
           const matchElapsed2 = (performance.now() - tMatch2) / 1000;
-          console.log(`[Timer] AKAZE Matching (${item.label}): ${matchElapsed2.toFixed(1)}s`);
           setProcessingTimes(prev => new Map(prev).set(`AKAZE: ${item.label}`, matchElapsed2));
 
 
@@ -914,7 +869,6 @@ const App: React.FC = () => {
           console.error(`Failed to complete ${item.label}`, e);
         } finally {
           const itemElapsed = (performance.now() - tItem) / 1000;
-          console.log(`[Timer] Completion (${item.label}): ${itemElapsed.toFixed(1)}s`);
           setProcessingTimes(prev => new Map(prev).set(`Completion: ${item.label}`, itemElapsed));
         }
       }
@@ -924,7 +878,6 @@ const App: React.FC = () => {
       setError("Batch completion failed. See console for details.");
     } finally {
       const elapsed = (performance.now() - t0) / 1000;
-      console.log(`[Timer] Batch Completion: ${elapsed.toFixed(1)}s`);
       setProcessingTimes(prev => new Map(prev).set('Batch Completion', elapsed));
       setIsBatchCompleting(false);
     }
@@ -961,7 +914,6 @@ const App: React.FC = () => {
 
   const resetAppState = () => {
     setMode('landing');
-    setSelectedFile(null);
     setPreviewUrl(null);
     setCompletionOriginalUrl(null);
     setCompletionResult(null);
@@ -973,18 +925,10 @@ const App: React.FC = () => {
     setCompletedImages([]);
     setModels3D([]);
     setDepthMapUrl(null);
-    setShowScene(false);
     setError(null);
 
     setActiveTab('original');
     setFilter('all');
-  };
-
-  const handleFullReset = () => {
-    if (!window.confirm("Are you sure you want to start over? All current progress will be lost.")) {
-      return;
-    }
-    resetAppState();
   };
 
   // --- Project Archiving Functions ---

@@ -98,7 +98,6 @@ export const detectObjectsInImage = async (file: File, settings: AISettings): Pr
       { schemaName: "detected_objects", deterministic: true, effort: "high" },
     );
     const objects = result.objects || [];
-    console.log(`[Detection:${settings.visionProvider}] response:`, JSON.stringify(objects, null, 2));
     return objects;
   } catch (error) {
     console.error("Error detecting objects:", error);
@@ -249,12 +248,10 @@ Return ONLY valid JSON:
     const parsed = await analyzeImageJson<{ bottomCutoffPercent: number, topCutoffPercent: number, sideCutoffPercent: number }>(
       settings, image, prompt, EXPANSION_SCHEMA, { schemaName: "canvas_expansion", effort: "low" },
     );
-    console.log('[Canvas Estimate] Response:', parsed);
 
     const verticalRatio = 1 + (parsed.bottomCutoffPercent + parsed.topCutoffPercent) / 100;
     const horizontalRatio = 1 + (parsed.sideCutoffPercent * 2) / 100;
 
-    console.log(`[Canvas Estimate] Vertical: ${(verticalRatio * 100).toFixed(0)}%, Horizontal: ${(horizontalRatio * 100).toFixed(0)}%`);
 
     return {
       verticalRatio: Math.min(Math.max(verticalRatio, 1.2), 3.5), // Clamp between 120% and 350%
@@ -310,7 +307,6 @@ Return ONLY valid JSON:
     const parsed = await analyzeImageJson<{ isComplete: boolean, missingParts: string[] }>(
       settings, image, prompt, VERIFY_SCHEMA, { schemaName: "completion_check", effort: "low" },
     );
-    console.log(`[Completion Verify] Complete: ${parsed.isComplete}, Missing: ${parsed.missingParts?.join(', ') || 'none'}`);
     return {
       isComplete: !!parsed.isComplete,
       missingParts: parsed.missingParts || []

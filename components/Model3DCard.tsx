@@ -12,9 +12,6 @@ interface Model3DCardProps {
 }
 
 export const Model3DCard: React.FC<Model3DCardProps> = ({ model, onDelete, selected, onSelect, showBoundingBox }) => {
-  // Use 'model-viewer' as any to bypass TS check since we removed the custom JSX declaration
-  const ModelViewer = 'model-viewer' as any;
-
   return (
     <div
       className={`bg-white rounded-xl shadow-sm border overflow-hidden hover:shadow-md transition-shadow relative
@@ -62,8 +59,7 @@ export const Model3DCard: React.FC<Model3DCardProps> = ({ model, onDelete, selec
           </button>
         </div>
 
-        {/* Badge - Only show Interactive 3D if using model-viewer, or just always show it? 
-            Three.js is also interactive. */}
+        {/* Badge */}
         <div className="absolute top-2 right-2 pointer-events-none">
           <div className="bg-orange-100 text-orange-800 text-[10px] font-semibold px-2 py-1 rounded-full border border-orange-200 shadow-sm flex items-center gap-1 opacity-90">
             <Box size={12} />

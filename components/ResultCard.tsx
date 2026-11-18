@@ -1,17 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { CroppedObject } from '../types';
-import { Download, AlertTriangle, Wand2, Trash2, Scissors, Box, Eraser, Sparkles } from 'lucide-react';
-import { BoundingBoxOverlay } from './BoundingBoxOverlay';
+import { Download, AlertTriangle, Wand2, Trash2, Box } from 'lucide-react';
+import { BoundingBoxOverlay, OverlayBox } from './BoundingBoxOverlay';
 import { findBestMatchPosition, calculateTightBoundingBox } from '../utils';
 
 interface ResultCardProps {
   item: CroppedObject;
   onCompleteBody?: (item: CroppedObject) => void;
   onDelete?: () => void;
-  onFinalize?: (item: CroppedObject) => void;
   onGenerate3D?: (item: CroppedObject) => void;
-  onRefineOverlap?: (item: CroppedObject) => void;
-  onRemoveBackground?: (item: CroppedObject) => void;
   selected?: boolean;
   onSelect?: (selected: boolean) => void;
   onUpdate?: (item: CroppedObject) => void;
@@ -19,12 +16,9 @@ interface ResultCardProps {
   isProcessing?: boolean; // External processing state (persists across tab switches)
 }
 
-export const ResultCard: React.FC<ResultCardProps> = ({ item, onCompleteBody, onDelete, onFinalize, onGenerate3D, onRefineOverlap, onRemoveBackground, selected, onSelect, onUpdate, showBoundingBox, isProcessing }) => {
+export const ResultCard: React.FC<ResultCardProps> = ({ item, onCompleteBody, onDelete, onGenerate3D, selected, onSelect, onUpdate, showBoundingBox, isProcessing }) => {
   const [isGenerating, setIsGenerating] = useState(false);
-  const [isFinalizing, setIsFinalizing] = useState(false);
   const [isGenerating3D, setIsGenerating3D] = useState(false);
-  const [isRefining, setIsRefining] = useState(false);
-  const [isRemovingBg, setIsRemovingBg] = useState(false);
   const [detectedBox, setDetectedBox] = useState<[number, number, number, number] | null>(null);
   const [fullObjectBox, setFullObjectBox] = useState<[number, number, number, number] | null>(null);
   const [imageAspectRatio, setImageAspectRatio] = useState<number | null>(null);
@@ -106,20 +100,6 @@ export const ResultCard: React.FC<ResultCardProps> = ({ item, onCompleteBody, on
     }
   };
 
-  const handleFinalizeClick = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!onFinalize || isFinalizing) return;
-
-    setIsFinalizing(true);
-    try {
-      await onFinalize(item);
-    } finally {
-      setIsFinalizing(false);
-    }
-  };
-
-
-
   const handleGenerate3DClick = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!onGenerate3D || isGenerating3D) return;
@@ -129,30 +109,6 @@ export const ResultCard: React.FC<ResultCardProps> = ({ item, onCompleteBody, on
       await onGenerate3D(item);
     } finally {
       setIsGenerating3D(false);
-    }
-  };
-
-  const handleRefineOverlapClick = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!onRefineOverlap || isRefining) return;
-
-    setIsRefining(true);
-    try {
-      await onRefineOverlap(item);
-    } finally {
-      setIsRefining(false);
-    }
-  };
-
-  const handleRemoveBgClick = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!onRemoveBackground || isRemovingBg) return;
-
-    setIsRemovingBg(true);
-    try {
-      await onRemoveBackground(item);
-    } finally {
-      setIsRemovingBg(false);
     }
   };
 
@@ -184,7 +140,7 @@ export const ResultCard: React.FC<ResultCardProps> = ({ item, onCompleteBody, on
           {/* Bounding Box Overlay */}
           {showBoundingBox && (() => {
             if (item.completionExpansionRatio !== undefined) {
-              const boxesToShow: any[] = [];
+              const boxesToShow: OverlayBox[] = [];
 
               // 1. Full Object Box (Purple) - Requested by User
               boxesToShow.push({
@@ -258,38 +214,6 @@ export const ResultCard: React.FC<ResultCardProps> = ({ item, onCompleteBody, on
         )}
 
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors flex items-end justify-end p-2 opacity-0 group-hover:opacity-100 gap-2 flex-wrap">
-          {onRemoveBackground && !isRemovingBg && (
-            <button
-              onClick={handleRemoveBgClick}
-              className="bg-white text-purple-600 p-2 rounded-full shadow-sm hover:bg-purple-50 transition-colors"
-              title="Remove Background"
-            >
-              <Sparkles size={16} />
-            </button>
-          )}
-
-          {onRefineOverlap && !isRefining && (
-            <button
-              onClick={handleRefineOverlapClick}
-              className="bg-white text-rose-600 p-2 rounded-full shadow-sm hover:bg-rose-50 transition-colors"
-              title="Remove overlap from objects in front"
-            >
-              <Eraser size={16} />
-            </button>
-          )}
-
-          {onFinalize && !isFinalizing && (
-            <button
-              onClick={handleFinalizeClick}
-              className="bg-white text-green-600 p-2 rounded-full shadow-sm hover:bg-green-50 transition-colors"
-              title="Trim excess & Mark as Complete"
-            >
-              <Scissors size={16} />
-            </button>
-          )}
-
-
-
           {onCompleteBody && !isGenerating && (
             <button
               onClick={handleGenerateClick}
@@ -340,31 +264,12 @@ export const ResultCard: React.FC<ResultCardProps> = ({ item, onCompleteBody, on
           </div>
         )}
 
-        {isFinalizing && (
-          <div className="absolute inset-0 bg-white/60 flex items-center justify-center">
-            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-green-600"></div>
-          </div>
-        )}
-
-
-
         {(isProcessing || isGenerating3D) && (
           <div className="absolute inset-0 bg-white/60 flex items-center justify-center">
             <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-orange-600"></div>
           </div>
         )}
 
-        {isRefining && (
-          <div className="absolute inset-0 bg-white/60 flex items-center justify-center">
-            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-rose-600"></div>
-          </div>
-        )}
-
-        {isRemovingBg && (
-          <div className="absolute inset-0 bg-white/60 flex items-center justify-center">
-            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-purple-600"></div>
-          </div>
-        )}
       </div>
       <div className="p-3 border-t border-slate-100">
         <p className="font-medium text-slate-800 capitalize text-center truncate" title={item.label}>

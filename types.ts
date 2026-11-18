@@ -1,5 +1,3 @@
-import React from 'react';
-
 export interface DetectedObject {
   label: string;
   box_2d: [number, number, number, number]; // [ymin, xmin, ymax, xmax]
@@ -7,34 +5,15 @@ export interface DetectedObject {
   description?: string; // Detailed description including pose, clothing, etc.
 }
 
-export interface Point3D {
-  x: number;
-  y: number;
-  z: number;
-}
-
-export interface Box3D {
-  min: Point3D;
-  max: Point3D;
-  center: Point3D;
-  dimensions: Point3D;
-  corners: Point3D[];
-}
-
 export interface CroppedObject extends DetectedObject {
   id: string;
   imageUrl: string;
   bgRemovalFailed?: boolean;
-  box_3d?: Box3D;
   completionExpansionRatio?: number;
   originalCroppedImageUrl?: string;
   originalPartBox2d?: [number, number, number, number]; // Position of original crop within completed image
   tightBox2d?: [number, number, number, number]; // Calculated tight bounding box of the object (purple box)
   isRefined?: boolean;
-}
-
-export interface AnalysisResult {
-  objects: DetectedObject[];
 }
 
 export interface Model3D {
@@ -65,15 +44,6 @@ export interface ProjectArchive {
   models3D: Model3D[];
   depthMapUrl?: string | null;
   processingTimes?: Record<string, number>;
-}
-
-export interface ProcessResult {
-  matchesCount: number;
-  goodMatchesCount: number;
-  processingTimeMs: number;
-  imageWidth: number;
-  imageHeight: number;
-  error?: string;
 }
 
 // ---- AI provider settings ----
