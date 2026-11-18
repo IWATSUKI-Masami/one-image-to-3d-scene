@@ -36,7 +36,7 @@
 
 ### 処理の流れ（サンプル画像）
 
-OpenAI（物体検出と画像補完）と TRELLIS.2（3D生成）を使った結果です。下の3Dシーンは、向きの推定を適用し、論文の配置（遠近による大きさの補正なし）で表示しています。
+OpenAI（物体検出と画像補完）と TRELLIS.2（3D生成）を使った結果です。3Dシーンは、遠近を考慮した配置（遠/近の比 1.5）と向きの推定を適用しています。
 
 <table>
   <tr>
@@ -49,7 +49,7 @@ OpenAI（物体検出と画像補完）と TRELLIS.2（3D生成）を使った�
   </tr>
   <tr>
     <td width="50%"><img src="docs/images/step5-depth-map.webp" alt="深度マップ"><br><sub><b>5. 深度推定</b>：Depth Anything V2（明るいほど手前）</sub></td>
-    <td width="50%"><img src="docs/images/scene-result.webp" alt="3Dシーン"><br><sub><b>7〜8. シーン合成と向きの推定</b>：8つのモデルを PC Box の奥行きに配置し、推定した向きに回転</sub></td>
+    <td width="50%"><img src="docs/images/scene-result.webp" alt="3Dシーン"><br><sub><b>7〜8. シーン合成と向きの推定</b>：人物、花瓶、カップを遠近を考慮して PC Box の奥行きに配置し、推定した向きに回転（2人が向かい合う姿勢を再現）</sub></td>
   </tr>
 </table>
 

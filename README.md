@@ -36,7 +36,7 @@ The sample photo [`samples/two-people-at-table.webp`](samples/two-people-at-tabl
 
 ### Walkthrough (sample photo)
 
-Results with OpenAI (detection and completion) and TRELLIS.2 (3D generation). The scene below uses orientation estimation and the paper's placement (without the perspective size correction).
+Results with OpenAI (detection and completion) and TRELLIS.2 (3D generation). The scene uses perspective placement (far/near ratio 1.5) and orientation estimation.
 
 <table>
   <tr>
@@ -49,7 +49,7 @@ Results with OpenAI (detection and completion) and TRELLIS.2 (3D generation). Th
   </tr>
   <tr>
     <td width="50%"><img src="docs/images/step5-depth-map.webp" alt="Depth map"><br><sub><b>5. Depth estimation</b> — Depth Anything V2 (brighter = nearer)</sub></td>
-    <td width="50%"><img src="docs/images/scene-result.webp" alt="3D scene"><br><sub><b>7–8. Scene composition and orientation</b> — all 8 models placed at the depth of their PC Boxes and rotated by their estimated orientation</sub></td>
+    <td width="50%"><img src="docs/images/scene-result.webp" alt="3D scene"><br><sub><b>7–8. Scene composition and orientation</b> — people, vase and cups placed with perspective at the depth of their PC Boxes and rotated by their estimated orientation (the face-to-face pose of the two people is recovered)</sub></td>
   </tr>
 </table>
 
