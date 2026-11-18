@@ -26,6 +26,20 @@ This system scales and places each model so that the object region in the comple
 - The official Space [TencentARC/Pixal3D](https://huggingface.co/spaces/TencentARC/Pixal3D) is running on ZeroGPU and exposes API endpoints `preprocess`, `generate_3d` and `extract_glb_api` — the same structure as TRELLIS.2, so it can be added the same way (no local GPU needed).
 - Things to check when implementing: parameters of `generate_3d`, the model orientation in the scene, and the alignment with tightBox2d.
 
+### Fitting to the point cloud
+
+Pixal3D could also give position, orientation and size together, when combined with registration to the point cloud:
+
+1. **Initial pose from Pixal3D**: if the model is generated in the frame of the input image's camera, its orientation relative to the camera is already correct, and Orient Anything (item 4) would no longer be needed.
+2. **Visible surface**: take the part of the model visible from that camera.
+3. **Registration**: fit that surface to the object's masked point cloud (from the depth map) with a similarity transform (scale, rotation, translation; ICP / Umeyama). This gives position, size and fine orientation at once. ICP fails from a poor initial orientation; Pixal3D's alignment provides a good one. Since only the visible surfaces are matched, it may also help partially visible objects (item 3).
+
+To check first:
+
+- Whether the output GLB stays in the camera frame or is normalized in size and position.
+- The input is the completed crop, not the original photo. The crop's position in the photo gives the camera transform, but the image model may redraw or re-center the object during completion.
+- The point cloud depends on the assumptions of item 5 (field of view, far/near ratio).
+
 ## 2. Local 3D generation with ComfyUI
 
 Add **ComfyUI (local)** as an option for 3D generation, next to the Hugging Face Spaces. The Spaces stay the default, because most users do not have a suitable GPU.
