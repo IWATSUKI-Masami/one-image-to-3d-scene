@@ -14,9 +14,9 @@ This is the reference implementation of the paper listed in [Citation](#citation
 
 | # | Phase | Method |
 |---|---|---|
-| 1 | Object detection | Vision-Language Model (Google Gemini) returns bounding boxes, labels and detailed descriptions (pose, action, clothing) |
+| 1 | Object detection | Vision-Language Model (Gemini, Claude or OpenAI) returns bounding boxes, labels and detailed descriptions (pose, action, clothing) |
 | 2 | Cropping | HTML5 Canvas API |
-| 3 | Image completion | Generative AI outpainting (Gemini image generation) restores occluded / cut-off parts while preserving pose, followed by background removal (BRIA RMBG 2.0) |
+| 3 | Image completion | Generative AI outpainting (Gemini or OpenAI image generation) restores occluded / cut-off parts while preserving pose, followed by background removal (BRIA RMBG 2.0) |
 | 4 | Feature matching | AKAZE (OpenCV.js) + Lowe's ratio test + RANSAC homography to localize the original crop inside the completed image |
 | 5 | Depth estimation | Depth Anything V2; object depth is the median depth inside the object mask |
 | 6 | 3D generation | TRELLIS.2 or TripoSR (local) → GLB |
@@ -25,7 +25,7 @@ This is the reference implementation of the paper listed in [Citation](#citation
 ## Requirements
 
 - Node.js 18 or later
-- **Google Gemini API key** (required)
+- **An API key for at least one AI provider**: Google Gemini, Anthropic (Claude) or OpenAI. Gemini or OpenAI is needed for image completion.
 - **Hugging Face token** (required for TRELLIS.2; recommended for the other Hugging Face Spaces, since ZeroGPU usage is counted against your own quota)
 - Optional: a local [TripoSR](https://github.com/VAST-AI-Research/TripoSR) Gradio server (default `http://127.0.0.1:7860/`)
 
@@ -58,6 +58,20 @@ Open `http://localhost:3000` in your browser.
 > [!WARNING]
 > Variables prefixed with `VITE_` are **embedded into the JavaScript bundle** at build time, and API calls are made directly from the browser. This is fine for running the app locally. **Do not deploy a build that contains your keys to a public server** — anyone could read them. For a public deployment, leave `.env.local` empty and let each user enter their own keys in the UI.
 
+## AI providers and models
+
+Click the AI button in the header to open **AI Settings**, where you choose the providers, enter API keys and change model IDs.
+
+| Task | Providers | Default model |
+|---|---|---|
+| Object detection, canvas expansion estimate, completion check | Gemini / Claude / OpenAI | `gemini-pro-latest` / `claude-opus-5-5` / `gpt-5.6-sol` |
+| Image completion (outpainting) | Gemini / OpenAI | `gemini-3-pro-image` / `gpt-image-2.6-sunburst` |
+
+- Claude cannot generate images, so it is available only for detection and checks.
+- Model IDs change often. If a model is retired, type a new ID in AI Settings; no code change is needed.
+- The results in the paper were obtained with `gemini-3-pro-preview` and `gemini-3-pro-image-preview` (both since shut down). Other providers and models use the same prompts, but detection accuracy and pose preservation may differ.
+- API keys are kept in memory only. Providers and model IDs are remembered in the browser.
+
 ## Usage
 
 1. **Detect & Crop** — upload an image and analyze the scene. Detected objects are cropped automatically.
@@ -73,7 +87,8 @@ Projects (images, depth map, models and scene layout) can be saved and loaded.
 ├── App.tsx                 # Main application (UI and workflow)
 ├── components/             # React components (3D viewers, cards, overlays)
 ├── services/
-│   └── geminiService.ts    # Object detection and image completion with Gemini
+│   ├── aiService.ts        # Prompts for detection, completion and checks
+│   └── ai/                 # Provider layer (Gemini / Claude / OpenAI) and default models
 ├── utils.ts                # Cropping, AKAZE matching, depth, 3D generation APIs
 ├── types.ts                # Type definitions
 └── docs/                   # Development history
@@ -100,7 +115,7 @@ If you use this software in your research, please cite:
 
 [MIT](LICENSE)
 
-This repository contains only the application code. The external models and APIs it calls (Gemini, TRELLIS.2, TripoSR, Depth Anything V2, BRIA RMBG 2.0, etc.) are governed by their own licenses and terms of use; check them before use, especially for commercial purposes.
+This repository contains only the application code. The external models and APIs it calls (Gemini, Claude, OpenAI, TRELLIS.2, TripoSR, Depth Anything V2, BRIA RMBG 2.0, etc.) are governed by their own licenses and terms of use; check them before use, especially for commercial purposes.
 
 ## Changelog
 

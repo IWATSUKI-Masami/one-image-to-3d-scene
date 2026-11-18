@@ -6,9 +6,11 @@ import { Model3DCard } from './components/Model3DCard';
 
 import { DepthOnlyScene } from './components/DepthOnlyScene';
 import { BoundingBoxOverlay } from './components/BoundingBoxOverlay';
-import { detectObjectsInImage, generateCompletion, estimateCanvasExpansion, verifyCompletion } from './services/geminiService';
+import { detectObjectsInImage, generateCompletion, estimateCanvasExpansion, verifyCompletion } from './services/aiService';
+import { loadAISettings, saveAISettings, hasRequiredKeys, VISION_PROVIDER_LABELS, IMAGE_PROVIDER_LABELS } from './services/ai/models';
+import { AISettingsDialog } from './components/AISettingsDialog';
 import { cropObjectsFromImage, removeBackgroundWithRembg, refineOverlaps, refineSingleOverlap, trimTransparentEdges, generate3DModelWithTripoSRLocal, generate3DModelWithTrellis, blobUrlToDataUrl, dataUrlToBlobUrl, generateDepthMap, prepareImageForCompletion, calculateTightBoundingBox } from './utils';
-import { DetectedObject, CroppedObject, Model3D, ProjectArchive } from './types';
+import { DetectedObject, CroppedObject, Model3D, ProjectArchive, AISettings } from './types';
 import { Scan, Sparkles, AlertCircle, Layers, Image as ImageIcon, Key, User, Box, ArrowLeft, Upload, Eraser, Plug, Wand2, RefreshCw, Star, Download, LayoutGrid, MonitorPlay, Cuboid, Save, FolderOpen, Eye, Trash2, Scissors } from 'lucide-react';
 
 type AppMode = 'landing' | 'analyze' | 'batch-remove' | 'complete-body' | 'generate-3d';
@@ -19,10 +21,11 @@ const App: React.FC = () => {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [originalImageDimensions, setOriginalImageDimensions] = useState<{ width: number, height: number } | null>(null);
 
-  // Auth state
-  const [hasGeminiKey, setHasGeminiKey] = useState(false);
-  const [isCheckingKey, setIsCheckingKey] = useState(true);
-  const [geminiApiKey, setGeminiApiKey] = useState(import.meta.env.VITE_GEMINI_API_KEY || '');
+  // AI provider settings (API keys, providers, model IDs)
+  const [aiSettings, setAISettings] = useState<AISettings>(() => loadAISettings());
+  const [showAISettings, setShowAISettings] = useState(false);
+  const hasAIKeys = hasRequiredKeys(aiSettings);
+  useEffect(() => { saveAISettings(aiSettings); }, [aiSettings]);
 
   // Analysis states
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -238,57 +241,20 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    const checkApiKey = async () => {
-      setIsCheckingKey(true);
-      try {
-        if (window.aistudio?.hasSelectedApiKey) {
-          const hasKey = await window.aistudio.hasSelectedApiKey();
-          setHasGeminiKey(hasKey);
-        } else {
-          setHasGeminiKey(!!import.meta.env.VITE_GEMINI_API_KEY || !!geminiApiKey);
-        }
-      } catch (e) {
-        console.error("Failed to check API key", e);
-        setHasGeminiKey(false);
-      } finally {
-        setIsCheckingKey(false);
-      }
-    };
-    checkApiKey();
-
     return () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       if (completionOriginalUrl) URL.revokeObjectURL(completionOriginalUrl);
     };
-  }, [previewUrl, completionOriginalUrl, geminiApiKey]);
+  }, [previewUrl, completionOriginalUrl]);
 
-
-
-  const handleConnectGemini = async () => {
-    if (window.aistudio?.openSelectKey) {
-      try {
-        await window.aistudio.openSelectKey();
-        if (window.aistudio.hasSelectedApiKey) {
-          const hasKey = await window.aistudio.hasSelectedApiKey();
-          setHasGeminiKey(hasKey);
-        } else {
-          setHasGeminiKey(true);
-        }
-      } catch (e) {
-        console.error("Failed to select key", e);
-        setHasGeminiKey(false);
-      }
-    } else {
-      alert("API Key selection not available in this environment.");
-    }
-  };
+  const openAISettings = () => setShowAISettings(true);
 
   const handleAnalysisImageSelected = async (files: File[]) => {
     const file = files[0];
     if (!file) return;
 
-    if (!hasGeminiKey) {
-      handleConnectGemini();
+    if (!hasAIKeys) {
+      openAISettings();
       return;
     }
 
@@ -328,7 +294,7 @@ const App: React.FC = () => {
   const startAnalysis = async (file: File, url: string) => {
     const t0 = performance.now();
     try {
-      const objects = await detectObjectsInImage(file, geminiApiKey);
+      const objects = await detectObjectsInImage(file, aiSettings);
       setDetectedObjects(objects);
 
       if (objects.length === 0) {
@@ -342,7 +308,7 @@ const App: React.FC = () => {
 
     } catch (err) {
       console.error(err);
-      setError("Failed to analyze image. Please check your Gemini API key connection.");
+      setError(`Failed to analyze image: ${err instanceof Error ? err.message : String(err)}. Check the API key and model in AI Settings.`);
     } finally {
       const elapsed = (performance.now() - t0) / 1000;
       console.log(`[Timer] Object Detection: ${elapsed.toFixed(1)}s`);
@@ -552,8 +518,8 @@ const App: React.FC = () => {
     const file = files[0];
     if (!file) return;
 
-    if (!hasGeminiKey) {
-      handleConnectGemini();
+    if (!hasAIKeys) {
+      openAISettings();
       return;
     }
 
@@ -613,7 +579,7 @@ const App: React.FC = () => {
       // Prepare image (pad if needed to track expansion)
       const { imageUrl: preparedUrl, expansionRatio } = await prepareImageForCompletion(url);
 
-      const generatedUrl = await generateCompletion(preparedUrl, label, type, geminiApiKey);
+      const generatedUrl = await generateCompletion(preparedUrl, label, type, aiSettings);
 
       const newObject: CroppedObject = {
         id: `comp-${Date.now()}`,
@@ -641,8 +607,8 @@ const App: React.FC = () => {
 
 
   const handleCompleteBody = async (item: CroppedObject) => {
-    if (!hasGeminiKey) {
-      handleConnectGemini();
+    if (!hasAIKeys) {
+      openAISettings();
       return;
     }
 
@@ -658,13 +624,13 @@ const App: React.FC = () => {
     let detectedTightBox2d: [number, number, number, number] | undefined;
 
     try {
-      // Step 1: Estimate canvas expansion needed using Gemini
+      // Step 1: Estimate canvas expansion needed using the vision provider
       console.log('[Complete Body] Estimating canvas expansion...');
       const { verticalRatio, horizontalRatio } = await estimateCanvasExpansion(
         item.imageUrl,
         item.label,
         item.type,
-        geminiApiKey
+        aiSettings
       );
 
       while (attempt <= MAX_RETRIES) {
@@ -688,7 +654,7 @@ const App: React.FC = () => {
           preparedUrl,
           item.label,
           item.type,
-          geminiApiKey,
+          aiSettings,
           item.description
         );
         const genElapsed = (performance.now() - tGen) / 1000;
@@ -774,7 +740,7 @@ const App: React.FC = () => {
           transparentUrl,
           item.label,
           item.type,
-          geminiApiKey
+          aiSettings
         );
 
         if (isComplete || attempt > MAX_RETRIES) {
@@ -823,8 +789,8 @@ const App: React.FC = () => {
   };
 
   const handleBatchCompleteExtracted = async () => {
-    if (!hasGeminiKey) {
-      handleConnectGemini();
+    if (!hasAIKeys) {
+      openAISettings();
       return;
     }
 
@@ -848,7 +814,7 @@ const App: React.FC = () => {
           const { imageUrl: preparedUrl, expansionRatio } = await prepareImageForCompletion(item.imageUrl);
 
           const tGen2 = performance.now();
-          const generatedImageUrl = await generateCompletion(preparedUrl, item.label, item.type, geminiApiKey, item.description);
+          const generatedImageUrl = await generateCompletion(preparedUrl, item.label, item.type, aiSettings, item.description);
           const genElapsed2 = (performance.now() - tGen2) / 1000;
           console.log(`[Timer] Generation (${item.label}): ${genElapsed2.toFixed(1)}s`);
           setProcessingTimes(prev => new Map(prev).set(`Generation: ${item.label}`, genElapsed2));
@@ -1256,20 +1222,23 @@ const App: React.FC = () => {
             </div>
 
             {/* Settings Area */}
-            {!isCheckingKey && (
+            {(
               <div className="flex flex-col items-end gap-1.5">
-                {/* Row 1: Gemini + HF Token + BG Removal */}
+                {/* Row 1: AI settings + HF Token */}
                 <div className="flex items-center gap-3 bg-slate-50 px-3 py-1 rounded-lg border border-slate-100">
-                  {/* Gemini */}
+                  {/* AI providers */}
                   <button
-                    onClick={handleConnectGemini}
-                    className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium transition-colors border ${hasGeminiKey
+                    onClick={openAISettings}
+                    title="AI Settings: providers, API keys and models"
+                    className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium transition-colors border ${hasAIKeys
                       ? 'bg-green-100 text-green-700 border-green-200'
                       : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
                       }`}
                   >
-                    <div className={`w-1.5 h-1.5 rounded-full ${hasGeminiKey ? 'bg-green-500' : 'bg-slate-300'}`} />
-                    {hasGeminiKey ? 'Gemini' : 'Connect'}
+                    <div className={`w-1.5 h-1.5 rounded-full ${hasAIKeys ? 'bg-green-500' : 'bg-slate-300'}`} />
+                    {hasAIKeys
+                      ? `AI: ${VISION_PROVIDER_LABELS[aiSettings.visionProvider]} / ${IMAGE_PROVIDER_LABELS[aiSettings.imageProvider]}`
+                      : 'Set API Keys'}
                   </button>
 
                   {/* HF Token */}
@@ -1355,22 +1324,22 @@ const App: React.FC = () => {
               )}
             </div>
 
-            {!hasGeminiKey && !isCheckingKey && (
+            {!hasAIKeys && (
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 text-center max-w-lg mx-auto">
-                <h3 className="text-lg font-bold text-amber-800 mb-2">Google API Key Required</h3>
+                <h3 className="text-lg font-bold text-amber-800 mb-2">API Key Required</h3>
                 <p className="text-amber-700 mb-4 text-sm">
-                  To use the AI Object Detection and Image Generation features, you must connect your Google Cloud Project API Key.
+                  Object detection and image completion use Gemini, Claude or OpenAI. Choose the providers and enter the API keys in AI Settings.
                 </p>
                 <button
-                  onClick={handleConnectGemini}
+                  onClick={openAISettings}
                   className="bg-amber-600 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-amber-700 transition-colors shadow-sm inline-flex items-center gap-2"
                 >
-                  <Plug size={18} /> Connect API Key
+                  <Plug size={18} /> Open AI Settings
                 </button>
               </div>
             )}
 
-            <div className={`grid md:grid-cols-2 lg:grid-cols-3 gap-6 ${!hasGeminiKey ? 'opacity-50 pointer-events-none grayscale-[0.5]' : ''}`}>
+            <div className={`grid md:grid-cols-2 lg:grid-cols-3 gap-6 ${!hasAIKeys ? 'opacity-50 pointer-events-none grayscale-[0.5]' : ''}`}>
               {/* Option 1: AI Analysis */}
               <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 hover:shadow-md transition-shadow flex flex-col h-full">
                 <div className="flex-1 space-y-4 mb-6">
@@ -1862,13 +1831,13 @@ const App: React.FC = () => {
 
                           <button
                             onClick={handleBatchCompleteExtracted}
-                            disabled={isBatchCompleting || !hasGeminiKey || filteredCroppedImages.length === 0}
+                            disabled={isBatchCompleting || !hasAIKeys || filteredCroppedImages.length === 0}
                             className={`text-xs px-3 py-1.5 rounded-full font-medium transition-all flex items-center gap-1.5 whitespace-nowrap
-                             ${(isBatchCompleting || !hasGeminiKey || filteredCroppedImages.length === 0)
+                             ${(isBatchCompleting || !hasAIKeys || filteredCroppedImages.length === 0)
                                 ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
                                 : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm'
                               }`}
-                            title={!hasGeminiKey ? "Connect Gemini API Key first" : `Complete ${selectedItems.size > 0 ? selectedItems.size : 'all'} items (Skip BG Removal)`}
+                            title={!hasAIKeys ? "Set the API keys in AI Settings first" : `Complete ${selectedItems.size > 0 ? selectedItems.size : 'all'} items (Skip BG Removal)`}
                           >
                             <Wand2 size={12} />
                             {selectedItems.size > 0 ? `Complete (${selectedItems.size})` : 'Complete All'}
@@ -2222,6 +2191,14 @@ const App: React.FC = () => {
           animation: shimmer 1.5s infinite;
         }
       `}</style>
+
+      {showAISettings && (
+        <AISettingsDialog
+          settings={aiSettings}
+          onChange={setAISettings}
+          onClose={() => setShowAISettings(false)}
+        />
+      )}
     </div >
   );
 };

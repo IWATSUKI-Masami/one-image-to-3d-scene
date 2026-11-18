@@ -1,28 +1,73 @@
-import { GoogleGenAI, Type } from "@google/genai";
-import { DetectedObject } from "../types";
-import { fileToGenerativePart, urlToBase64 } from "../utils";
+/**
+ * AI tasks of the pipeline, independent of the provider:
+ *
+ * - detectObjectsInImage   (Phase 1: VLM object detection)        Gemini / Claude / OpenAI
+ * - estimateCanvasExpansion (Phase 3: canvas size before completion) Gemini / Claude / OpenAI
+ * - generateCompletion      (Phase 3: image completion/outpainting)  Gemini / OpenAI
+ * - verifyCompletion        (Phase 3: check the completed image)     Gemini / Claude / OpenAI
+ *
+ * The prompts are the ones used in the paper (KBSE2025-61); only the JSON output
+ * format is now enforced with each provider's structured-output feature.
+ */
+import { AISettings, DetectedObject } from "../types";
+import { analyzeImageJson, generateImage, loadImageData, JsonSchema } from "./ai/providers";
 
-const MODEL_NAME = 'gemini-3-pro-preview';
-const IMAGE_GEN_MODEL = 'gemini-3-pro-image-preview';
+// ---------------------------------------------------------------------------
+// JSON schemas (compatible with Gemini, Claude and OpenAI strict mode)
+// ---------------------------------------------------------------------------
 
-export const detectObjectsInImage = async (file: File, apiKey?: string): Promise<DetectedObject[]> => {
-  try {
-    // Initialize inside function to ensure we use the latest API Key from process.env or argument
-    const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
-    const base64Data = await fileToGenerativePart(file);
-
-    const response = await ai.models.generateContent({
-      model: MODEL_NAME,
-      contents: {
-        parts: [
-          {
-            inlineData: {
-              mimeType: file.type,
-              data: base64Data.inlineData.data
-            }
+const DETECTION_SCHEMA: JsonSchema = {
+  type: "object",
+  properties: {
+    objects: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          label: { type: "string", description: "The descriptive name of the detected object" },
+          type: { type: "string", enum: ["person", "object"], description: "Category of the object" },
+          box_2d: {
+            type: "array",
+            description: "Tight bounding box [ymin, xmin, ymax, xmax], normalized 0.0-1.0",
+            items: { type: "number" },
           },
-          {
-            text: `Analyze this image and detect the main distinct objects. 
+          description: { type: "string", description: "Detailed description including pose, action, clothing, and colors" },
+        },
+        required: ["label", "type", "box_2d", "description"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["objects"],
+  additionalProperties: false,
+};
+
+const EXPANSION_SCHEMA: JsonSchema = {
+  type: "object",
+  properties: {
+    bottomCutoffPercent: { type: "number" },
+    topCutoffPercent: { type: "number" },
+    sideCutoffPercent: { type: "number" },
+  },
+  required: ["bottomCutoffPercent", "topCutoffPercent", "sideCutoffPercent"],
+  additionalProperties: false,
+};
+
+const VERIFY_SCHEMA: JsonSchema = {
+  type: "object",
+  properties: {
+    isComplete: { type: "boolean" },
+    missingParts: { type: "array", items: { type: "string" } },
+  },
+  required: ["isComplete", "missingParts"],
+  additionalProperties: false,
+};
+
+// ---------------------------------------------------------------------------
+// Phase 1: object detection
+// ---------------------------------------------------------------------------
+
+const DETECTION_PROMPT = `Analyze this image and detect the main distinct objects. 
             
             CRITICAL INSTRUCTION: Group related items that physically belong together (e.g., flowers in a vase, a cup on a saucer) into a SINGLE object.
             
@@ -36,69 +81,46 @@ export const detectObjectsInImage = async (file: File, apiKey?: string): Promise
                - VERIFY: The aspect ratio of the box MUST match the object's actual shape.
             4. 'description': A DETAILED visual description. MUST include POSE (sitting/standing), ACTION, and CLOTHING. Do NOT just repeat the label.
             
-            Return the result as a JSON list.`
-          }
-        ]
-      },
-      config: {
-        temperature: 0,
-        seed: 1,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              label: {
-                type: Type.STRING,
-                description: "The descriptive name of the detected object"
-              },
-              type: {
-                type: Type.STRING,
-                enum: ["person", "object"],
-                description: "Category of the object"
-              },
-              box_2d: {
-                type: Type.ARRAY,
-                description: "Tight bounding box [ymin, xmin, ymax, xmax]",
-                items: {
-                  type: Type.NUMBER
-                }
-              },
-              description: {
-                type: Type.STRING,
-                description: "Detailed description including pose, action, clothing, and colors"
-              }
-            },
-            required: ["label", "type", "box_2d", "description"]
-          }
-        }
-      }
-    });
+            Return the result as JSON in the form {"objects": [...]}.`;
 
-    const jsonText = response.text;
-    if (!jsonText) {
-      throw new Error("No data returned from API");
+export const detectObjectsInImage = async (file: File, settings: AISettings): Promise<DetectedObject[]> => {
+  try {
+    const url = URL.createObjectURL(file);
+    let image;
+    try {
+      image = await loadImageData(url);
+    } finally {
+      URL.revokeObjectURL(url);
     }
 
-    const rawData = JSON.parse(jsonText) as DetectedObject[];
-    console.log("Gemini detection response:", JSON.stringify(rawData, null, 2));
-    return rawData;
-
+    const result = await analyzeImageJson<{ objects: DetectedObject[] }>(
+      settings, image, DETECTION_PROMPT, DETECTION_SCHEMA,
+      { schemaName: "detected_objects", deterministic: true, effort: "high" },
+    );
+    const objects = result.objects || [];
+    console.log(`[Detection:${settings.visionProvider}] response:`, JSON.stringify(objects, null, 2));
+    return objects;
   } catch (error) {
     console.error("Error detecting objects:", error);
     throw error;
   }
 };
 
-export const generateCompletion = async (imageUrl: string, label: string, type: 'person' | 'object', apiKey?: string, description?: string): Promise<string> => {
+// ---------------------------------------------------------------------------
+// Phase 3: image completion
+// ---------------------------------------------------------------------------
+
+export const generateCompletion = async (
+  imageUrl: string,
+  label: string,
+  type: 'person' | 'object',
+  settings: AISettings,
+  description?: string,
+): Promise<string> => {
   try {
-    // Initialize inside function to ensure we use the latest API Key from process.env or argument
-    const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
-    const base64Data = await urlToBase64(imageUrl);
+    const image = await loadImageData(imageUrl);
 
     let prompt = '';
-
     if (type === 'person') {
       // Include description with pose information if available
       const poseInfo = description ? `
@@ -171,39 +193,8 @@ export const generateCompletion = async (imageUrl: string, label: string, type: 
         Output: A clean, isolated sprite of the complete object.`;
     }
 
-    const response = await ai.models.generateContent({
-      model: IMAGE_GEN_MODEL,
-      contents: {
-        parts: [
-          {
-            inlineData: {
-              mimeType: 'image/png',
-              data: base64Data
-            }
-          },
-          {
-            text: prompt
-          }
-        ]
-      },
-      config: {
-        imageConfig: {
-          // Use 9:16 for persons (more vertical space for sitting figures)
-          // Use 3:4 for objects
-          aspectRatio: type === 'person' ? "9:16" : "3:4"
-        }
-      }
-    });
-
-    // Extract image from response
-    for (const part of response.candidates?.[0]?.content?.parts || []) {
-      if (part.inlineData) {
-        return `data:image/png;base64,${part.inlineData.data}`;
-      }
-    }
-
-    throw new Error("No image generated.");
-
+    // Use 9:16 for persons (more vertical space for sitting figures), 3:4 for objects
+    return await generateImage(settings, image, prompt, type === 'person' ? '9:16' : '3:4');
   } catch (error) {
     console.error("Error generating completion:", error);
     throw error;
@@ -212,17 +203,16 @@ export const generateCompletion = async (imageUrl: string, label: string, type: 
 
 /**
  * Estimate the canvas expansion needed to complete a cropped image.
- * Uses Gemini to analyze what percentage of the object is visible and what's cut off.
+ * Analyzes what percentage of the object is visible and what's cut off.
  */
 export const estimateCanvasExpansion = async (
   imageUrl: string,
   label: string,
   type: 'person' | 'object',
-  apiKey?: string
+  settings: AISettings,
 ): Promise<{ verticalRatio: number, horizontalRatio: number }> => {
   try {
-    const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
-    const base64Data = await urlToBase64(imageUrl);
+    const image = await loadImageData(imageUrl);
 
     const prompt = type === 'person'
       ? `Analyze this cropped image of "${label}" (a person).
@@ -256,35 +246,20 @@ Return ONLY valid JSON:
   "sideCutoffPercent": <0-50>
 }`;
 
-    const response = await ai.models.generateContent({
-      model: MODEL_NAME,
-      contents: {
-        parts: [
-          { inlineData: { mimeType: 'image/png', data: base64Data } },
-          { text: prompt }
-        ]
-      }
-    });
+    const parsed = await analyzeImageJson<{ bottomCutoffPercent: number, topCutoffPercent: number, sideCutoffPercent: number }>(
+      settings, image, prompt, EXPANSION_SCHEMA, { schemaName: "canvas_expansion", effort: "low" },
+    );
+    console.log('[Canvas Estimate] Response:', parsed);
 
-    const text = response.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    console.log('[Canvas Estimate] Raw response:', text);
+    const verticalRatio = 1 + (parsed.bottomCutoffPercent + parsed.topCutoffPercent) / 100;
+    const horizontalRatio = 1 + (parsed.sideCutoffPercent * 2) / 100;
 
-    // Parse JSON from response
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      const verticalRatio = 1 + (parsed.bottomCutoffPercent + parsed.topCutoffPercent) / 100;
-      const horizontalRatio = 1 + (parsed.sideCutoffPercent * 2) / 100;
+    console.log(`[Canvas Estimate] Vertical: ${(verticalRatio * 100).toFixed(0)}%, Horizontal: ${(horizontalRatio * 100).toFixed(0)}%`);
 
-      console.log(`[Canvas Estimate] Vertical: ${(verticalRatio * 100).toFixed(0)}%, Horizontal: ${(horizontalRatio * 100).toFixed(0)}%`);
-
-      return {
-        verticalRatio: Math.min(Math.max(verticalRatio, 1.2), 3.5), // Clamp between 120% and 350%
-        horizontalRatio: Math.min(Math.max(horizontalRatio, 1.1), 2.0) // Clamp between 110% and 200%
-      };
-    }
-
-    throw new Error('Failed to parse expansion estimate');
+    return {
+      verticalRatio: Math.min(Math.max(verticalRatio, 1.2), 3.5), // Clamp between 120% and 350%
+      horizontalRatio: Math.min(Math.max(horizontalRatio, 1.1), 2.0) // Clamp between 110% and 200%
+    };
   } catch (error) {
     console.warn('[Canvas Estimate] Failed, using default:', error);
     // Fallback to generous defaults
@@ -300,11 +275,10 @@ export const verifyCompletion = async (
   imageUrl: string,
   label: string,
   type: 'person' | 'object',
-  apiKey?: string
+  settings: AISettings,
 ): Promise<{ isComplete: boolean, missingParts: string[] }> => {
   try {
-    const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
-    const base64Data = await urlToBase64(imageUrl);
+    const image = await loadImageData(imageUrl);
 
     const prompt = type === 'person'
       ? `Analyze this image of "${label}" (a person).
@@ -333,31 +307,14 @@ Return ONLY valid JSON:
   "missingParts": ["base", "top", etc] or []
 }`;
 
-    const response = await ai.models.generateContent({
-      model: MODEL_NAME,
-      contents: {
-        parts: [
-          { inlineData: { mimeType: 'image/png', data: base64Data } },
-          { text: prompt }
-        ]
-      }
-    });
-
-    const text = response.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    console.log('[Completion Verify] Raw response:', text);
-
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      console.log(`[Completion Verify] Complete: ${parsed.isComplete}, Missing: ${parsed.missingParts?.join(', ') || 'none'}`);
-      return {
-        isComplete: !!parsed.isComplete,
-        missingParts: parsed.missingParts || []
-      };
-    }
-
-    // If parsing fails, assume complete
-    return { isComplete: true, missingParts: [] };
+    const parsed = await analyzeImageJson<{ isComplete: boolean, missingParts: string[] }>(
+      settings, image, prompt, VERIFY_SCHEMA, { schemaName: "completion_check", effort: "low" },
+    );
+    console.log(`[Completion Verify] Complete: ${parsed.isComplete}, Missing: ${parsed.missingParts?.join(', ') || 'none'}`);
+    return {
+      isComplete: !!parsed.isComplete,
+      missingParts: parsed.missingParts || []
+    };
   } catch (error) {
     console.warn('[Completion Verify] Failed, assuming complete:', error);
     return { isComplete: true, missingParts: [] };

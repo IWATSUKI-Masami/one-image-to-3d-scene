@@ -4,6 +4,11 @@ All notable changes to this project. Versions up to v1.18.1 were developed in th
 
 
 ## Unreleased
+- **Added** Claude (Anthropic) and OpenAI as AI providers. Object detection and checks can use Gemini, Claude or OpenAI; image completion can use Gemini or OpenAI. Choose providers, enter API keys and change model IDs in the new **AI Settings** dialog.
+- **Changed** default Gemini models: `gemini-3-pro-preview` → `gemini-pro-latest`, `gemini-3-pro-image-preview` (shut down) → `gemini-3-pro-image`.
+- **Changed** JSON output of all vision tasks is now enforced with each provider's structured-output feature. The detection result is wrapped as `{"objects": [...]}`.
+- **Changed** the Gemini API key can now be entered in the app (previously only via `.env.local` or Google AI Studio). Removed the Google AI Studio key-selection integration.
+- **Updated** `@google/genai` 1.30 → 3.4; added `@anthropic-ai/sdk` and `openai`; removed the unused `@google/generative-ai`.
 - **Removed** the automatic fallback from the official Hugging Face Spaces (BRIA RMBG 2.0, Depth Anything V2, TRELLIS.2) to the author's private duplicate Spaces.
 - **Removed** the commercial API integrations: Stability AI API (3D generation) and Remove.bg (background removal). Background removal now always uses BRIA RMBG 2.0.
 - **Removed** Stable Fast 3D (it depended on the author's private Space). 3D generation now uses TRELLIS.2 or a local TripoSR server.

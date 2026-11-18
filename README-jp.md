@@ -14,9 +14,9 @@
 
 | # | フェーズ | 手法 |
 |---|---|---|
-| 1 | 物体検出 | VLM（Google Gemini）でバウンディングボックス、ラベル、詳細な説明（姿勢・動作・服装）を取得 |
+| 1 | 物体検出 | VLM（Gemini、Claude、OpenAIのいずれか）でバウンディングボックス、ラベル、詳細な説明（姿勢・動作・服装）を取得 |
 | 2 | 切り出し | HTML5 Canvas API |
-| 3 | 画像補完 | 生成AI（Geminiの画像生成）によるアウトペインティングで、姿勢を保ったまま隠れた部分や切れた部分を復元し、背景を除去（BRIA RMBG 2.0） |
+| 3 | 画像補完 | 生成AI（Gemini または OpenAI の画像生成）によるアウトペインティングで、姿勢を保ったまま隠れた部分や切れた部分を復元し、背景を除去（BRIA RMBG 2.0） |
 | 4 | 特徴点マッチング | AKAZE（OpenCV.js）、Lowe's Ratio Test、RANSACによるホモグラフィ推定で、元の切り出し画像が補完画像のどこにあたるかを特定 |
 | 5 | 深度推定 | Depth Anything V2。物体の深度はマスク内の深度の中央値 |
 | 6 | 3D生成 | TRELLIS.2 または TripoSR（ローカル）でGLBを生成 |
@@ -25,7 +25,7 @@
 ## 必要な環境
 
 - Node.js 18以上
-- **Google Gemini APIキー**（必須）
+- **AIプロバイダーのAPIキー**（Google Gemini、Anthropic（Claude）、OpenAI のうち使うもの）。画像補完には Gemini か OpenAI が必要です。
 - **Hugging Face トークン**（TRELLIS.2では必須。他のHugging Face Spacesでも推奨。ZeroGPUの利用分が各自の枠で計上されます）
 - 任意: ローカルの [TripoSR](https://github.com/VAST-AI-Research/TripoSR) Gradioサーバー（既定値 `http://127.0.0.1:7860/`）
 
@@ -58,6 +58,20 @@ npm run dev
 > [!WARNING]
 > `VITE_` で始まる環境変数は、ビルド時に**JavaScriptにそのまま埋め込まれます**。また、APIはブラウザから直接呼び出されます。手元で動かす分には問題ありませんが、**キーを含んだビルドを公開サーバーにデプロイしないでください**。誰でもキーを読めてしまいます。公開する場合は `.env.local` を空にし、利用者それぞれが画面でキーを入力する形にしてください。
 
+## AIプロバイダーとモデル
+
+画面上部のAIボタンから **AI Settings** を開き、プロバイダーの選択、APIキーの入力、モデルIDの変更ができます。
+
+| 処理 | プロバイダー | 既定のモデル |
+|---|---|---|
+| 物体検出、キャンバス拡張量の推定、補完結果のチェック | Gemini / Claude / OpenAI | `gemini-pro-latest` / `claude-opus-5-5` / `gpt-5.6-sol` |
+| 画像補完（アウトペインティング） | Gemini / OpenAI | `gemini-3-pro-image` / `gpt-image-2.6-sunburst` |
+
+- Claude は画像を生成できないため、物体検出とチェックにだけ使えます。
+- モデルIDは頻繁に変わります。モデルが提供終了になった場合は、AI Settings で新しいIDを入力してください。コードの変更は不要です。
+- 論文の結果は `gemini-3-pro-preview` と `gemini-3-pro-image-preview`（どちらも提供終了）で得たものです。他のプロバイダーやモデルでも同じプロンプトを使いますが、検出精度や姿勢の保持には差が出る可能性があります。
+- APIキーはメモリ上にだけ保持します。プロバイダーとモデルIDはブラウザに記憶されます。
+
 ## 使い方
 
 1. **Detect & Crop**：画像をアップロードしてシーンを解析します。検出された物体は自動で切り出されます。
@@ -73,7 +87,8 @@ npm run dev
 ├── App.tsx                 # メインアプリ（UIと処理の流れ）
 ├── components/             # Reactコンポーネント（3Dビューア、カード、オーバーレイ）
 ├── services/
-│   └── geminiService.ts    # Geminiによる物体検出と画像補完
+│   ├── aiService.ts        # 物体検出・補完・チェックのプロンプト
+│   └── ai/                 # プロバイダー層（Gemini / Claude / OpenAI）と既定のモデル
 ├── utils.ts                # 切り出し、AKAZEマッチング、深度推定、3D生成API
 ├── types.ts                # 型定義
 └── docs/                   # 開発の経緯
@@ -102,7 +117,7 @@ npm run dev
 
 [MIT](LICENSE)
 
-このリポジトリに含まれるのはアプリケーションのコードのみです。呼び出している外部のモデルやAPI（Gemini、TRELLIS.2、TripoSR、Depth Anything V2、BRIA RMBG 2.0 など）には、それぞれのライセンスと利用規約が適用されます。特に商用で利用する場合は、事前に確認してください。
+このリポジトリに含まれるのはアプリケーションのコードのみです。呼び出している外部のモデルやAPI（Gemini、Claude、OpenAI、TRELLIS.2、TripoSR、Depth Anything V2、BRIA RMBG 2.0 など）には、それぞれのライセンスと利用規約が適用されます。特に商用で利用する場合は、事前に確認してください。
 
 ## 更新履歴
 

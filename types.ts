@@ -76,14 +76,36 @@ export interface ProcessResult {
   error?: string;
 }
 
-declare global {
-  interface AIStudio {
-    hasSelectedApiKey: () => Promise<boolean>;
-    openSelectKey: () => Promise<void>;
-  }
+// ---- AI provider settings ----
 
+/** Provider for image understanding: object detection, canvas expansion estimate, completion check */
+export type VisionProvider = 'gemini' | 'claude' | 'openai';
+/** Provider for image completion (outpainting). Claude cannot generate images. */
+export type ImageProvider = 'gemini' | 'openai';
+
+export interface AIKeys {
+  gemini: string;
+  anthropic: string;
+  openai: string;
+}
+
+export interface AIModels {
+  geminiVision: string;
+  geminiImage: string;
+  claudeVision: string;
+  openaiVision: string;
+  openaiImage: string;
+}
+
+export interface AISettings {
+  visionProvider: VisionProvider;
+  imageProvider: ImageProvider;
+  keys: AIKeys;
+  models: AIModels;
+}
+
+declare global {
   interface Window {
-    aistudio?: AIStudio;
     cv?: any;
   }
 }
