@@ -118,7 +118,7 @@ Estimate from the photo where a person is facing (**face and body**), or where a
 The paper places each object at its size in the image and only moves it along the depth axis, so objects near the camera (e.g. the cups at the bottom of the sample photo) are magnified twice: once because they are near in the photo, and again by the scene camera. With **Perspective**, the point cloud, PC Boxes and models are back-projected through a pinhole camera (assumed 60° horizontal field of view), and the depth map is read as disparity (inverse depth). Remaining ideas:
 
 - **Estimate the field of view** instead of assuming 60° (e.g. from EXIF, or a model such as MoGe that estimates camera intrinsics).
-- **Metric depth**: Depth Anything V2's relative disparity is mapped to 0.5–5.0 (unknown scale and shift). A metric depth model would give real distances and therefore real sizes.
+- **Metric depth**: Depth Anything V2's relative disparity is stretched over the full range for every image, so the far/near ratio is unknown; it is set with the Depth slider (default 1.5, tuned on the sample photo). A metric depth model would give real distances and therefore real sizes without this setting.
 
 ## References
 

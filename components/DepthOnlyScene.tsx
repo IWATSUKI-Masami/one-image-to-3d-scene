@@ -325,9 +325,28 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         //   image regardless of its distance (near objects end up magnified).
         const HFOV_DEG = 60; // assumed, as in the orientation estimation
         const tanHalf = Math.tan((HFOV_DEG / 2) * Math.PI / 180);
+        // Vertical field of view (degrees) of the initial "photo camera" view for a canvas
+        // of the given aspect: the whole photo frame fits, with a margin for the control
+        // panel over the top of the canvas.
+        const VIEW_MARGIN = 1.35;
+        const photoViewFov = (canvasAspect: number): number => {
+            const tanV = Math.max(tanHalf / originalAspectRatio, tanHalf / canvasAspect) * VIEW_MARGIN;
+            return 2 * Math.atan(tanV) * 180 / Math.PI;
+        };
+        let inPhotoView = false; // camera still at the photo's camera, so resizes refit the FOV
         const toWorldXY = (u: number, v: number, depth: number): [number, number] => perspective
-            ? [(u - 0.5) * 2 * tanHalf * depth * depthScale, -(v - 0.5) * 2 * (tanHalf / originalAspectRatio) * depth * depthScale]
+            ? [(u - 0.5) * 2 * tanHalf * depth, -(v - 0.5) * 2 * (tanHalf / originalAspectRatio) * depth]
             : [(u - 0.5) * 2 * originalAspectRatio, -(v - 0.5) * 2];
+        const toWorldZ = (depth: number): number => perspective ? -depth : -depth * depthScale;
+
+        // Depth range. Depth Anything V2 stretches its disparity over 0..255 for every
+        // image, so only the ratio far/near is unknown. With perspective, the Depth
+        // slider sets that ratio (1 + slider; default 1.5, measured on the sample photo:
+        // it makes a cup's size relative to a person's head realistic). Without, the
+        // paper's linear mapping to 0.5..5.0 is scaled by the slider along Z only.
+        const depthRange: DepthRange = perspective
+            ? { min: 1, max: 1 + depthScale, inverse: true }
+            : { min: 0.5, max: 5.0 };
 
         // Clear any existing canvas
         mountRef.current.innerHTML = '';
@@ -474,11 +493,6 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 const positions: number[] = [];
                 const colors: number[] = [];
 
-                const depthMin = 0.5;
-                const depthMax = 5.0;
-                const aspectCorrection = originalAspectRatio;
-                // Depth Anything V2 outputs disparity: with perspective, treat it as inverse depth
-                const depthRange: DepthRange = { min: depthMin, max: depthMax, inverse: perspective };
 
                 for (let y = 0; y < height; y++) {
                     for (let x = 0; x < width; x++) {
@@ -486,7 +500,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
 
                         // Depth from brightness (R channel; white = near), then X/Y from the pixel position
                         const depth = depthFromBrightness(depthData.data[idx], depthRange);
-                        const z = -depth * depthScale;
+                        const z = toWorldZ(depth);
                         const [xPos, yPos] = toWorldXY(x / width, y / height, depth);
 
                         positions.push(xPos, yPos, z);
@@ -540,7 +554,8 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
 
                 if (perspective) {
                     // Start from the photo's camera: at the origin, with the assumed field of view
-                    camera.fov = 2 * Math.atan(tanHalf / aspectCorrection) * 180 / Math.PI;
+                    camera.fov = photoViewFov(camera.aspect);
+                    inPhotoView = true;
                     camera.near = 0.01;
                     camera.updateProjectionMatrix();
                     camera.position.set(0, 0, 0);
@@ -579,7 +594,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 // 3D model generated from this object (same box), if there is one.
                 const model = positionedModels.find(m => m.box_2d && sameBox(m.box_2d, obj.box_2d));
                 const medianDepth = medianDepthInBox(depthData, obj.box_2d, depthRange, model ? masks.get(model.id) : null).z;
-                const zPos = -medianDepth * depthScale;
+                const zPos = toWorldZ(medianDepth);
 
                 // Calculate 3D position and size (at the object's depth)
                 const [x3dMin, y3dMin] = toWorldXY(xmin, ymax, medianDepth);
@@ -587,7 +602,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
 
                 const boxWidth = x3dMax - x3dMin;
                 const boxHeight = y3dMax - y3dMin;
-                const boxDepth = 0.1 * depthScale; // Thin depth for visibility
+                const boxDepth = perspective ? 0.02 : 0.1 * depthScale; // Thin depth for visibility
 
                 // Create box geometry
                 const boxGeometry = new THREE.BoxGeometry(boxWidth, boxHeight, boxDepth);
@@ -646,7 +661,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 // Eq. (4): median depth of the non-transparent pixels of the model's
                 // background-removed image (same Z as the object's PC Box)
                 const medianDepth = medianDepthInBox(depthData, [ds_ymin, ds_xmin, ds_ymax, ds_xmax], depthRange, masks.get(model.id)).z;
-                const zPos = -medianDepth * depthScale;
+                const zPos = toWorldZ(medianDepth);
 
                 // Calculate 3D position (same as bounding boxes)
                 const [x3dMin, y3dMin] = toWorldXY(ds_xmin, ds_ymax, medianDepth);
@@ -908,6 +923,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             if (width === 0 || height === 0) return;
             renderer.setSize(width, height);
             camera.aspect = width / height;
+            if (inPhotoView) camera.fov = photoViewFov(camera.aspect);
             camera.updateProjectionMatrix();
         };
         window.addEventListener('resize', handleResize);
@@ -990,7 +1006,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 <div className="flex gap-4 mb-3">
                     <div className="flex-1 min-w-[120px]">
                         <label className="block text-xs font-semibold text-slate-300 mb-1">
-                            Depth: {depthScale.toFixed(1)}x
+                            {perspective ? `Depth range: far/near ${(1 + depthScale).toFixed(1)}×` : `Depth: ${depthScale.toFixed(1)}x`}
                         </label>
                         <input
                             type="range"

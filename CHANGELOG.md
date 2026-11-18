@@ -4,6 +4,9 @@ All notable changes to this project. Versions up to v1.18.1 were developed in th
 
 
 ## Unreleased
+- **Fixed** with perspective, near objects (e.g. cups) were too small compared with people: the depth map was mapped to distances 0.5–5.0 (far/near ratio 10), which exaggerated how much nearer they are. In the sample's depth map the cups (brightness ~240) and the woman (~87) then came out at a distance ratio of 0.43 instead of about 0.8. With perspective, the Depth slider now sets the far/near ratio (1 + slider; default 1.5), and Z is no longer scaled separately.
+- **Added** a download button (PNG) on the Depth Map card.
+- **Fixed** the initial perspective view cut objects off at the sides when the canvas is narrower than the photo; the field of view now fits the whole photo frame (with a margin for the control panel) and follows canvas resizes.
 - **Changed** OpenAI is now the default provider for detection and completion, and is listed before Gemini in AI Settings; RMBG 2.0 is listed before RMBG 3.0. The background-removal choice and its Space fields are disabled while OpenAI does the completion (OpenAI completions are already transparent).
 - **Changed** README images updated with the current results (OpenAI + TRELLIS.2, scene with orientation estimation).
 - **Added** perspective placement in the 3D scene (**Perspective** checkbox, on by default). The point cloud, PC Boxes and models are back-projected through a pinhole camera (assumed 60° horizontal field of view), and the depth map is read as disparity (inverse depth), as output by Depth Anything V2. Objects near the camera (e.g. cups) are no longer magnified, and the scene starts from the photo's camera. Unchecking it reproduces the paper's placement.

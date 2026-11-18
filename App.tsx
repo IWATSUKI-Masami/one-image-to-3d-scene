@@ -1679,9 +1679,27 @@ const App: React.FC = () => {
                     {/* Depth Map */}
                     {!isAnalyzing && depthMapUrl && (
                       <div className="mt-4 bg-white rounded-xl border border-slate-200 p-4">
-                        <h4 className="font-semibold text-slate-700 mb-2 flex items-center gap-2">
-                          <Layers size={16} /> Depth Map
-                        </h4>
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="font-semibold text-slate-700 flex items-center gap-2">
+                            <Layers size={16} /> Depth Map
+                          </h4>
+                          <button
+                            onClick={() => {
+                              // Save the depth map as delivered by Depth Anything V2 (PNG, white = near)
+                              const base = (sourceImageName || 'depth').replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 60) || 'depth';
+                              const link = document.createElement('a');
+                              link.href = depthMapUrl;
+                              link.download = `${base}_depth.png`;
+                              document.body.appendChild(link);
+                              link.click();
+                              document.body.removeChild(link);
+                            }}
+                            title="Download the depth map (PNG)"
+                            className="flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium text-slate-600 border border-slate-200 bg-white hover:bg-slate-50 transition-colors"
+                          >
+                            <Download size={12} /> PNG
+                          </button>
+                        </div>
                         <p className="text-xs text-slate-500 mb-3">
                           Used for 3D scene reconstruction accuracy.
                         </p>
