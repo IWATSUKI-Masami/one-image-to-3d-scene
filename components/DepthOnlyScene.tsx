@@ -891,10 +891,27 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             if (transformControlsRef.current) {
                 transformControlsRef.current.detach();
             }
-            if (mountRef.current) {
+            if (mountRef.current && mountRef.current.contains(renderer.domElement)) {
                 mountRef.current.removeChild(renderer.domElement);
             }
+            // Release GPU resources. The scene is rebuilt whenever the depth scale or the
+            // selected models change; without forceContextLoss() each rebuild leaves a WebGL
+            // context behind, and once the browser's limit (~16) is reached the visible
+            // scene loses its context and goes blank.
+            transformControls.dispose();
+            controls.dispose();
+            scene.traverse((obj: any) => {
+                obj.geometry?.dispose?.();
+                const materials: any[] = Array.isArray(obj.material) ? obj.material : obj.material ? [obj.material] : [];
+                for (const m of materials) {
+                    for (const value of Object.values(m) as any[]) {
+                        if (value?.isTexture) value.dispose();
+                    }
+                    m.dispose?.();
+                }
+            });
             renderer.dispose();
+            renderer.forceContextLoss();
             sceneRef.current = null;
         };
     }, [imageUrl, depthMapUrl, originalAspectRatio, depthScale, detectedObjects, positionedModels]);
