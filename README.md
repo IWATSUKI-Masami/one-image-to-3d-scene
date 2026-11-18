@@ -19,18 +19,15 @@ This is the reference implementation of the paper listed in [Citation](#citation
 | 3 | Image completion | Generative AI outpainting (Gemini image generation) restores occluded / cut-off parts while preserving pose, followed by background removal (BRIA RMBG 2.0) |
 | 4 | Feature matching | AKAZE (OpenCV.js) + Lowe's ratio test + RANSAC homography to localize the original crop inside the completed image |
 | 5 | Depth estimation | Depth Anything V2; object depth is the median depth inside the object mask |
-| 6 | 3D generation | TRELLIS.2, Stable Fast 3D, TripoSR (local) or Stability AI API → GLB |
+| 6 | 3D generation | TRELLIS.2, Stable Fast 3D or TripoSR (local) → GLB |
 | 7 | Scene composition | Three.js; models are aligned to point-cloud bounding boxes (PC Box) built from the depth map |
 
 ## Requirements
 
 - Node.js 18 or later
 - **Google Gemini API key** (required)
-- Optional:
-  - Hugging Face token (to avoid ZeroGPU quotas on Hugging Face Spaces)
-  - Stability AI API key (paid 3D generation)
-  - Remove.bg API key (paid background removal)
-  - A local [TripoSR](https://github.com/VAST-AI-Research/TripoSR) Gradio server (default `http://127.0.0.1:7860/`)
+- **Hugging Face token** (required for TRELLIS.2; recommended for the other Hugging Face Spaces, since ZeroGPU usage is counted against your own quota)
+- Optional: a local [TripoSR](https://github.com/VAST-AI-Research/TripoSR) Gradio server (default `http://127.0.0.1:7860/`)
 
 ## Setup
 

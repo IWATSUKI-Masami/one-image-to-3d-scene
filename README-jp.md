@@ -19,18 +19,15 @@
 | 3 | 画像補完 | 生成AI（Geminiの画像生成）によるアウトペインティングで、姿勢を保ったまま隠れた部分や切れた部分を復元し、背景を除去（BRIA RMBG 2.0） |
 | 4 | 特徴点マッチング | AKAZE（OpenCV.js）、Lowe's Ratio Test、RANSACによるホモグラフィ推定で、元の切り出し画像が補完画像のどこにあたるかを特定 |
 | 5 | 深度推定 | Depth Anything V2。物体の深度はマスク内の深度の中央値 |
-| 6 | 3D生成 | TRELLIS.2、Stable Fast 3D、TripoSR（ローカル）、Stability AI API のいずれかでGLBを生成 |
+| 6 | 3D生成 | TRELLIS.2、Stable Fast 3D、TripoSR（ローカル）のいずれかでGLBを生成 |
 | 7 | シーン合成 | Three.js。深度マップから作った点群のバウンディングボックス（PC Box）にモデルを合わせて配置 |
 
 ## 必要な環境
 
 - Node.js 18以上
 - **Google Gemini APIキー**（必須）
-- 任意:
-  - Hugging Face トークン（Hugging Face Spaces の ZeroGPU の利用上限を避けるため）
-  - Stability AI APIキー（有料の3D生成）
-  - Remove.bg APIキー（有料の背景除去）
-  - ローカルの [TripoSR](https://github.com/VAST-AI-Research/TripoSR) Gradioサーバー（既定値 `http://127.0.0.1:7860/`）
+- **Hugging Face トークン**（TRELLIS.2では必須。他のHugging Face Spacesでも推奨。ZeroGPUの利用分が各自の枠で計上されます）
+- 任意: ローカルの [TripoSR](https://github.com/VAST-AI-Research/TripoSR) Gradioサーバー（既定値 `http://127.0.0.1:7860/`）
 
 ## セットアップ
 

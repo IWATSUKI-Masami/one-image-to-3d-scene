@@ -49,7 +49,7 @@ export interface Model3D {
   completionExpansionRatio?: number;
   originalPartBox2d?: [number, number, number, number];
   tightBox2d?: [number, number, number, number]; // Bounds of the non-transparent object in the image
-  provider?: 'stability-api' | 'huggingface' | 'triposr-local' | 'trellis'; // Which 3D generation service was used
+  provider?: 'huggingface' | 'triposr-local' | 'trellis'; // Which 3D generation service was used
 }
 
 export interface ProjectArchive {

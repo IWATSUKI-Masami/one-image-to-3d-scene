@@ -7,7 +7,7 @@ import { Model3DCard } from './components/Model3DCard';
 import { DepthOnlyScene } from './components/DepthOnlyScene';
 import { BoundingBoxOverlay } from './components/BoundingBoxOverlay';
 import { detectObjectsInImage, generateCompletion, estimateCanvasExpansion, verifyCompletion } from './services/geminiService';
-import { cropObjectsFromImage, removeBackgroundWithApi, removeBackgroundWithRembg, refineOverlaps, refineSingleOverlap, trimTransparentEdges, generate3DModel, generate3DModelWithGradio, generate3DModelWithTripoSRLocal, generate3DModelWithTrellis, blobUrlToDataUrl, dataUrlToBlobUrl, generateDepthMap, prepareImageForCompletion, calculateTightBoundingBox } from './utils';
+import { cropObjectsFromImage, removeBackgroundWithRembg, refineOverlaps, refineSingleOverlap, trimTransparentEdges, generate3DModelWithGradio, generate3DModelWithTripoSRLocal, generate3DModelWithTrellis, blobUrlToDataUrl, dataUrlToBlobUrl, generateDepthMap, prepareImageForCompletion, calculateTightBoundingBox } from './utils';
 import { DetectedObject, CroppedObject, Model3D, ProjectArchive } from './types';
 import { Scan, Sparkles, AlertCircle, Layers, Image as ImageIcon, Key, User, Box, ArrowLeft, Upload, Eraser, Plug, Wand2, RefreshCw, Star, Download, LayoutGrid, MonitorPlay, Cuboid, Save, FolderOpen, Eye, Trash2, Scissors } from 'lucide-react';
 
@@ -34,14 +34,8 @@ const App: React.FC = () => {
   const [depthMapUrl, setDepthMapUrl] = useState<string | null>(null);
   const [isGeneratingDepth, setIsGeneratingDepth] = useState(false);
 
-  // Background Removal states
-  const [removeBgApiKey, setRemoveBgApiKey] = useState(import.meta.env.VITE_REMOVE_BG_API_KEY || '');
-  const [bgRemovalProvider, setBgRemovalProvider] = useState<'removebg' | 'rembg' | 'gemini'>('rembg');
-
-
-  // Stability AI state
-  const [stabilityApiKey, setStabilityApiKey] = useState(import.meta.env.VITE_STABILITY_API_KEY || '');
-  const [modelProvider, setModelProvider] = useState<'stability-api' | 'huggingface' | 'triposr-local' | 'trellis'>('trellis');
+  // 3D generation settings
+  const [modelProvider, setModelProvider] = useState<'huggingface' | 'triposr-local' | 'trellis'>('trellis');
   const [tripoSrApiUrl, setTripoSrApiUrl] = useState('http://127.0.0.1:7860/');
   const [hfToken, setHfToken] = useState(import.meta.env.VITE_HF_TOKEN || '');
 
@@ -399,11 +393,6 @@ const App: React.FC = () => {
   };
 
   const handleGenerate3D = async (item: CroppedObject) => {
-    if (modelProvider === 'stability-api' && !stabilityApiKey) {
-      alert("Please enter a Stability AI API Key first.");
-      return;
-    }
-
     setActiveTab('3d');
 
     // Check if already processed or processing
@@ -418,9 +407,7 @@ const App: React.FC = () => {
     try {
       let glbBlob: Blob;
 
-      if (modelProvider === 'stability-api') {
-        glbBlob = await generate3DModel(item.imageUrl, stabilityApiKey);
-      } else if (modelProvider === 'triposr-local') {
+      if (modelProvider === 'triposr-local') {
         // Local TripoSR
         glbBlob = await generate3DModelWithTripoSRLocal(item.imageUrl, 256, tripoSrApiUrl);
       } else if (modelProvider === 'trellis') {
@@ -484,11 +471,6 @@ const App: React.FC = () => {
   };
 
   const handleBatchGenerate3D = async () => {
-    if (modelProvider === 'stability-api' && !stabilityApiKey) {
-      alert("Please enter a Stability AI API Key first.");
-      return;
-    }
-
     const itemsToProcess = filteredCompletedImages.filter(item => selectedItems.has(item.id));
     if (itemsToProcess.length === 0) return;
 
@@ -649,21 +631,6 @@ const App: React.FC = () => {
 
       setCompletionResult(newObject);
 
-      // Auto-remove BG if key is present
-      if (removeBgApiKey) {
-        try {
-          // Pass the completion target type to help background remover
-          const transparentUrl = await removeBackgroundWithApi(generatedUrl, removeBgApiKey, type);
-          setCompletionResult({
-            ...newObject,
-            imageUrl: transparentUrl,
-            label: `Completed ${type === 'person' ? 'Full Body' : 'Object'} (Transparent)`
-          });
-        } catch (e: any) {
-          console.warn("Auto background removal failed for completion", e);
-        }
-      }
-
     } catch (e: any) {
       console.error(e);
       setError("Failed to complete image: " + (e.message || "Unknown error"));
@@ -738,24 +705,14 @@ const App: React.FC = () => {
         if (bgRemovalAfterCompletion) {
           const tBg = performance.now();
           try {
-            // Remove background from completed image using selected provider
-            let bgRemovedBlob: Blob;
-            if (bgRemovalProvider === 'removebg' && removeBgApiKey) {
-              bgRemovedBlob = await removeBackgroundWithApi(generatedImageUrl, removeBgApiKey, item.type);
-            } else {
-              bgRemovedBlob = await removeBackgroundWithRembg(generatedImageUrl, hfToken);
-            }
+            // Remove background from completed image (BRIA RMBG 2.0)
+            const bgRemovedBlob = await removeBackgroundWithRembg(generatedImageUrl, hfToken);
             transparentUrl = URL.createObjectURL(bgRemovedBlob);
-            console.log(`[Complete Body] Background removed using ${bgRemovalProvider === 'removebg' ? 'Remove.bg' : 'RMBG'}`);
+            console.log('[Complete Body] Background removed using RMBG');
 
             // Also remove background from extracted image for matching
             try {
-              let extractedBgRemovedBlob: Blob;
-              if (bgRemovalProvider === 'removebg' && removeBgApiKey) {
-                extractedBgRemovedBlob = await removeBackgroundWithApi(item.imageUrl, removeBgApiKey, item.type);
-              } else {
-                extractedBgRemovedBlob = await removeBackgroundWithRembg(item.imageUrl, hfToken);
-              }
+              const extractedBgRemovedBlob = await removeBackgroundWithRembg(item.imageUrl, hfToken);
               extractedTransparentUrl = URL.createObjectURL(extractedBgRemovedBlob);
               console.log('[Complete Body] Background removed from extracted image for matching');
             } catch (extractBgError) {
@@ -907,23 +864,13 @@ const App: React.FC = () => {
           if (bgRemovalAfterCompletion) {
             const tBg2 = performance.now();
             try {
-              // Remove background from completed image using selected provider
-              let bgRemovedBlob: Blob;
-              if (bgRemovalProvider === 'removebg' && removeBgApiKey) {
-                bgRemovedBlob = await removeBackgroundWithApi(generatedImageUrl, removeBgApiKey, item.type);
-              } else {
-                bgRemovedBlob = await removeBackgroundWithRembg(generatedImageUrl, hfToken);
-              }
+              // Remove background from completed image (BRIA RMBG 2.0)
+              const bgRemovedBlob = await removeBackgroundWithRembg(generatedImageUrl, hfToken);
               transparentUrl = URL.createObjectURL(bgRemovedBlob);
 
               // Also remove background from extracted image for matching
               try {
-                let extractedBgRemovedBlob: Blob;
-                if (bgRemovalProvider === 'removebg' && removeBgApiKey) {
-                  extractedBgRemovedBlob = await removeBackgroundWithApi(item.imageUrl, removeBgApiKey, item.type);
-                } else {
-                  extractedBgRemovedBlob = await removeBackgroundWithRembg(item.imageUrl, hfToken);
-                }
+                const extractedBgRemovedBlob = await removeBackgroundWithRembg(item.imageUrl, hfToken);
                 extractedTransparentUrl = URL.createObjectURL(extractedBgRemovedBlob);
               } catch (extractBgError) {
                 console.warn('[Batch Complete] Failed to remove BG from extracted:', extractBgError);
@@ -1338,34 +1285,6 @@ const App: React.FC = () => {
                     title="Optional: Hugging Face Token"
                   />
 
-                  <div className="h-4 w-px bg-slate-300" />
-
-                  {/* BG Removal */}
-                  <span className="text-[10px] font-bold text-slate-400 uppercase">BG</span>
-                  <div className="flex bg-white rounded-md border border-slate-200 p-0.5">
-
-                    <button
-                      onClick={() => setBgRemovalProvider('rembg')}
-                      className={`px-1.5 py-0.5 text-[11px] rounded-sm transition-colors ${bgRemovalProvider === 'rembg' ? 'bg-orange-100 text-orange-700 font-medium' : 'text-slate-500 hover:text-slate-700'}`}
-                    >
-                      RMBG
-                    </button>
-                    <button
-                      onClick={() => setBgRemovalProvider('removebg')}
-                      className={`px-1.5 py-0.5 text-[11px] rounded-sm transition-colors ${bgRemovalProvider === 'removebg' ? 'bg-orange-100 text-orange-700 font-medium' : 'text-slate-500 hover:text-slate-700'}`}
-                    >
-                      Remove.bg
-                    </button>
-                  </div>
-                  {bgRemovalProvider === 'removebg' && (
-                    <input
-                      type="password"
-                      placeholder="Key"
-                      value={removeBgApiKey}
-                      onChange={(e) => setRemoveBgApiKey(e.target.value)}
-                      className="w-20 px-2 py-0.5 text-xs border border-slate-300 rounded focus:outline-none focus:border-orange-500"
-                    />
-                  )}
                 </div>
 
                 {/* Row 2: 3D Model Settings */}
@@ -1390,23 +1309,7 @@ const App: React.FC = () => {
                     >
                       Stable Fast 3D
                     </button>
-                    <button
-                      onClick={() => setModelProvider('stability-api')}
-                      className={`px-1.5 py-0.5 text-[11px] rounded-sm transition-colors ${modelProvider === 'stability-api' ? 'bg-blue-100 text-blue-700 font-medium' : 'text-slate-500 hover:text-slate-700'}`}
-                    >
-                      Stability AI
-                    </button>
                   </div>
-
-                  {modelProvider === 'stability-api' && (
-                    <input
-                      type="password"
-                      placeholder="API Key"
-                      value={stabilityApiKey}
-                      onChange={(e) => setStabilityApiKey(e.target.value)}
-                      className="w-28 px-2 py-0.5 text-xs border border-slate-300 rounded focus:outline-none focus:border-blue-500"
-                    />
-                  )}
 
                   {modelProvider === 'triposr-local' && (
                     <input
@@ -1610,7 +1513,7 @@ const App: React.FC = () => {
 
               <h2 className="text-2xl font-bold text-slate-900 mb-2">Generate 3D Model</h2>
               <p className="text-slate-600 mb-8">
-                Convert your image into a 3D GLB file using Stability AI.
+                Convert your image into a 3D GLB file using the selected 3D generator.
               </p>
 
               <div className="relative w-64 h-64 mx-auto bg-slate-100 rounded-xl overflow-hidden mb-8 border border-slate-200 flex items-center justify-center">
@@ -1626,21 +1529,15 @@ const App: React.FC = () => {
 
               <button
                 onClick={() => handleGenerate3D(model3DSource)}
-                disabled={isGenerating3DGlobal || (modelProvider === 'stability-api' && !stabilityApiKey)}
+                disabled={isGenerating3DGlobal}
                 className={`w-full py-3 rounded-lg font-bold text-white transition-all flex items-center justify-center gap-2 shadow-md
-                          ${isGenerating3DGlobal || (modelProvider === 'stability-api' && !stabilityApiKey)
+                          ${isGenerating3DGlobal
                     ? 'bg-slate-300 cursor-not-allowed'
                     : 'bg-orange-500 hover:bg-orange-600'}`}
               >
                 {isGenerating3DGlobal ? <Spinner /> : <Box size={20} />}
                 {isGenerating3DGlobal ? 'Generating...' : 'Generate 3D Model'}
               </button>
-
-              {modelProvider === 'stability-api' && !stabilityApiKey && (
-                <p className="text-red-500 text-sm mt-3">
-                  Please enter your Stability AI API Key in the top header first.
-                </p>
-              )}
             </div>
           </div>
         )}
@@ -1721,7 +1618,6 @@ const App: React.FC = () => {
               <div className="space-y-4">
                 <h3 className="font-semibold text-slate-700 flex items-center gap-2">
                   Generated Result
-                  {removeBgApiKey && <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Auto-BG Removal Active</span>}
                 </h3>
 
                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex items-center justify-center min-h-[400px] relative overflow-hidden">
@@ -1736,11 +1632,7 @@ const App: React.FC = () => {
 
                   {!isCompleting && completionResult && (
                     <div className="w-full h-full flex flex-col items-center">
-                      <div style={removeBgApiKey ? {
-                        backgroundImage: 'linear-gradient(45deg, #e5e7eb 25%, transparent 25%), linear-gradient(-45deg, #e5e7eb 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e5e7eb 75%), linear-gradient(-45deg, transparent 75%, #e5e7eb 75%)',
-                        backgroundSize: '20px 20px',
-                        backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px'
-                      } : {}} className="rounded-lg overflow-hidden mb-4">
+                      <div className="rounded-lg overflow-hidden mb-4">
                         <img src={completionResult.imageUrl} alt="Result" className="max-w-full max-h-[400px] object-contain" />
                       </div>
 
@@ -2091,11 +1983,7 @@ const App: React.FC = () => {
                           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
                             {filteredCompletedImages.map((item) => (
                               <div key={item.id} className="relative group">
-                                <div style={!item.bgRemovalFailed && removeBgApiKey ? {
-                                  backgroundImage: 'linear-gradient(45deg, #e5e7eb 25%, transparent 25%), linear-gradient(-45deg, #e5e7eb 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e5e7eb 75%), linear-gradient(-45deg, transparent 75%, #e5e7eb 75%)',
-                                  backgroundSize: '20px 20px',
-                                  backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px'
-                                } : {}} className="rounded-xl overflow-hidden">
+                                <div className="rounded-xl overflow-hidden">
                                   <ResultCard
                                     item={item}
                                     onDelete={() => handleDeleteCompletedImage(item.id)}

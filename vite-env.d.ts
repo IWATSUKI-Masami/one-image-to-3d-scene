@@ -2,8 +2,6 @@
 
 interface ImportMetaEnv {
     readonly VITE_GEMINI_API_KEY: string
-    readonly VITE_STABILITY_API_KEY: string
-    readonly VITE_REMOVE_BG_API_KEY: string
     readonly VITE_HF_TOKEN: string
 }
 

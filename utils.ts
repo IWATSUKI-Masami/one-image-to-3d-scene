@@ -3,25 +3,6 @@ import { CroppedObject, DetectedObject } from './types';
 // Declare cv globally for OpenCV.js
 declare const cv: any;
 
-// HF Space fallback configuration: original spaces (ZeroGPU) -> iwatsuki duplicates (dedicated GPU)
-const HF_SPACE_FALLBACKS: Record<string, string> = {
-  'briaai/BRIA-RMBG-2.0': 'iwatsuki/BRIA-RMBG-2.0',
-  'depth-anything/Depth-Anything-V2': 'iwatsuki/Depth-Anything-V2',
-  'microsoft/TRELLIS.2': 'iwatsuki/TRELLIS.2',
-};
-
-/**
- * Detect ZeroGPU quota exhaustion errors from HF Space responses.
- */
-const isZeroGPUQuotaError = (error: any): boolean => {
-  const msg = (error?.message || error?.original_msg || '').toLowerCase();
-  return msg.includes('gpu') && (msg.includes('quota') || msg.includes('exceeded') || msg.includes('limit'))
-    || msg.includes('zerogpu')
-    || msg.includes('you have exceeded')
-    || msg.includes('rate limit')
-    || msg.includes('too many requests');
-};
-
 export const fileToGenerativePart = async (file: File): Promise<{ inlineData: { data: string; mimeType: string } }> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -160,9 +141,7 @@ export const cropObjectsFromImage = async (
 
 
 export const removeBackgroundWithRembg = async (imageUrl: string, apiKey?: string): Promise<Blob> => {
-  const primarySpace = 'briaai/BRIA-RMBG-2.0';
-  const fallbackSpace = HF_SPACE_FALLBACKS[primarySpace];
-  const spaces = [primarySpace, fallbackSpace];
+  const space = 'briaai/BRIA-RMBG-2.0';
 
   const { Client } = await import("@gradio/client");
   const options: any = {};
@@ -170,91 +149,37 @@ export const removeBackgroundWithRembg = async (imageUrl: string, apiKey?: strin
     options.hf_token = apiKey as `hf_${string}`;
   }
 
-  for (let i = 0; i < spaces.length; i++) {
-    const space = spaces[i];
-    try {
-      console.log(`[RMBG] Connecting to ${space}...`);
-      const client = await Client.connect(space, options);
+  try {
+    console.log(`[RMBG] Connecting to ${space}...`);
+    const client = await Client.connect(space, options);
 
-      const response = await fetch(imageUrl);
-      const imageBlob = await response.blob();
+    const response = await fetch(imageUrl);
+    const imageBlob = await response.blob();
 
-      const result = await client.predict("/image", {
-        image: imageBlob,
-      });
+    const result = await client.predict("/image", {
+      image: imageBlob,
+    });
 
-      if ((result as any).data && (result as any).data.length > 1) {
-        const output = (result as any).data[1];
+    if ((result as any).data && (result as any).data.length > 1) {
+      const output = (result as any).data[1];
 
-        if (output instanceof Blob) {
-          return output;
-        } else if (typeof output === 'string') {
-          const res = await fetch(output);
-          return await res.blob();
-        } else if ((output as any).url) {
-          const res = await fetch((output as any).url);
-          return await res.blob();
-        }
+      if (output instanceof Blob) {
+        return output;
+      } else if (typeof output === 'string') {
+        const res = await fetch(output);
+        return await res.blob();
+      } else if ((output as any).url) {
+        const res = await fetch((output as any).url);
+        return await res.blob();
       }
-
-      throw new Error("No valid output from RMBG-2.0");
-
-    } catch (e: any) {
-      if (i === 0 && fallbackSpace && isZeroGPUQuotaError(e)) {
-        console.warn(`[RMBG] ZeroGPU quota exceeded on ${space}, falling back to ${fallbackSpace}...`);
-        continue;
-      }
-      console.error(`RMBG-2.0 via Gradio failed (${space}):`, e);
-      throw new Error(`RMBG-2.0 Failed: ${e.message}`);
     }
+
+    throw new Error("No valid output from RMBG-2.0");
+
+  } catch (e: any) {
+    console.error(`RMBG-2.0 via Gradio failed (${space}):`, e);
+    throw new Error(`RMBG-2.0 Failed: ${e.message}`);
   }
-
-  throw new Error("RMBG-2.0 Failed: All spaces exhausted");
-};
-
-export const removeBackgroundWithApi = async (imageUrl: string, apiKey: string, type: 'person' | 'object'): Promise<Blob> => {
-  // Convert imageUrl (blob URL or data URL) to a Blob for file upload
-  let imageBlob: Blob;
-
-  if (imageUrl.startsWith('data:')) {
-    // Data URL - convert to blob
-    const response = await fetch(imageUrl);
-    imageBlob = await response.blob();
-  } else if (imageUrl.startsWith('blob:')) {
-    // Blob URL - fetch the blob
-    const response = await fetch(imageUrl);
-    imageBlob = await response.blob();
-  } else {
-    // Regular URL - fetch the image
-    const response = await fetch(imageUrl);
-    imageBlob = await response.blob();
-  }
-
-  const formData = new FormData();
-  // Use image_file instead of image_url for blob/data URLs
-  formData.append('image_file', imageBlob, 'image.png');
-  formData.append('size', 'auto');
-
-  if (type === 'person') {
-    formData.append('type', 'person');
-  } else {
-    formData.append('type', 'product');
-  }
-
-  const response = await fetch('https://api.remove.bg/v1.0/removebg', {
-    method: 'POST',
-    headers: {
-      'X-Api-Key': apiKey,
-    },
-    body: formData,
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.errors[0].title || 'Failed to remove background');
-  }
-
-  return await response.blob();
 };
 
 export const trimTransparentEdges = async (imageUrl: string, alphaThreshold: number = 50, maintainAspectRatio: boolean = false): Promise<string> => {
@@ -572,24 +497,6 @@ export const findBestMatchPosition = async (
   return null;
 };
 
-export const generate3DModel = async (imageUrl: string, apiKey: string): Promise<Blob> => {
-  const formData = new FormData();
-  const imageBlob = await (await fetch(imageUrl)).blob();
-  formData.append('image', imageBlob);
-
-  const response = await fetch('https://api.stability.ai/v2beta/3d/stable-fast-3d', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${apiKey}` },
-    body: formData
-  });
-
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Stability AI 3D Generation Failed: ${err}`);
-  }
-  return await response.blob();
-};
-
 export const generate3DModelWithGradio = async (imageUrl: string, hfToken?: string): Promise<Blob> => {
   try {
     const { Client } = await import("@gradio/client");
@@ -691,63 +598,52 @@ export const generateDepthMap = async (imageUrl: string, apiKey?: string): Promi
   // Ensure hfToken is undefined if empty string
   const token = apiKey && apiKey.trim().length > 0 ? apiKey : undefined;
 
-  const primarySpace = 'depth-anything/Depth-Anything-V2';
-  const fallbackSpace = HF_SPACE_FALLBACKS[primarySpace];
-  const spaces = [primarySpace, fallbackSpace];
+  const space = 'depth-anything/Depth-Anything-V2';
 
-  for (let i = 0; i < spaces.length; i++) {
-    const space = spaces[i];
-    try {
-      console.log(`[DepthMap] Connecting to ${space}...`);
-      const client = await Client.connect(space, token ? { hf_token: token } as any : {});
+  try {
+    console.log(`[DepthMap] Connecting to ${space}...`);
+    const client = await Client.connect(space, token ? { hf_token: token } as any : {});
 
-      const imageBlob = await (await fetch(imageUrl)).blob();
+    const imageBlob = await (await fetch(imageUrl)).blob();
 
-      const result = await client.predict("/on_submit", {
-        image: imageBlob,
-      });
+    const result = await client.predict("/on_submit", {
+      image: imageBlob,
+    });
 
-      const data = result.data as any[];
+    const data = result.data as any[];
 
-      if (data) {
-        let output = undefined;
+    if (data) {
+      let output = undefined;
 
-        if (data.length > 1 && data[1]) {
-          output = data[1];
-        }
-
-        if (!output) {
-          output = data.find(item =>
-            (typeof item === 'object' && item?.url) ||
-            (typeof item === 'string' && (item.endsWith('.png') || item.endsWith('.jpg') || item.startsWith('http')))
-          );
-        }
-
-        if (output) {
-          let fetchUrl = output;
-          if (typeof output === 'object' && output.url) fetchUrl = output.url;
-
-          const res = await fetch(fetchUrl);
-          const blob = await res.blob();
-          return URL.createObjectURL(blob);
-        }
+      if (data.length > 1 && data[1]) {
+        output = data[1];
       }
 
-      throw new Error("No valid output from Depth Anything V2");
-
-    } catch (e: any) {
-      if (i === 0 && fallbackSpace && isZeroGPUQuotaError(e)) {
-        console.warn(`[DepthMap] ZeroGPU quota exceeded on ${space}, falling back to ${fallbackSpace}...`);
-        continue;
+      if (!output) {
+        output = data.find(item =>
+          (typeof item === 'object' && item?.url) ||
+          (typeof item === 'string' && (item.endsWith('.png') || item.endsWith('.jpg') || item.startsWith('http')))
+        );
       }
-      console.error(`Depth Map generation failed (${space}):`, e);
-      let errorMsg = e.message || "Unknown error";
-      if (e.original_msg) errorMsg = e.original_msg;
-      throw new Error(`Depth Map Failed: ${errorMsg}`);
+
+      if (output) {
+        let fetchUrl = output;
+        if (typeof output === 'object' && output.url) fetchUrl = output.url;
+
+        const res = await fetch(fetchUrl);
+        const blob = await res.blob();
+        return URL.createObjectURL(blob);
+      }
     }
-  }
 
-  throw new Error("Depth Map Failed: All spaces exhausted");
+    throw new Error("No valid output from Depth Anything V2");
+
+  } catch (e: any) {
+    console.error(`Depth Map generation failed (${space}):`, e);
+    let errorMsg = e.message || "Unknown error";
+    if (e.original_msg) errorMsg = e.original_msg;
+    throw new Error(`Depth Map Failed: ${errorMsg}`);
+  }
 };
 
 /**
@@ -1095,41 +991,19 @@ export const generate3DModelWithTrellis = async (imageUrl: string, hfToken?: str
   try {
     const { Client } = await import("@gradio/client");
 
-    // This is a private Space - HF token is required
+    // An HF token is required so that ZeroGPU usage is billed to the user's own quota
     const token = hfToken && hfToken.trim().length > 0 ? hfToken : undefined;
 
     if (!token) {
       throw new Error("Hugging Face token is required for TRELLIS.2. Please enter your HF Token in the settings.");
     }
 
-    const primarySpace = 'microsoft/TRELLIS.2';
-    const fallbackSpace = HF_SPACE_FALLBACKS[primarySpace];
-    const spacesToTry = [primarySpace, fallbackSpace];
-    let client: any = null;
-    let lastError: any = null;
-
-    for (const space of spacesToTry) {
-      try {
-        console.log(`[TRELLIS] Connecting to ${space}...`);
-        client = await Client.connect(space, { hf_token: token } as any);
-        // Test connection with start_session
-        await client.predict("/start_session", {});
-        console.log(`[TRELLIS] Connected to ${space} successfully`);
-        break;
-      } catch (e: any) {
-        lastError = e;
-        if (space === primarySpace && fallbackSpace && isZeroGPUQuotaError(e)) {
-          console.warn(`[TRELLIS] ZeroGPU quota exceeded on ${space}, falling back to ${fallbackSpace}...`);
-          client = null;
-          continue;
-        }
-        throw e;
-      }
-    }
-
-    if (!client) {
-      throw lastError || new Error("TRELLIS.2 Failed: All spaces exhausted");
-    }
+    const space = 'microsoft/TRELLIS.2';
+    console.log(`[TRELLIS] Connecting to ${space}...`);
+    const client: any = await Client.connect(space, { hf_token: token } as any);
+    // Test connection with start_session
+    await client.predict("/start_session", {});
+    console.log(`[TRELLIS] Connected to ${space} successfully`);
 
     // Convert to PNG and create File object (matching how Gradio UI sends files)
     const response = await fetch(imageUrl);

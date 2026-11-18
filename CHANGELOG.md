@@ -3,6 +3,10 @@
 All notable changes to this project. Versions up to v1.18.1 were developed in the predecessor (private) repository.
 
 
+## Unreleased
+- **Removed** the automatic fallback from the official Hugging Face Spaces (BRIA RMBG 2.0, Depth Anything V2, TRELLIS.2) to the author's private duplicate Spaces.
+- **Removed** the commercial API integrations: Stability AI API (3D generation) and Remove.bg (background removal). Background removal now always uses BRIA RMBG 2.0.
+
 ## v1.1.0
 - **Enhanced 3D Object Placement**: Implemented anchor-based positioning using image vertical coordinates and object types (ground vs. table-top) for more realistic placement.
 - **Automatic Scaling**: Added depth-variance based automatic scaling to estimate object thickness and size more accurately.
