@@ -4,6 +4,8 @@ All notable changes to this project. Versions up to v1.18.1 were developed in th
 
 
 ## Unreleased
+- **Fixed** Hunyuan3D-2.1 could build a board behind an object (e.g. a chair) or stray fragments at the edges of its volume. Background removal can leave nearly invisible specks (alpha = 1) all over the image, and Hunyuan3D treats any alpha > 0 as the object. Alpha below about 10% is now cleared before the image is sent (TRELLIS.2 already ignores alpha below 80%).
+- **Fixed** bounding boxes (and the size and position of models in the 3D scene) could be far too large because of tiny stray fragments in generated models: e.g. a Hunyuan3D-2.1 cup had 14 fragments (0.1% of its surface) near the walls of the generation volume, making its box about 4 times as tall. Small fragments far from the main body are now removed when a model is loaded; separate parts close to it (a saucer, petals) are kept.
 - **Fixed** Hunyuan3D-2.1 could add a flat slab under objects (e.g. coffee cups). The app asked the Space to remove the background again; the Space then converted the already transparent image to RGB, which brought back the hidden background (the table) and modelled it. The transparent image is now used as is (`check_box_rembg: false`); non-transparent input is still background-removed by the Space.
 - **Added** `docs/hugging-face-spaces.md` (EN/JP): Hugging Face token, accepting the terms of gated models, the `HF_TOKEN` Space secret, GPU per Space, the file changes a Hunyuan3D-2.1 duplicate needs to run on a dedicated GPU, and common errors.
 - **Added** OpenAI as an AI provider. Object detection/checks and image completion can each use Gemini or OpenAI. Choose providers, enter API keys and change model IDs in the new **AI Settings** dialog.

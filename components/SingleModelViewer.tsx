@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { removeStrayFragments } from './meshCleanup';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Model3D } from '../types';
 import { Spinner } from './Spinner';
@@ -138,6 +139,8 @@ export const SingleModelViewer: React.FC<SingleModelViewerProps> = ({ model, sho
                 if (isAborted || !rendererRef.current) return;
 
                 const mesh = gltf.scene;
+                // Drop tiny stray fragments so that they do not stretch the bounding box
+                removeStrayFragments(mesh);
                 const box = new THREE.Box3().setFromObject(mesh);
                 const size = new THREE.Vector3();
                 box.getSize(size);

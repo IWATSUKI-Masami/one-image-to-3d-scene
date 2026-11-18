@@ -614,6 +614,50 @@ export const calculateTightBoundingBox = async (imageUrl: string): Promise<[numb
  * Calls `generation_all` (shape + PBR texture) of the Space's Gradio app and
  * returns the textured GLB. Parameters are the app's defaults.
  */
+/** Alpha below this is treated as background before 3D generation (about 10%) */
+const FAINT_ALPHA = 26;
+
+/**
+ * Prepare a background-removed image for Hunyuan3D-2.1.
+ *
+ * Hunyuan3D treats every pixel with alpha > 0 as part of the object. Background
+ * removal can leave nearly invisible specks (e.g. alpha = 1) all over the
+ * canvas; they then become stray fragments at the edges of the generation
+ * volume or a board behind the object. Faint alpha is set to 0, and fully
+ * transparent pixels are made white so that no hidden background colour
+ * (e.g. the table under a cup) can come back. Images without transparency
+ * are returned as they are (the Space removes their background itself).
+ */
+const clearFaintAlpha = async (imageUrl: string): Promise<Blob> => {
+  const original = await (await fetch(imageUrl)).blob();
+  try {
+    const img = await loadImageElement(imageUrl);
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return original;
+    ctx.drawImage(img, 0, 0);
+    const data = ctx.getImageData(0, 0, img.width, img.height);
+    const px = data.data;
+    let transparent = false;
+    for (let i = 3; i < px.length; i += 4) {
+      if (px[i] < 255) transparent = true;
+      if (px[i] < FAINT_ALPHA) {
+        px[i - 3] = px[i - 2] = px[i - 1] = 255;
+        px[i] = 0;
+      }
+    }
+    if (!transparent) return original;
+    ctx.putImageData(data, 0, 0);
+    return await new Promise<Blob>((resolve) =>
+      canvas.toBlob(b => resolve(b ?? original), 'image/png'));
+  } catch (e) {
+    console.warn('Could not clean the alpha channel; sending the image as is:', e);
+    return original;
+  }
+};
+
 export const generate3DModelWithHunyuan3D = async (imageUrl: string, hfToken?: string, space: string = DEFAULT_SPACES.hunyuan3d): Promise<Blob> => {
   space = space.trim() || DEFAULT_SPACES.hunyuan3d; // an empty setting means the official Space
   try {
@@ -627,7 +671,7 @@ export const generate3DModelWithHunyuan3D = async (imageUrl: string, hfToken?: s
 
     const client: any = await Client.connect(space, { token: token as `hf_${string}` });
 
-    const imageBlob = await (await fetch(imageUrl)).blob();
+    const imageBlob = await clearFaintAlpha(imageUrl);
     const imageFile = new File([imageBlob], 'input.png', { type: imageBlob.type || 'image/png' });
 
     const result = await client.predict("/generation_all", {
@@ -640,9 +684,8 @@ export const generate3DModelWithHunyuan3D = async (imageUrl: string, hfToken?: s
       guidance_scale: 5.0,
       seed: 1234,
       octree_resolution: 256,
-      // The input is already background-removed (RGBA). With rembg on, the Space
-      // converts it to RGB first, which brings back the hidden background colours
-      // (e.g. the table under a cup) and turns them into a slab under the model.
+      // The input is already background-removed (RGBA, cleaned by clearFaintAlpha).
+      // With rembg on, the Space would convert it to RGB first and segment it again.
       // With rembg off, RGBA input is used as is and RGB input is still rembg'd.
       check_box_rembg: false,
       num_chunks: 8000,

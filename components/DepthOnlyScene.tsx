@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { removeStrayFragments } from './meshCleanup';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { Spinner } from './Spinner';
 import { DetectedObject, Model3D } from '../types';
@@ -645,6 +646,9 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
 
                     const mesh = gltf.scene;
                     const meshContainer = new THREE.Group();
+
+                    // Drop tiny stray fragments so that they do not stretch the bounds used for placement
+                    removeStrayFragments(mesh);
 
                     // Step 1: Get original mesh bounds and center at origin
                     mesh.updateMatrixWorld(true);
