@@ -33,6 +33,23 @@ The sample photo [`samples/two-people-at-table.webp`](samples/two-people-at-tabl
 | 6 | 3D generation | TRELLIS.2 or Hunyuan3D-2.1 (Hugging Face Spaces) → textured GLB |
 | 7 | Scene composition | Three.js; models are aligned to point-cloud bounding boxes (PC Box) built from the depth map |
 
+### Walkthrough (sample photo)
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/step1-detection.webp" alt="Object detection"><br><sub><b>1. Detection</b> — 8 objects with labels and boxes (VLM)</sub></td>
+    <td width="50%"><img src="docs/images/step2-extracted.webp" alt="Extracted objects"><br><sub><b>2. Cropping</b> — each object cut out of the photo</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/images/step3-completed.webp" alt="Completed objects"><br><sub><b>3. Completion</b> — hidden parts generated, background removed</sub></td>
+    <td width="50%"><img src="docs/images/step4-3d-models.webp" alt="3D models"><br><sub><b>6. 3D generation</b> — one textured 3D model per object (TRELLIS.2)</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/images/step5-depth-map.webp" alt="Depth map"><br><sub><b>5. Depth estimation</b> — Depth Anything V2 (brighter = nearer)</sub></td>
+    <td width="50%"><img src="docs/images/scene-result.webp" alt="3D scene"><br><sub><b>7. Scene composition</b> — models placed at the depth of their PC Boxes</sub></td>
+  </tr>
+</table>
+
 ## Requirements
 
 - Node.js 18 or later
