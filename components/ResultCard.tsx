@@ -4,6 +4,13 @@ import { Download, AlertTriangle, Wand2, Trash2, Box } from 'lucide-react';
 import { BoundingBoxOverlay, OverlayBox } from './BoundingBoxOverlay';
 import { findBestMatchPosition, calculateTightBoundingBox } from '../utils';
 
+const CHECKERBOARD: React.CSSProperties = {
+  backgroundColor: '#ffffff',
+  backgroundImage: 'linear-gradient(45deg, #e2e8f0 25%, transparent 25%), linear-gradient(-45deg, #e2e8f0 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e2e8f0 75%), linear-gradient(-45deg, transparent 75%, #e2e8f0 75%)',
+  backgroundSize: '16px 16px',
+  backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0px',
+};
+
 interface ResultCardProps {
   item: CroppedObject;
   onCompleteBody?: (item: CroppedObject) => void;
@@ -127,7 +134,10 @@ export const ResultCard: React.FC<ResultCardProps> = ({ item, onCompleteBody, on
             height: imageAspectRatio && imageAspectRatio <= 1 ? '100%' : 'auto',
             aspectRatio: imageAspectRatio ? `${imageAspectRatio}` : 'auto',
             maxWidth: '100%',
-            maxHeight: '100%'
+            maxHeight: '100%',
+            // Checkerboard behind completed images, so that a transparent background
+            // is visible (a white background stays white)
+            ...(item.completionExpansionRatio !== undefined ? CHECKERBOARD : {})
           }}
         >
           <img
