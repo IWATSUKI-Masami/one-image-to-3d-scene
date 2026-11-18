@@ -182,9 +182,97 @@ const loadImageElement = (src: string): Promise<HTMLImageElement> =>
     img.src = src;
   });
 
+type Point = [number, number];
+
+/** Inlier distance, as a fraction of the larger side of the completed image */
+const MATCH_INLIER_THRESHOLD = 0.015;
+/** Minimum number of matches that must agree on the transform */
+const MATCH_MIN_INLIERS = 8;
+/** Minimum fraction of all ratio-test matches that must agree */
+const MATCH_MIN_INLIER_RATIO = 0.25;
+/** Minimum fraction of the matched box that must lie inside the completed image */
+const MATCH_MIN_INSIDE = 0.8;
+
+/** Details of the last match (for diagnostics and tests) */
+export let lastMatchDiagnostics: { matches: number; inliers: number; imageScale: number | null } | null = null;
+
 /**
- * Locate the template image (original crop) inside the large image (completed image)
- * with AKAZE + Lowe's ratio test + RANSAC homography.
+ * Estimate dst = s * src + t (uniform scale + translation) with RANSAC.
+ *
+ * Image completion is asked not to move, resize or deform the visible part, so
+ * the original crop appears in the completed image scaled and shifted only.
+ * This 3-parameter model needs far fewer correct matches than a homography
+ * (8 parameters), which produces distorted boxes from a few wrong matches.
+ * A fixed random seed keeps results reproducible.
+ */
+export const estimateScaleTranslation = (
+  src: Point[],
+  dst: Point[],
+  threshold: number,
+  iterations = 2000,
+): { s: number; tx: number; ty: number; inliers: number } | null => {
+  const n = src.length;
+  if (n < 2) return null;
+
+  let seed = 12345;
+  const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+
+  const countInliers = (s: number, tx: number, ty: number, mark?: boolean[]) => {
+    let count = 0;
+    for (let i = 0; i < n; i++) {
+      const ok = Math.hypot(s * src[i][0] + tx - dst[i][0], s * src[i][1] + ty - dst[i][1]) < threshold;
+      if (ok) count++;
+      if (mark) mark[i] = ok;
+    }
+    return count;
+  };
+
+  let best: { s: number; tx: number; ty: number; inliers: number } | null = null;
+  for (let it = 0; it < iterations; it++) {
+    const i = Math.floor(rand() * n);
+    let j = Math.floor(rand() * (n - 1));
+    if (j >= i) j++;
+    const ds = Math.hypot(src[j][0] - src[i][0], src[j][1] - src[i][1]);
+    if (ds < 1e-6) continue;
+    const s = Math.hypot(dst[j][0] - dst[i][0], dst[j][1] - dst[i][1]) / ds;
+    if (s < 0.2 || s > 10) continue;
+    const tx = dst[i][0] - s * src[i][0];
+    const ty = dst[i][1] - s * src[i][1];
+    const inliers = countInliers(s, tx, ty);
+    if (!best || inliers > best.inliers) best = { s, tx, ty, inliers };
+  }
+  if (!best) return null;
+
+  // Least-squares refinement on the inliers
+  const mark: boolean[] = [];
+  countInliers(best.s, best.tx, best.ty, mark);
+  const idx = mark.flatMap((ok, i) => (ok ? [i] : []));
+  if (idx.length >= 2) {
+    const mean = (pts: Point[], k: 0 | 1) => idx.reduce((a, i) => a + pts[i][k], 0) / idx.length;
+    const sx = mean(src, 0), sy = mean(src, 1), dx = mean(dst, 0), dy = mean(dst, 1);
+    let num = 0, den = 0;
+    for (const i of idx) {
+      num += (src[i][0] - sx) * (dst[i][0] - dx) + (src[i][1] - sy) * (dst[i][1] - dy);
+      den += (src[i][0] - sx) ** 2 + (src[i][1] - sy) ** 2;
+    }
+    if (den > 1e-9 && num > 0) {
+      const s = num / den;
+      best = { s, tx: dx - s * sx, ty: dy - s * sy, inliers: countInliers(s, dx - s * sx, dy - s * sy) };
+    }
+  }
+  return best;
+};
+
+/** Scales of the completed image to search (completions are often drawn much larger than the crop) */
+const MATCH_SCALES = [1, 0.5, 0.25];
+
+/**
+ * Locate the template image (original crop) inside the large image (completed image).
+ *
+ * AKAZE keypoints + k-NN matching with Lowe's ratio test (r = 0.8), then a
+ * uniform scale + translation fitted with RANSAC (see estimateScaleTranslation).
+ * The completed image is searched at several scales and the most consistent
+ * result is kept.
  *
  * Returns the normalized box [ymin, xmin, ymax, xmax] in the large image, or null
  * if no reliable match was found (the caller then falls back to tightBox2d).
@@ -193,6 +281,7 @@ export const findBestMatchPosition = async (
   largeImageUrl: string,
   templateImageUrl: string
 ): Promise<[number, number, number, number] | null> => {
+  lastMatchDiagnostics = null;
   const opencv = await loadOpenCV();
   if (!opencv) {
     console.warn("AKAZE: OpenCV.js is not available.");
@@ -211,106 +300,97 @@ export const findBestMatchPosition = async (
   const allocated: { delete: () => void }[] = [];
   const track = <T extends { delete: () => void }>(obj: T): T => { allocated.push(obj); return obj; };
 
-  const matFromImage = (img: HTMLImageElement) => {
+  /** Grayscale Mat of an image drawn at `scale`, composited on white */
+  const grayFromImage = (img: HTMLImageElement, scale = 1) => {
+    const w = Math.max(1, Math.round(img.width * scale));
+    const h = Math.max(1, Math.round(img.height * scale));
     const canvas = document.createElement('canvas');
-    canvas.width = img.width;
-    canvas.height = img.height;
+    canvas.width = w;
+    canvas.height = h;
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error("Canvas context failed");
-    ctx.drawImage(img, 0, 0);
-    return track(cv.matFromImageData(ctx.getImageData(0, 0, img.width, img.height)));
+    // Transparent pixels would become black in grayscale and create false edges;
+    // completions are generated on white, so composite on white.
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    const rgba = track(cv.matFromImageData(ctx.getImageData(0, 0, w, h)));
+    const gray = track(new cv.Mat());
+    cv.cvtColor(rgba, gray, cv.COLOR_RGBA2GRAY, 0);
+    return { gray, w, h };
   };
 
   try {
-    // Grayscale images
-    const gray1 = track(new cv.Mat());
-    const gray2 = track(new cv.Mat());
-    cv.cvtColor(matFromImage(templateImg), gray1, cv.COLOR_RGBA2GRAY, 0);
-    cv.cvtColor(matFromImage(largeImg), gray2, cv.COLOR_RGBA2GRAY, 0);
-
-    // Keypoints and descriptors
     const akaze = track(new cv.AKAZE());
-    const kp1 = track(new cv.KeyPointVector());
-    const kp2 = track(new cv.KeyPointVector());
-    const des1 = track(new cv.Mat());
-    const des2 = track(new cv.Mat());
+    const bf = track(new cv.BFMatcher(cv.NORM_HAMMING, false));
     const noMask = track(new cv.Mat());
-    akaze.detectAndCompute(gray1, noMask, kp1, des1);
-    akaze.detectAndCompute(gray2, noMask, kp2, des2);
 
-    if (kp1.size() === 0 || kp2.size() === 0) {
-      console.warn("AKAZE: No keypoints detected.");
+    const tpl = grayFromImage(templateImg);
+    const kp1 = track(new cv.KeyPointVector());
+    const des1 = track(new cv.Mat());
+    akaze.detectAndCompute(tpl.gray, noMask, kp1, des1);
+    if (kp1.size() === 0) {
+      console.warn("AKAZE: No keypoints in the original crop.");
       return null;
     }
 
-    // k-NN matching (k = 2) with Lowe's ratio test
-    const bf = track(new cv.BFMatcher(cv.NORM_HAMMING, false));
-    const matches = track(new cv.DMatchVectorVector());
-    bf.knnMatch(des1, des2, matches, 2);
+    type Candidate = { box: [number, number, number, number]; inliers: number; matches: number; scale: number };
+    let best: Candidate | null = null;
+    let tried = 0;
 
-    const ratio = 0.8;
-    const srcPoints: number[] = [];
-    const dstPoints: number[] = [];
-    for (let i = 0; i < matches.size(); ++i) {
-      const pair = matches.get(i);
-      if (pair.size() < 2) continue;
-      const m = pair.get(0);
-      const n = pair.get(1);
-      if (m.distance < ratio * n.distance) {
-        const p1 = kp1.get(m.queryIdx).pt;
-        const p2 = kp2.get(m.trainIdx).pt;
-        srcPoints.push(p1.x, p1.y);
-        dstPoints.push(p2.x, p2.y);
+    for (const imageScale of MATCH_SCALES) {
+      const large = grayFromImage(largeImg, imageScale);
+      if (Math.min(large.w, large.h) < 32) continue;
+      const kp2 = track(new cv.KeyPointVector());
+      const des2 = track(new cv.Mat());
+      akaze.detectAndCompute(large.gray, noMask, kp2, des2);
+      if (kp2.size() < 2) continue;
+
+      // k-NN matching (k = 2) with Lowe's ratio test
+      const matches = track(new cv.DMatchVectorVector());
+      bf.knnMatch(des1, des2, matches, 2);
+      const src: Point[] = [], dst: Point[] = [];
+      for (let i = 0; i < matches.size(); ++i) {
+        const pair = matches.get(i);
+        if (pair.size() < 2) continue;
+        const m = pair.get(0);
+        const n = pair.get(1);
+        if (m.distance < 0.8 * n.distance) {
+          const p1 = kp1.get(m.queryIdx).pt;
+          const p2 = kp2.get(m.trainIdx).pt;
+          src.push([p1.x, p1.y]);
+          dst.push([p2.x, p2.y]);
+        }
+      }
+      tried = Math.max(tried, src.length);
+
+      const model = estimateScaleTranslation(src, dst, MATCH_INLIER_THRESHOLD * Math.max(large.w, large.h));
+      if (!model || model.inliers < MATCH_MIN_INLIERS || model.inliers < MATCH_MIN_INLIER_RATIO * src.length) continue;
+
+      // The template rectangle mapped into the large image
+      const x0 = model.tx, y0 = model.ty;
+      const x1 = model.tx + model.s * tpl.w, y1 = model.ty + model.s * tpl.h;
+      const inside = (Math.min(x1, large.w) - Math.max(x0, 0)) * (Math.min(y1, large.h) - Math.max(y0, 0));
+      if (inside <= 0 || inside < MATCH_MIN_INSIDE * (x1 - x0) * (y1 - y0)) continue;
+
+      if (!best || model.inliers > best.inliers) {
+        best = {
+          box: [Math.max(0, y0 / large.h), Math.max(0, x0 / large.w), Math.min(1, y1 / large.h), Math.min(1, x1 / large.w)],
+          inliers: model.inliers,
+          matches: src.length,
+          scale: imageScale,
+        };
       }
     }
 
-    if (srcPoints.length / 2 < 4) {
-      console.warn("AKAZE: Not enough matches found (< 4).");
+    lastMatchDiagnostics = best
+      ? { matches: best.matches, inliers: best.inliers, imageScale: best.scale }
+      : { matches: tried, inliers: 0, imageScale: null };
+    if (!best) {
+      console.warn(`AKAZE: No reliable match (at most ${tried} ratio-test matches); using the fallback box.`);
       return null;
     }
-
-    // Homography with RANSAC
-    const srcMat = track(cv.matFromArray(srcPoints.length / 2, 1, cv.CV_32FC2, srcPoints));
-    const dstMat = track(cv.matFromArray(dstPoints.length / 2, 1, cv.CV_32FC2, dstPoints));
-    const H = track(cv.findHomography(srcMat, dstMat, cv.RANSAC, 5.0));
-    if (H.empty()) {
-      console.warn("AKAZE: Homography matrix is empty.");
-      return null;
-    }
-
-    // Project the template corners into the large image
-    const objCorners = track(cv.matFromArray(4, 1, cv.CV_32FC2, [
-      0, 0,
-      templateImg.width, 0,
-      templateImg.width, templateImg.height,
-      0, templateImg.height
-    ]));
-    const sceneCorners = track(new cv.Mat());
-    cv.perspectiveTransform(objCorners, sceneCorners, H);
-
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (let i = 0; i < 4; ++i) {
-      const x = sceneCorners.data32F[i * 2];
-      const y = sceneCorners.data32F[i * 2 + 1];
-      minX = Math.min(minX, x); maxX = Math.max(maxX, x);
-      minY = Math.min(minY, y); maxY = Math.max(maxY, y);
-    }
-
-    const normMinX = Math.max(0, minX / largeImg.width);
-    const normMinY = Math.max(0, minY / largeImg.height);
-    const normMaxX = Math.min(1, maxX / largeImg.width);
-    const normMaxY = Math.min(1, maxY / largeImg.height);
-
-    // A box much smaller than the large image means AKAZE matched only a part of it
-    const minSize = 0.3;
-    const detectedWidth = normMaxX - normMinX;
-    const detectedHeight = normMaxY - normMinY;
-    if (detectedWidth < minSize && detectedHeight < minSize) {
-      console.warn(`AKAZE: Detected box too small (${(detectedWidth * 100).toFixed(1)}% x ${(detectedHeight * 100).toFixed(1)}%), rejecting match`);
-      return null;
-    }
-
-    return [normMinY, normMinX, normMaxY, normMaxX];
+    return best.box;
   } catch (e) {
     console.error("AKAZE execution failed:", e);
     return null;

@@ -17,7 +17,7 @@
 | 1 | 物体検出 | VLM（Gemini または OpenAI）でバウンディングボックス、ラベル、詳細な説明（姿勢・動作・服装）を取得 |
 | 2 | 切り出し | HTML5 Canvas API |
 | 3 | 画像補完 | 生成AI（Gemini または OpenAI の画像生成）によるアウトペインティングで、姿勢を保ったまま隠れた部分や切れた部分を復元し、背景を除去（BRIA RMBG 2.0） |
-| 4 | 特徴点マッチング | AKAZE（OpenCV.js）、Lowe's Ratio Test、RANSACによるホモグラフィ推定で、元の切り出し画像が補完画像のどこにあたるかを特定 |
+| 4 | 特徴点マッチング | AKAZE（OpenCV.js）、Lowe's Ratio Test、RANSAC による拡大率と移動量の推定（複数の縮小率で探索）で、元の切り出し画像が補完画像のどこにあたるかを特定（信頼できない場合は物体全体の枠を使用） |
 | 5 | 深度推定 | Depth Anything V2。物体の深度はマスク内の深度の中央値 |
 | 6 | 3D生成 | TRELLIS.2 または Hunyuan3D-2.1（Hugging Face Spaces）でテクスチャ付きGLBを生成 |
 | 7 | シーン合成 | Three.js。深度マップから作った点群のバウンディングボックス（PC Box）にモデルを合わせて配置 |

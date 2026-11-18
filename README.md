@@ -17,7 +17,7 @@ This is the reference implementation of the paper listed in [Citation](#citation
 | 1 | Object detection | Vision-Language Model (Gemini or OpenAI) returns bounding boxes, labels and detailed descriptions (pose, action, clothing) |
 | 2 | Cropping | HTML5 Canvas API |
 | 3 | Image completion | Generative AI outpainting (Gemini or OpenAI image generation) restores occluded / cut-off parts while preserving pose, followed by background removal (BRIA RMBG 2.0) |
-| 4 | Feature matching | AKAZE (OpenCV.js) + Lowe's ratio test + RANSAC homography to localize the original crop inside the completed image |
+| 4 | Feature matching | AKAZE (OpenCV.js) + Lowe's ratio test + RANSAC fit of a scale + translation, searched at several image scales, to localize the original crop inside the completed image (unreliable matches fall back to the whole object) |
 | 5 | Depth estimation | Depth Anything V2; object depth is the median depth inside the object mask |
 | 6 | 3D generation | TRELLIS.2 or Hunyuan3D-2.1 (Hugging Face Spaces) → textured GLB |
 | 7 | Scene composition | Three.js; models are aligned to point-cloud bounding boxes (PC Box) built from the depth map |
