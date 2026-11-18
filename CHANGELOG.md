@@ -8,6 +8,7 @@ All notable changes to this project. Versions up to v1.18.1 were developed in th
 - **Changed** default Gemini models: `gemini-3-pro-preview` → `gemini-pro-latest`, `gemini-3-pro-image-preview` (shut down) → `gemini-3-pro-image`.
 - **Changed** JSON output of all vision tasks is now enforced with each provider's structured-output feature. The detection result is wrapped as `{"objects": [...]}`.
 - **Changed** the Gemini API key can now be entered in the app (previously only via `.env.local` or Google AI Studio). Removed the Google AI Studio key-selection integration.
+- **Fixed** Gemini calls use the `v1beta` API explicitly (SDK 3.x defaults to `v1`, where model aliases such as `gemini-pro-latest` return 404).
 - **Updated** `@google/genai` 1.30 → 3.4; added `openai`; removed the unused `@google/generative-ai`.
 - **Added** Hunyuan3D-2.1 (Tencent, official Hugging Face Space) as a 3D generator alongside TRELLIS.2. Note its license does not apply in the EU, UK and South Korea.
 - **Removed** TripoSR (local Gradio server) because of its low accuracy. Models generated with TripoSR in saved projects still load and display.

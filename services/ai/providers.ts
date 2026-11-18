@@ -13,6 +13,12 @@ import OpenAI, { toFile } from 'openai';
 import { AIProvider, AISettings } from '../../types';
 import { PROVIDER_LABELS } from './models';
 
+/**
+ * Gemini API version. SDK 3.x defaults to 'v1', where model aliases such as
+ * `gemini-pro-latest`, preview models and JSON-schema output are not available.
+ */
+const GEMINI_API_VERSION = 'v1beta';
+
 export interface ImageData {
   base64: string;
   mimeType: string;
@@ -87,7 +93,7 @@ export const analyzeImageJson = async <T>(
   const apiKey = requireKey(settings, provider);
 
   if (provider === 'gemini') {
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenAI({ apiKey, apiVersion: GEMINI_API_VERSION });
     const response = await ai.models.generateContent({
       model: settings.models.geminiVision,
       contents: {
@@ -139,7 +145,7 @@ export const generateImage = async (
   const apiKey = requireKey(settings, provider);
 
   if (provider === 'gemini') {
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenAI({ apiKey, apiVersion: GEMINI_API_VERSION });
     const response = await ai.models.generateContent({
       model: settings.models.geminiImage,
       contents: {
