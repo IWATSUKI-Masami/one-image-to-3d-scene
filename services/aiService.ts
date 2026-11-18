@@ -9,7 +9,7 @@
  * The prompts are the ones used in the paper (KBSE2025-61); only the JSON output
  * format is now enforced with each provider's structured-output feature.
  */
-import { AISettings, DetectedObject } from "../types";
+import { AISettings, DetectedObject, FaceStyle } from "../types";
 import { analyzeImageJson, generateImage, loadImageData, JsonSchema } from "./ai/providers";
 
 // ---------------------------------------------------------------------------
@@ -109,14 +109,7 @@ export const detectObjectsInImage = async (file: File, settings: AISettings): Pr
 // Phase 3: image completion
 // ---------------------------------------------------------------------------
 
-/**
- * Face of people in completion:
- * - keep: copy the face from the photo as it is
- * - redraw: redraw a blurred or small face sharply, keeping the expression
- * - calm: like redraw, with a relaxed closed-mouth expression (teeth and open mouths look uncanny in 3D)
- * - mannequin: smooth face without painted features, like a store mannequin
- */
-export type FaceStyle = 'keep' | 'redraw' | 'calm' | 'mannequin';
+export type { FaceStyle };
 
 const FACE_RULES: Record<Exclude<FaceStyle, 'keep'>, string> = {
   redraw: `**CLEAR, NATURAL FACE**:

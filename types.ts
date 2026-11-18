@@ -14,6 +14,24 @@ export interface CroppedObject extends DetectedObject {
   originalPartBox2d?: [number, number, number, number]; // Position of original crop within completed image
   tightBox2d?: [number, number, number, number]; // Calculated tight bounding box of the object (purple box)
   isRefined?: boolean;
+  /** How the image was completed (shown on the completed card) */
+  completion?: CompletionInfo;
+}
+
+/**
+ * Face of people in completion:
+ * - keep: copy the face from the photo as it is
+ * - redraw: redraw a blurred or small face sharply, keeping the expression
+ * - calm: like redraw, with a relaxed closed-mouth expression (teeth and open mouths look uncanny in 3D)
+ * - mannequin: smooth face without painted features, like a store mannequin
+ */
+export type FaceStyle = 'keep' | 'redraw' | 'calm' | 'mannequin';
+
+export interface CompletionInfo {
+  /** Image provider used for completion (e.g. 'OpenAI') */
+  provider: string;
+  /** Face style (people only) */
+  faceStyle?: FaceStyle;
 }
 
 /** 3D generation service (Hugging Face Spaces) */

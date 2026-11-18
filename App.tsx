@@ -6,21 +6,17 @@ import { Model3DCard } from './components/Model3DCard';
 
 import { DepthOnlyScene } from './components/DepthOnlyScene';
 import { BoundingBoxOverlay } from './components/BoundingBoxOverlay';
-import { detectObjectsInImage, generateCompletion, estimateCanvasExpansion, verifyCompletion, FaceStyle } from './services/aiService';
+import { detectObjectsInImage, generateCompletion, estimateCanvasExpansion, verifyCompletion } from './services/aiService';
 
 /** Face styles for the completion of people */
-const FACE_STYLE_OPTIONS: { value: FaceStyle; label: string }[] = [
-  { value: 'calm', label: 'Calm' },
-  { value: 'redraw', label: 'Redraw' },
-  { value: 'mannequin', label: 'Mannequin' },
-  { value: 'keep', label: 'As in photo' },
-];
+const FACE_STYLE_OPTIONS = (Object.entries(FACE_STYLE_LABELS) as [FaceStyle, string][])
+  .map(([value, label]) => ({ value, label }));
 const FACE_STYLE_HINT = 'Faces of people in completion. Calm: sharp face, relaxed expression with the mouth closed (open mouths and teeth look uncanny in 3D). Redraw: sharp face, same expression. Mannequin: smooth face without painted features. As in photo: copied as it is.';
-import { loadAISettings, saveAISettings, hasRequiredKeys, bgRemovalSpace, DEFAULT_SPACES, PROVIDER_LABELS } from './services/ai/models';
+import { loadAISettings, saveAISettings, hasRequiredKeys, bgRemovalSpace, DEFAULT_SPACES, PROVIDER_LABELS, FACE_STYLE_LABELS } from './services/ai/models';
 import { estimateModelOrientation, MIN_ORIENTATION_CONFIDENCE } from './services/orientation';
 import { AISettingsDialog } from './components/AISettingsDialog';
 import { cropObjectsFromImage, removeBackgroundWithRembg, findBestMatchPosition, hasTransparentBackground, generate3DModelWithHunyuan3D, generate3DModelWithTrellis, blobUrlToDataUrl, dataUrlToBlobUrl, generateDepthMap, prepareImageForCompletion, calculateTightBoundingBox } from './utils';
-import { DetectedObject, CroppedObject, Model3D, ModelOrientation, ModelProvider, ProjectArchive, AISettings } from './types';
+import { DetectedObject, CroppedObject, Model3D, ModelOrientation, ModelProvider, ProjectArchive, AISettings, FaceStyle, CompletionInfo } from './types';
 import { Scan, Sparkles, AlertCircle, Layers, Image as ImageIcon, User, Box, ArrowLeft, Upload, Plug, Wand2, RefreshCw, Star, Download, MonitorPlay, Cuboid, Save, FolderOpen, Trash2, Compass } from 'lucide-react';
 
 type AppMode = 'landing' | 'analyze' | 'batch-remove' | 'complete-body' | 'generate-3d';
@@ -617,6 +613,12 @@ const App: React.FC = () => {
 
   };
 
+  /** Settings used for a completion, shown on the completed card */
+  const completionInfo = (type: 'person' | 'object'): CompletionInfo => ({
+    provider: PROVIDER_LABELS[aiSettings.imageProvider],
+    ...(type === 'person' ? { faceStyle } : {}),
+  });
+
   const performCompletion = async (url: string, type: 'person' | 'object') => {
     setIsCompleting(true);
     setError(null);
@@ -638,7 +640,8 @@ const App: React.FC = () => {
         imageUrl: generatedUrl,
         bgRemovalFailed: false,
         // Convert multiplier (e.g. 1.6) to extension fraction (e.g. 0.6/1.6 = 0.375)
-        completionExpansionRatio: (expansionRatio - 1) / expansionRatio
+        completionExpansionRatio: (expansionRatio - 1) / expansionRatio,
+        completion: completionInfo(type),
       };
 
       setCompletionResult(newObject);
@@ -823,6 +826,7 @@ const App: React.FC = () => {
         imageUrl: finalImageUrl,
         bgRemovalFailed,
         completionExpansionRatio: expansionRatio,
+        completion: completionInfo(item.type),
         originalCroppedImageUrl: item.imageUrl,
         originalPartBox2d: detectedOriginalPartBox2d,
         tightBox2d: detectedTightBox2d,
@@ -940,6 +944,7 @@ const App: React.FC = () => {
             imageUrl: transparentUrl,
             bgRemovalFailed: batchBgRemovalFailed,
             completionExpansionRatio: expansionRatio,
+            completion: completionInfo(item.type),
             originalCroppedImageUrl: item.imageUrl,
             originalPartBox2d: batchOriginalPartBox2d,
             tightBox2d: batchTightBox2d,

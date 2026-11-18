@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { CroppedObject } from '../types';
+import { FACE_STYLE_LABELS } from '../services/ai/models';
 import { Download, AlertTriangle, Wand2, Trash2, Box } from 'lucide-react';
 import { BoundingBoxOverlay, OverlayBox } from './BoundingBoxOverlay';
 import { findBestMatchPosition, calculateTightBoundingBox } from '../utils';
@@ -285,6 +286,13 @@ export const ResultCard: React.FC<ResultCardProps> = ({ item, onCompleteBody, on
         <p className="font-medium text-slate-800 capitalize text-center truncate" title={item.label}>
           {item.label}
         </p>
+        {item.completion && (
+          <p className="text-[11px] text-indigo-600 mt-1 text-center truncate"
+            title="Settings used for the completion: image provider and face style (people)">
+            {item.completion.provider}
+            {item.completion.faceStyle && ` · Face: ${FACE_STYLE_LABELS[item.completion.faceStyle]}`}
+          </p>
+        )}
         {item.description && (
           <p className="text-xs text-slate-500 mt-1 text-center line-clamp-2" title={item.description}>
             {item.description}

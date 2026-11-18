@@ -1,4 +1,4 @@
-import { AIModels, AIProvider, AISettings, BgRemovalModel, HFSpaces } from '../../types';
+import { AIModels, AIProvider, AISettings, BgRemovalModel, FaceStyle, HFSpaces } from '../../types';
 
 /**
  * Default model IDs.
@@ -42,6 +42,14 @@ export const MODEL_SUGGESTIONS: Record<keyof AIModels, string[]> = {
 };
 
 // Key order is the display order (OpenAI first: it is the default)
+/** Face styles for the completion of people, in menu order */
+export const FACE_STYLE_LABELS: Record<FaceStyle, string> = {
+  calm: 'Calm',
+  redraw: 'Redraw',
+  mannequin: 'Mannequin',
+  keep: 'As in photo',
+};
+
 export const PROVIDER_LABELS: Record<AIProvider, string> = {
   openai: 'OpenAI',
   gemini: 'Gemini',
