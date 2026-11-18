@@ -16,6 +16,9 @@ export interface CroppedObject extends DetectedObject {
   isRefined?: boolean;
 }
 
+/** 3D generation service (Hugging Face Spaces) */
+export type ModelProvider = 'trellis' | 'hunyuan3d';
+
 export interface Model3D {
   id: string;
   label: string;
@@ -28,7 +31,7 @@ export interface Model3D {
   completionExpansionRatio?: number;
   originalPartBox2d?: [number, number, number, number];
   tightBox2d?: [number, number, number, number]; // Bounds of the non-transparent object in the image
-  provider?: 'triposr-local' | 'trellis'; // Which 3D generation service was used
+  provider?: ModelProvider | 'triposr-local'; // Service that generated the model ('triposr-local': projects saved by earlier versions)
 }
 
 export interface ProjectArchive {

@@ -9,6 +9,8 @@ All notable changes to this project. Versions up to v1.18.1 were developed in th
 - **Changed** JSON output of all vision tasks is now enforced with each provider's structured-output feature. The detection result is wrapped as `{"objects": [...]}`.
 - **Changed** the Gemini API key can now be entered in the app (previously only via `.env.local` or Google AI Studio). Removed the Google AI Studio key-selection integration.
 - **Updated** `@google/genai` 1.30 → 3.4; added `openai`; removed the unused `@google/generative-ai`.
+- **Added** Hunyuan3D-2.1 (Tencent, official Hugging Face Space) as a 3D generator alongside TRELLIS.2. Note its license does not apply in the EU, UK and South Korea.
+- **Removed** TripoSR (local Gradio server) because of its low accuracy. Models generated with TripoSR in saved projects still load and display.
 - **Fixed** PC Box depth now follows Eq. (4) of the paper: the median depth of the non-transparent pixels (alpha > 128) of the object's background-removed image, mapped into the scene with the AKAZE result (`originalPartBox2d`). This code path had never run before; the boxes and 3D models were placed using the depth at a few fixed points of the bounding box (2 points for models, 6 for PC Boxes). Without a usable mask, the median of all pixels in the box is used.
 - **Fixed** person/object classification of detected objects now uses the VLM's `type` (it used to guess from label words, so e.g. "woman" matched "man").
 - **Fixed** AKAZE matching: OpenCV objects are always released (some were leaked), the bounding box of projected corners is computed correctly (`Number.MIN_VALUE` was used as -∞), and matching waits for OpenCV.js to finish loading instead of giving up.

@@ -149,8 +149,8 @@ export const SingleModelViewer: React.FC<SingleModelViewerProps> = ({ model, sho
                 mesh.scale.set(scale, scale, scale);
                 mesh.position.sub(center.multiplyScalar(scale));
                 mesh.position.y += (size.y * scale) / 2;
-                // Apply rotation based on provider - TRELLIS.2 models don't need rotation
-                if (model.provider !== 'trellis') {
+                // TRELLIS.2 and Hunyuan3D-2.1 models already face the camera (+Z); older TripoSR models need a 180° turn
+                if (model.provider !== 'trellis' && model.provider !== 'hunyuan3d') {
                     mesh.rotation.y = Math.PI; // Face the camera for other providers
                 }
 

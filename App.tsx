@@ -9,8 +9,8 @@ import { BoundingBoxOverlay } from './components/BoundingBoxOverlay';
 import { detectObjectsInImage, generateCompletion, estimateCanvasExpansion, verifyCompletion } from './services/aiService';
 import { loadAISettings, saveAISettings, hasRequiredKeys, PROVIDER_LABELS } from './services/ai/models';
 import { AISettingsDialog } from './components/AISettingsDialog';
-import { cropObjectsFromImage, removeBackgroundWithRembg, findBestMatchPosition, generate3DModelWithTripoSRLocal, generate3DModelWithTrellis, blobUrlToDataUrl, dataUrlToBlobUrl, generateDepthMap, prepareImageForCompletion, calculateTightBoundingBox } from './utils';
-import { DetectedObject, CroppedObject, Model3D, ProjectArchive, AISettings } from './types';
+import { cropObjectsFromImage, removeBackgroundWithRembg, findBestMatchPosition, generate3DModelWithHunyuan3D, generate3DModelWithTrellis, blobUrlToDataUrl, dataUrlToBlobUrl, generateDepthMap, prepareImageForCompletion, calculateTightBoundingBox } from './utils';
+import { DetectedObject, CroppedObject, Model3D, ModelProvider, ProjectArchive, AISettings } from './types';
 import { Scan, Sparkles, AlertCircle, Layers, Image as ImageIcon, User, Box, ArrowLeft, Upload, Plug, Wand2, RefreshCw, Star, Download, MonitorPlay, Cuboid, Save, FolderOpen, Trash2 } from 'lucide-react';
 
 type AppMode = 'landing' | 'analyze' | 'batch-remove' | 'complete-body' | 'generate-3d';
@@ -37,8 +37,7 @@ const App: React.FC = () => {
   const [isGeneratingDepth, setIsGeneratingDepth] = useState(false);
 
   // 3D generation settings
-  const [modelProvider, setModelProvider] = useState<'triposr-local' | 'trellis'>('trellis');
-  const [tripoSrApiUrl, setTripoSrApiUrl] = useState('http://127.0.0.1:7860/');
+  const [modelProvider, setModelProvider] = useState<ModelProvider>('trellis');
   const [hfToken, setHfToken] = useState(import.meta.env.VITE_HF_TOKEN || '');
 
   // Overlap refinement state
@@ -353,13 +352,9 @@ const App: React.FC = () => {
     try {
       let glbBlob: Blob;
 
-      if (modelProvider === 'triposr-local') {
-        // Local TripoSR
-        glbBlob = await generate3DModelWithTripoSRLocal(item.imageUrl, 256, tripoSrApiUrl);
-      } else {
-        // TRELLIS.2 via Hugging Face
-        glbBlob = await generate3DModelWithTrellis(item.imageUrl, hfToken);
-      }
+      glbBlob = modelProvider === 'hunyuan3d'
+        ? await generate3DModelWithHunyuan3D(item.imageUrl, hfToken)
+        : await generate3DModelWithTrellis(item.imageUrl, hfToken);
 
       const glbUrl = URL.createObjectURL(glbBlob);
 
@@ -1192,7 +1187,7 @@ const App: React.FC = () => {
                     value={hfToken}
                     onChange={(e) => setHfToken(e.target.value)}
                     className="w-24 px-2 py-0.5 text-xs border border-slate-300 rounded focus:outline-none focus:border-blue-500"
-                    title="Hugging Face token: required for TRELLIS.2, recommended for background removal and depth estimation"
+                    title="Hugging Face token: required for 3D generation (TRELLIS.2 / Hunyuan3D-2.1), recommended for background removal and depth estimation"
                   />
 
                 </div>
@@ -1202,28 +1197,18 @@ const App: React.FC = () => {
                   <span className="text-[10px] font-bold text-slate-400 uppercase">3D</span>
                   <div className="flex bg-white rounded-md border border-slate-200 p-0.5">
                     <button
-                      onClick={() => setModelProvider('triposr-local')}
-                      className={`px-1.5 py-0.5 text-[11px] rounded-sm transition-colors ${modelProvider === 'triposr-local' ? 'bg-orange-100 text-orange-700 font-medium' : 'text-slate-500 hover:text-slate-700'}`}
-                    >
-                      TripoSR
-                    </button>
-                    <button
                       onClick={() => setModelProvider('trellis')}
                       className={`px-1.5 py-0.5 text-[11px] rounded-sm transition-colors ${modelProvider === 'trellis' ? 'bg-emerald-100 text-emerald-700 font-medium' : 'text-slate-500 hover:text-slate-700'}`}
                     >
                       TRELLIS.2
                     </button>
+                    <button
+                      onClick={() => setModelProvider('hunyuan3d')}
+                      className={`px-1.5 py-0.5 text-[11px] rounded-sm transition-colors ${modelProvider === 'hunyuan3d' ? 'bg-emerald-100 text-emerald-700 font-medium' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                      Hunyuan3D-2.1
+                    </button>
                   </div>
-
-                  {modelProvider === 'triposr-local' && (
-                    <input
-                      type="text"
-                      placeholder="http://127.0.0.1:7860/"
-                      value={tripoSrApiUrl}
-                      onChange={(e) => setTripoSrApiUrl(e.target.value)}
-                      className="w-40 px-2 py-0.5 text-xs border border-slate-300 rounded focus:outline-none focus:border-orange-500 font-mono"
-                    />
-                  )}
                 </div>
               </div>
             )}

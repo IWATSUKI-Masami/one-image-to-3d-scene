@@ -480,51 +480,54 @@ export const calculateTightBoundingBox = async (imageUrl: string): Promise<[numb
   });
 };
 
-export const generate3DModelWithTripoSRLocal = async (imageUrl: string, mcResolution: number = 256, apiUrl: string = "http://127.0.0.1:7860/"): Promise<Blob> => {
+/**
+ * Hunyuan3D-2.1 (Tencent) via its official Hugging Face Space.
+ * Calls `generation_all` (shape + PBR texture) of the Space's Gradio app and
+ * returns the textured GLB. Parameters are the app's defaults.
+ */
+export const generate3DModelWithHunyuan3D = async (imageUrl: string, hfToken?: string): Promise<Blob> => {
   try {
     const { Client } = await import("@gradio/client");
 
-    // Connect to local Gradio server
-    const client = await Client.connect(apiUrl);
+    // An HF token is required so that ZeroGPU usage is billed to the user's own quota
+    const token = hfToken && hfToken.trim().length > 0 ? hfToken : undefined;
+    if (!token) {
+      throw new Error("Hugging Face token is required for Hunyuan3D-2.1. Please enter your HF Token in the settings.");
+    }
+
+    const client: any = await Client.connect('tencent/Hunyuan3D-2.1', { hf_token: token } as any);
 
     const imageBlob = await (await fetch(imageUrl)).blob();
+    const imageFile = new File([imageBlob], 'input.png', { type: imageBlob.type || 'image/png' });
 
-    // Endpoint /generate based on provided docs
-    const result = await client.predict("/generate", {
-      image: imageBlob,
-      mc_resolution: mcResolution,
+    const result = await client.predict("/generation_all", {
+      image: imageFile,
+      mv_image_front: null,
+      mv_image_back: null,
+      mv_image_left: null,
+      mv_image_right: null,
+      steps: 30,
+      guidance_scale: 5.0,
+      seed: 1234,
+      octree_resolution: 256,
+      check_box_rembg: true,
+      num_chunks: 8000,
+      randomize_seed: true,
     });
 
-    const data = result.data as any[];
+    // Outputs: [untextured mesh, textured GLB, viewer HTML, stats, seed]
+    const textured = (result.data as any[])?.[1];
+    const glbUrl: string | undefined = typeof textured === 'string' ? textured : (textured?.url ?? textured?.value?.url);
+    if (!glbUrl) throw new Error("No textured GLB in the response");
 
-    if (data && data.length > 1) {
-      // API Returns [0]: OBJ, [1]: GLB - we prefer GLB for web viewing
-      // Note: Gradio client might return a clean URL or a data object depending on version
-      const glbItem = data[1];
+    const response = await fetch(glbUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+    if (!response.ok) throw new Error(`GLB download failed: ${response.status} ${response.statusText}`);
+    return new Blob([await response.arrayBuffer()], { type: 'model/gltf-binary' });
 
-      let glbUrl = "";
-      if (typeof glbItem === 'string') {
-        glbUrl = glbItem;
-      } else if (glbItem && glbItem.url) {
-        glbUrl = glbItem.url;
-      }
-
-      if (glbUrl) {
-        // Fetch the actual blob from the URL
-        const response = await fetch(glbUrl);
-        return await response.blob();
-      }
-    }
-
-    throw new Error("Invalid response structure from TripoSR Local");
-
-  } catch (error) {
-    console.error("TripoSR Local generation error:", error);
-    // Suggest checking the server if connection failed
-    if (error instanceof Error && error.message.includes("Failed to fetch")) {
-      throw new Error(`Failed to connect to TripoSR Local at ${apiUrl}. Please ensure the server is running.`);
-    }
-    throw error;
+  } catch (e: any) {
+    console.error("Hunyuan3D-2.1 via Gradio failed:", e);
+    const errorMsg = e.original_msg ? `Gradio Error: ${e.original_msg}` : (e.message || "An unknown error occurred");
+    throw new Error(`Hunyuan3D-2.1 Failed: ${errorMsg}`);
   }
 };
 

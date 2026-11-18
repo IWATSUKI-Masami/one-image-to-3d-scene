@@ -648,8 +648,8 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
 
                     // Center mesh at origin
                     mesh.position.sub(meshCenter);
-                    // Apply rotation based on provider - TRELLIS.2 models don't need rotation
-                    if (model.provider !== 'trellis') {
+                    // TRELLIS.2 and Hunyuan3D-2.1 models already face the camera (+Z); older TripoSR models need a 180° turn
+                    if (model.provider !== 'trellis' && model.provider !== 'hunyuan3d') {
                         mesh.rotation.y = Math.PI; // Face camera for other providers
                     }
 

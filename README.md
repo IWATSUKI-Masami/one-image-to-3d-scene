@@ -19,15 +19,14 @@ This is the reference implementation of the paper listed in [Citation](#citation
 | 3 | Image completion | Generative AI outpainting (Gemini or OpenAI image generation) restores occluded / cut-off parts while preserving pose, followed by background removal (BRIA RMBG 2.0) |
 | 4 | Feature matching | AKAZE (OpenCV.js) + Lowe's ratio test + RANSAC homography to localize the original crop inside the completed image |
 | 5 | Depth estimation | Depth Anything V2; object depth is the median depth inside the object mask |
-| 6 | 3D generation | TRELLIS.2 or TripoSR (local) → GLB |
+| 6 | 3D generation | TRELLIS.2 or Hunyuan3D-2.1 (Hugging Face Spaces) → textured GLB |
 | 7 | Scene composition | Three.js; models are aligned to point-cloud bounding boxes (PC Box) built from the depth map |
 
 ## Requirements
 
 - Node.js 18 or later
 - **An API key for Google Gemini or OpenAI** (or both, if you use one for detection and the other for completion)
-- **Hugging Face token** (required for TRELLIS.2; recommended for the other Hugging Face Spaces, since ZeroGPU usage is counted against your own quota)
-- Optional: a local [TripoSR](https://github.com/VAST-AI-Research/TripoSR) Gradio server (default `http://127.0.0.1:7860/`)
+- **Hugging Face token** (required for 3D generation with TRELLIS.2 / Hunyuan3D-2.1; recommended for background removal and depth estimation, since ZeroGPU usage is counted against your own quota)
 
 ## Setup
 
@@ -114,7 +113,9 @@ If you use this software in your research, please cite:
 
 [MIT](LICENSE)
 
-This repository contains only the application code. The external models and APIs it calls (Gemini, OpenAI, TRELLIS.2, TripoSR, Depth Anything V2, BRIA RMBG 2.0, etc.) are governed by their own licenses and terms of use; check them before use, especially for commercial purposes.
+This repository contains only the application code. The external models and APIs it calls (Gemini, OpenAI, TRELLIS.2, Hunyuan3D-2.1, Depth Anything V2, BRIA RMBG 2.0, etc.) are governed by their own licenses and terms of use; check them before use, especially for commercial purposes.
+
+In particular, the [Tencent Hunyuan 3D 2.1 Community License](https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1/blob/main/LICENSE) does not apply in the European Union, the United Kingdom and South Korea; use TRELLIS.2 (MIT) there.
 
 ## Changelog
 
