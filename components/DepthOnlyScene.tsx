@@ -303,6 +303,12 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     useEffect(() => {
         if (!mountRef.current) return;
 
+        // Set when this scene is torn down. The point cloud and models load
+        // asynchronously; a run that finishes after its scene was replaced (React
+        // StrictMode mounts twice in development, and the scene is rebuilt when the
+        // depth scale or selection changes) must not touch the new scene.
+        let disposed = false;
+
         // Clear any existing canvas
         mountRef.current.innerHTML = '';
 
@@ -416,6 +422,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     loadImageAsync(imageUrl),
                     loadImageAsync(depthMapUrl)
                 ]);
+                if (disposed) return;
 
                 // Use a reasonable resolution for the point cloud
                 const resolution = 256; // Number of points per dimension
@@ -502,6 +509,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 // Alpha masks of the models' background-removed images (Eq. (4))
                 const depthRange: DepthRange = { min: depthMin, max: depthMax };
                 const masks = await loadModelMasks(positionedModels);
+                if (disposed) return;
 
                 // Create PC Boxes for detected objects
                 createBoundingBoxes(depthData, depthRange, aspectCorrection, masks);
@@ -532,9 +540,9 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             aspectCorrection: number,
             masks: Map<string, ObjectMask>
         ) => {
-            if (!sceneRef.current?.boundingBoxGroup || detectedObjects.length === 0) return;
+            if (disposed || detectedObjects.length === 0) return;
 
-            const group = sceneRef.current.boundingBoxGroup;
+            const group = boundingBoxGroup;
             // Clear existing boxes
             while (group.children.length > 0) {
                 group.remove(group.children[0]);
@@ -582,15 +590,15 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             aspectCorrection: number,
             masks: Map<string, ObjectMask>
         ) => {
-            if (!sceneRef.current?.modelsGroup || !sceneRef.current?.modelBoxesGroup || !sceneRef.current?.wholeModelBoxesGroup || positionedModels.length === 0) return;
+            if (disposed || positionedModels.length === 0) return;
 
             // Increment load version to invalidate any in-flight async loads
             loadVersionRef.current++;
             const thisLoadVersion = loadVersionRef.current;
 
-            const group = sceneRef.current.modelsGroup;
-            const boxGroup = sceneRef.current.modelBoxesGroup;
-            const wholeBoxGroup = sceneRef.current.wholeModelBoxesGroup;
+            const group = modelsGroup;
+            const boxGroup = modelBoxesGroup;
+            const wholeBoxGroup = wholeModelBoxesGroup;
             // Clear existing models
             while (group.children.length > 0) {
                 group.remove(group.children[0]);
@@ -632,8 +640,8 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
 
                 // Load and position the model
                 loader.load(model.glbUrl, (gltf) => {
-                    // Skip if a newer load has been initiated (prevents model duplication)
-                    if (thisLoadVersion !== loadVersionRef.current) return;
+                    // Skip if this scene was torn down or a newer load has started (prevents model duplication)
+                    if (disposed || thisLoadVersion !== loadVersionRef.current) return;
 
                     const mesh = gltf.scene;
                     const meshContainer = new THREE.Group();
@@ -885,6 +893,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
 
         // Cleanup
         return () => {
+            disposed = true;
             window.removeEventListener('resize', handleResize);
             renderer.domElement.removeEventListener('click', handleClick);
             cancelAnimationFrame(animationId);

@@ -9,6 +9,7 @@ All notable changes to this project. Versions up to v1.18.1 were developed in th
 - **Changed** JSON output of all vision tasks is now enforced with each provider's structured-output feature. The detection result is wrapped as `{"objects": [...]}`.
 - **Changed** the Gemini API key can now be entered in the app (previously only via `.env.local` or Google AI Studio). Removed the Google AI Studio key-selection integration.
 - **Changed** OpenAI completions request a transparent background (`background: 'transparent'`; retried without it if the model rejects it). Completions that are already transparent skip BRIA RMBG, so OpenAI completion no longer needs the background-removal Space. Gemini cannot output transparency, so RMBG is still used there.
+- **Fixed** the 3D scene could stay empty when first opened and appear only after moving the depth slider: an earlier, already torn-down initialization (React StrictMode mounts twice in development) finished later and cleared the models of the current scene. Async loading now stops when its scene is torn down and only touches its own scene.
 - **Changed** background removal now uses BRIA RMBG 3.0 (`briaai/BRIA-RMBG-3.0`, same Space API as 2.0) by default.
 - **Changed** AI Settings store only values that differ from the defaults, so new defaults take effect; a stored former default (`briaai/BRIA-RMBG-2.0`) is replaced by the new one.
 - **Fixed** selection counts (e.g. "Generate 3D (10)" with 8 cards) included deleted or replaced items; selections are now pruned when items change.
