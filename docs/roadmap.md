@@ -2,7 +2,14 @@
 
 [日本語](roadmap-jp.md)
 
-Planned extensions that are not implemented yet. Facts below were checked in November 2026.
+Planned extensions. Facts below were checked in November 2026.
+
+## Implemented
+
+Items of earlier versions of this roadmap that are now in the app (see the README for how to use them):
+
+- **Orientation estimation** (first version): **Estimate Orientation** in the 3D Scene header rotates each model about the vertical axis using [Orient Anything](https://huggingface.co/spaces/Viglong/Orient-Anything) (`services/orientation.ts`). Improvements: item 4.
+- **Perspective placement**: the **Perspective** checkbox back-projects the point cloud, PC Boxes and models through a pinhole camera, so near objects are no longer magnified. Remaining assumptions: item 5.
 
 ## 1. Pixal3D as a 3D generator (Hugging Face Space)
 
@@ -85,40 +92,24 @@ People, the vase and the cups are mostly visible and are placed correctly.
 - **Silhouette fitting**: render the 3D model from the estimated camera and fit its scale and position so that its silhouette matches the visible mask in the photo.
 - **Pixel-aligned generation**: models such as Pixal3D (item 1) keep the front of the model aligned with the input image, which may make the visible part easier to locate.
 
-## 4. Estimating orientation (rotation about the vertical axis)
+## 4. More accurate orientation estimation
 
-> **Status**: a first version is implemented (**Estimate Orientation** in the 3D Scene header). It combines the viewing-direction correction with a dedicated orientation model, [Orient Anything](https://huggingface.co/spaces/Viglong/Orient-Anything), run on both the photo appearance and a front render of the model (`services/orientation.ts`). The other ideas below remain options for improving accuracy, and the assumed field of view (60°) could be replaced by an estimate.
+A first version is implemented (see "Implemented" above): Orient Anything on the photo appearance and on a front render of each model, plus a viewing-direction correction. Ways to improve it:
 
-### Problem
+- **Use the depth map**: detect left/right point pairs in 2D, such as a person's shoulders (pose estimation, e.g. MediaPipe), and read their depth from the depth map. The depth difference gives the body's yaw, independently of Orient Anything.
+- **Ask the vision model (VLM)**: give the crop to OpenAI / Gemini and ask, with structured output (e.g. in 15° steps), which direction the subject faces. Useful as a cross-check.
+- **Render and compare**: render the generated model at several yaw angles (e.g. every 10°) and pick the angle whose silhouette or appearance best matches the masked crop. Works for any object but costs more computation.
+- **Orient Anything V2** ([Space](https://huggingface.co/spaces/Viglong/Orient-Anything-V2), ZeroGPU) also returns the relative azimuth of two images and the symmetry of the object (number of directions), which could replace the two separate estimates and the confidence threshold.
+- **Evaluation**: compare against hand-set angles on a set of photos.
 
-The depth position of people and objects is roughly right, but **their orientation is not corrected**. In the 3D scene every model keeps the orientation its generator treats as the front (zero rotation about the vertical axis). Two people talking face to face in the photo can therefore face the same direction in the scene. Today the only fix is rotating them by hand in Edit mode.
+## 5. Camera and depth calibration
 
-### Goal
+Perspective placement (see "Implemented" above) still relies on two assumptions:
 
-Estimate from the photo where a person is facing (**face and body**), or where an object's **characteristic part** points (a chair's backrest, a cup's handle), compute the **rotation about the vertical (Y) axis**, and apply it when placing the model.
+- **Field of view**: 60° horizontal is assumed. It could be read from EXIF or estimated with a model such as MoGe, which estimates camera intrinsics.
+- **Far/near distance ratio**: Depth Anything V2's relative disparity is stretched over the full range for every image, so the ratio is unknown and set with the Depth slider (default 1.5, tuned on the sample photo). A metric depth model (e.g. Depth Anything V2 Metric, Depth Pro, MoGe) would give real distances, or the ratio could be estimated from typical object sizes (a cup, a person's head) in the scene.
 
-### Ideas
-
-- **Viewing-direction correction (first step)**: TRELLIS.2 and Hunyuan3D-2.1 roughly reproduce the input view as the model's front, but an object away from the image center is seen from an angle. Rotating the model by the horizontal angle from the camera to the object (`atan2(x, z)`) brings it closer to how it looks in the photo. A simple baseline that needs no extra model.
-- **Use the depth map**: detect left/right point pairs in 2D, such as a person's shoulders (pose estimation, e.g. MediaPipe), and read their depth from the depth map. The depth difference gives the body's yaw. For objects, the depth difference between the left and right ends may give it as well.
-- **Ask the vision model (VLM)**: give the crop to Gemini / OpenAI and ask, with structured output (e.g. in 15° steps), which direction the subject faces relative to the camera. Easy to implement; the angle may be coarse.
-- **A dedicated orientation model**: call a model that estimates an object's orientation (azimuth etc.) from one image, such as Orient Anything, e.g. through a Hugging Face Space. Available Spaces or APIs need to be checked when implementing.
-- **Render and compare**: render the generated model from the scene camera at several yaw angles (e.g. every 10°) and pick the angle whose silhouette or appearance best matches the masked crop. Works for any object but costs more computation.
-
-### Things to watch
-
-- **The front of each generator**: generators may differ in which direction of the model they treat as the front; check each one so that the correction has a common reference.
-- **Order relative to scaling**: rotation changes the width and depth of the model's bounding box, so the scale fit to the PC Box (Eq. (10), (11) of the paper) must be computed after the rotation is applied.
-- **Evaluation**: compare methods against hand-set angles or against how well the rendered view matches the photo.
-
-## 5. Perspective placement (implemented)
-
-> **Status**: implemented as the **Perspective** checkbox in the 3D scene (on by default).
-
-The paper places each object at its size in the image and only moves it along the depth axis, so objects near the camera (e.g. the cups at the bottom of the sample photo) are magnified twice: once because they are near in the photo, and again by the scene camera. With **Perspective**, the point cloud, PC Boxes and models are back-projected through a pinhole camera (assumed 60° horizontal field of view), and the depth map is read as disparity (inverse depth). Remaining ideas:
-
-- **Estimate the field of view** instead of assuming 60° (e.g. from EXIF, or a model such as MoGe that estimates camera intrinsics).
-- **Metric depth**: Depth Anything V2's relative disparity is stretched over the full range for every image, so the far/near ratio is unknown; it is set with the Depth slider (default 1.5, tuned on the sample photo). A metric depth model would give real distances and therefore real sizes without this setting.
+The orientation estimation's viewing-direction correction uses the same field of view, so it would benefit as well.
 
 ## References
 

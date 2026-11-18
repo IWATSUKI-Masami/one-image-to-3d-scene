@@ -168,7 +168,7 @@ AI Settings では次の項目を設定できます。
 
 ## 今後の拡張
 
-3D生成への [Pixal3D](https://huggingface.co/TencentARC/Pixal3D)（ピクセル整合型の画像-to-3D）の追加と、[ComfyUI](https://www.comfy.org/) による手元の GPU での3D生成、一部しか写っていない物体（テーブルの端や画像の端の椅子など）の配置の改善、向きの推定の精度向上（Orient Anything による最初の版は実装済み）を予定しています。詳しくは [docs/roadmap-jp.md](docs/roadmap-jp.md) を参照してください。
+3D生成への [Pixal3D](https://huggingface.co/TencentARC/Pixal3D)（ピクセル整合型の画像-to-3D）の追加と、[ComfyUI](https://www.comfy.org/) による手元の GPU での3D生成、一部しか写っていない物体（テーブルの端や画像の端の椅子など）の配置の改善、向きの推定の精度向上（Orient Anything による最初の版は実装済み）、カメラの画角と遠/近の距離の比の較正（遠近を考慮した配置は、今は画角 60° を仮定）を予定しています。詳しくは [docs/roadmap-jp.md](docs/roadmap-jp.md) を参照してください。
 
 ## 引用
 

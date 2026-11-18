@@ -4,52 +4,46 @@ All notable changes to this project. Versions up to v1.18.1 were developed in th
 
 
 ## Unreleased
-- **Fixed** with perspective, near objects (e.g. cups) were too small compared with people: the depth map was mapped to distances 0.5–5.0 (far/near ratio 10), which exaggerated how much nearer they are. In the sample's depth map the cups (brightness ~240) and the woman (~87) then came out at a distance ratio of 0.43 instead of about 0.8. With perspective, the Depth slider now sets the far/near ratio (1 + slider; default 1.5), and Z is no longer scaled separately.
-- **Added** a download button (PNG) on the Depth Map card.
-- **Fixed** the initial perspective view cut objects off at the sides when the canvas is narrower than the photo; the field of view now fits the whole photo frame (with a margin for the control panel) and follows canvas resizes.
-- **Changed** OpenAI is now the default provider for detection and completion, and is listed before Gemini in AI Settings; RMBG 2.0 is listed before RMBG 3.0. The background-removal choice and its Space fields are disabled while OpenAI does the completion (OpenAI completions are already transparent).
-- **Changed** README images updated with the current results (OpenAI + TRELLIS.2, scene with orientation estimation).
-- **Added** perspective placement in the 3D scene (**Perspective** checkbox, on by default). The point cloud, PC Boxes and models are back-projected through a pinhole camera (assumed 60° horizontal field of view), and the depth map is read as disparity (inverse depth), as output by Depth Anything V2. Objects near the camera (e.g. cups) are no longer magnified, and the scene starts from the photo's camera. Unchecking it reproduces the paper's placement.
-- **Added** orientation estimation (**Estimate Orientation** in the 3D Scene header). [Orient Anything](https://huggingface.co/spaces/Viglong/Orient-Anything) estimates the viewer's azimuth for the completed image and for a front render of each model; models are rotated about the vertical axis by `view angle + azimuth(model) − azimuth(photo)` before they are scaled to their PC Box. Objects without a clear front are not rotated. The angles are shown per model, saved with the project, and can be turned off with the **Orientation** checkbox. The Space ID is configurable in AI Settings.
-- **Fixed** the 3D scene could sometimes stay empty (no background, no models) when first shown. The canvas now follows the size of its container (a container that still had zero size left a 0×0 canvas), and the scene is rebuilt when the browser drops its WebGL context.
-- **Fixed** Hunyuan3D-2.1 could build a board behind an object (e.g. a chair) or stray fragments at the edges of its volume. Background removal can leave nearly invisible specks (alpha = 1) all over the image, and Hunyuan3D treats any alpha > 0 as the object. Alpha below about 10% is now cleared before the image is sent (TRELLIS.2 already ignores alpha below 80%).
-- **Fixed** bounding boxes (and the size and position of models in the 3D scene) could be far too large because of tiny stray fragments in generated models: e.g. a Hunyuan3D-2.1 cup had 14 fragments (0.1% of its surface) near the walls of the generation volume, making its box about 4 times as tall. Small fragments far from the main body are now removed when a model is loaded; separate parts close to it (a saucer, petals) are kept.
-- **Fixed** Hunyuan3D-2.1 could add a flat slab under objects (e.g. coffee cups). The app asked the Space to remove the background again; the Space then converted the already transparent image to RGB, which brought back the hidden background (the table) and modelled it. The transparent image is now used as is (`check_box_rembg: false`); non-transparent input is still background-removed by the Space.
-- **Added** `docs/hugging-face-spaces.md` (EN/JP): Hugging Face token, accepting the terms of gated models, the `HF_TOKEN` Space secret, GPU per Space, the file changes a Hunyuan3D-2.1 duplicate needs to run on a dedicated GPU, and common errors.
-- **Added** OpenAI as an AI provider. Object detection/checks and image completion can each use Gemini or OpenAI. Choose providers, enter API keys and change model IDs in the new **AI Settings** dialog.
-- **Changed** default Gemini models: `gemini-3-pro-preview` → `gemini-pro-latest`, `gemini-3-pro-image-preview` (shut down) → `gemini-3-pro-image`.
-- **Changed** JSON output of all vision tasks is now enforced with each provider's structured-output feature. The detection result is wrapped as `{"objects": [...]}`.
-- **Changed** the Gemini API key can now be entered in the app (previously only via `.env.local` or Google AI Studio). Removed the Google AI Studio key-selection integration.
-- **Changed** OpenAI completions request a transparent background (`background: 'transparent'`; retried without it if the model rejects it). Completions that are already transparent skip BRIA RMBG, so OpenAI completion no longer needs the background-removal Space. Gemini cannot output transparency, so RMBG is still used there.
-- **Fixed** the 3D scene could stay empty when first opened and appear only after moving the depth slider: an earlier, already torn-down initialization (React StrictMode mounts twice in development) finished later and cleared the models of the current scene. Async loading now stops when its scene is torn down and only touches its own scene.
-- **Changed** background removal now uses BRIA RMBG 3.0 (`briaai/BRIA-RMBG-3.0`, same Space API as 2.0) by default.
-- **Added** a background-removal choice in AI Settings: BRIA RMBG 3.0 (default) or BRIA RMBG 2.0 (`briaai/BRIA-RMBG-2.0`). Each has its own Space ID field, so a duplicate of either can be used (RMBG 2.0 runs on a T4).
-- **Changed** AI Settings store only values that differ from the defaults, so new defaults take effect; a stored former default (`briaai/BRIA-RMBG-2.0`) is replaced by the new one.
-- **Fixed** selection counts (e.g. "Generate 3D (10)" with 8 cards) included deleted or replaced items; selections are now pruned when items change.
-- **Changed** completed images are shown on a light checkerboard, so a transparent background can be told apart from a white one.
-- **Changed** a failed background removal is now shown on the completed card ("Background removal failed") instead of passing silently.
-- **Added** a sample photo (`samples/two-people-at-table.webp`, AI-generated) and a screenshot of the reconstructed scene in the README.
-- **Fixed** the 3D scene could turn blank (dark panel) after generating models or moving the depth slider: each rebuild of the scene left a WebGL context behind, and after about 16 the browser dropped the visible one. The scene now releases its WebGL context and GPU resources on every rebuild.
-- **Added** the Hugging Face Spaces (background removal, depth estimation, TRELLIS.2, Hunyuan3D-2.1) can be changed in AI Settings, e.g. to your own duplicate on a dedicated GPU to avoid the ZeroGPU quota. Defaults are the official Spaces; an empty field means the official Space.
-- **Changed** saved projects are named `<photo name>_<stage>_<YYYYMMDD-HHMMSS>.json` (stage: `detected`, `completed`, `3d-models` or `scene`) instead of `scenecraft-project-phase1-3-<milliseconds>.json`. The photo name is stored in the project file and kept when the project is loaded again.
-- **Changed** AKAZE matching: the homography (8 parameters) is replaced by a RANSAC fit of uniform scale + translation (3 parameters), the completed image is searched at 1, 1/2 and 1/4 scale, and transparent pixels are composited on white. Matches with too few agreeing points or boxes outside the image are rejected, so the whole-object box is used instead. Previously a few wrong matches on regenerated objects (cups) produced distorted boxes (e.g. a thin strip). Note: the paper (Eq. (2)) uses a homography.
-- **Fixed** Hugging Face Spaces could not be called from the browser ("Failed to fetch", CORS): `@gradio/client` 2.0 sent every request with `credentials: 'include'`, which the Spaces' CORS preflight does not allow. Updated to 2.8 (defaults to `same-origin`).
-- **Fixed** the Hugging Face token was never sent: the client reads the `token` option, but the app passed `hf_token`, so ZeroGPU usage was not counted against the user's quota.
-- **Fixed** AKAZE matching never ran: the OpenCV.js served at `docs.opencv.org/4.x` (unpinned) no longer initialized, so every completed image fell back to tightBox2d. OpenCV.js 4.10.0 is now shipped with the app (`@techstark/opencv-js`, pinned) and loaded on first use; the app no longer depends on docs.opencv.org.
-- **Fixed** Gemini calls use the `v1beta` API explicitly (SDK 3.x defaults to `v1`, where model aliases such as `gemini-pro-latest` return 404).
-- **Updated** `@google/genai` 1.30 → 3.4; added `openai`; removed the unused `@google/generative-ai`.
-- **Added** Hunyuan3D-2.1 (Tencent, official Hugging Face Space) as a 3D generator alongside TRELLIS.2. Note its license does not apply in the EU, UK and South Korea.
-- **Removed** TripoSR (local Gradio server) because of its low accuracy. Models generated with TripoSR in saved projects still load and display.
-- **Fixed** PC Box depth now follows Eq. (4) of the paper: the median depth of the non-transparent pixels (alpha > 128) of the object's background-removed image, mapped into the scene with the AKAZE result (`originalPartBox2d`). This code path had never run before; the boxes and 3D models were placed using the depth at a few fixed points of the bounding box (2 points for models, 6 for PC Boxes). Without a usable mask, the median of all pixels in the box is used.
-- **Fixed** person/object classification of detected objects now uses the VLM's `type` (it used to guess from label words, so e.g. "woman" matched "man").
-- **Fixed** AKAZE matching: OpenCV objects are always released (some were leaked), the bounding box of projected corners is computed correctly (`Number.MIN_VALUE` was used as -∞), and matching waits for OpenCV.js to finish loading instead of giving up.
-- **Cleanup** `index.html`: removed the Google AI Studio import map, the missing `/index.css` and the unused `<model-viewer>` script.
-- **Cleanup** removed unused code: utility functions (`trimTransparentEdges`, `refineOverlaps`, `refineSingleOverlap`, etc.), unused types, state, handlers, component props and the never-wired card actions (Finalize / Refine Overlap / Remove BG); removed debug `console.log` output (processing times are still recorded and exported as CSV).
-- **Changed** Tailwind CSS is now built with the app (Tailwind v3 + PostCSS) instead of being loaded from the Play CDN at runtime. The look is unchanged, and the app no longer needs `cdn.tailwindcss.com`.
-- **Cleanup** TypeScript now reports unused variables and parameters (`noUnusedLocals`, `noUnusedParameters`); added `npm run typecheck`.
-- **Removed** the automatic fallback from the official Hugging Face Spaces (BRIA RMBG 2.0, Depth Anything V2, TRELLIS.2) to the author's private duplicate Spaces.
-- **Removed** the commercial API integrations: Stability AI API (3D generation) and Remove.bg (background removal). Background removal now always uses BRIA RMBG 2.0.
-- **Removed** Stable Fast 3D (it depended on the author's private Space). 3D generation now uses TRELLIS.2 or a local TripoSR server.
+
+First version of the public repository. Changes since v1.18.1, the last version of the private predecessor (the history of the private versions follows below, oldest first).
+
+### Added
+
+- **OpenAI as an AI provider** next to Gemini. Object detection/checks and image completion can each use either provider; OpenAI is the default. Providers, API keys, model IDs and Hugging Face Space IDs are set in the new **AI Settings** dialog (an empty Space field means the official Space). Only values that differ from the defaults are stored in the browser, so new defaults take effect.
+- **Transparent OpenAI completions**: OpenAI is asked for a transparent background (retried without it if a model rejects it), so OpenAI completion needs no background-removal Space. Completions that are already transparent skip BRIA RMBG.
+- **Background-removal choice**: BRIA RMBG 2.0 (`briaai/BRIA-RMBG-2.0`) or 3.0 (`briaai/BRIA-RMBG-3.0`, default), each with its own Space ID field. Only used after Gemini completion; the choice is disabled while OpenAI does the completion. A failed removal is shown on the completed card, and completed images are shown on a light checkerboard so that transparency is visible.
+- **Hunyuan3D-2.1** (Tencent, Hugging Face Space) as a 3D generator next to TRELLIS.2. Its license does not apply in the EU, the UK and South Korea.
+- **Orientation estimation** (**Estimate Orientation** in the 3D Scene header). [Orient Anything](https://huggingface.co/spaces/Viglong/Orient-Anything) (CPU Space) estimates the viewer's azimuth for the completed image and for a front render of each model; models are rotated about the vertical axis by `view angle + azimuth(model) − azimuth(photo)` before they are scaled to their PC Box. Objects without a clear front (confidence < 0.5) are not rotated. The angles are shown per model, saved with the project, and can be turned off with the **Orientation** checkbox.
+- **Perspective placement** in the 3D scene (**Perspective** checkbox, on by default). The point cloud, PC Boxes and models are back-projected through a pinhole camera (assumed 60° horizontal field of view), and the depth map is read as disparity (inverse depth), as Depth Anything V2 outputs it. The **Depth** slider then sets the far/near distance ratio of the scene (default 1.5). Near objects such as cups keep a realistic size relative to people, and the scene starts from the photo's camera, fitted to the canvas. Unchecking it reproduces the paper's placement.
+- **Stray-fragment removal**: small fragments far from a model's main body are removed when the model is loaded, so they no longer stretch its bounding box or shrink it in the scene (e.g. a Hunyuan3D-2.1 cup had 14 fragments, 0.1% of its surface, that made its box about 4 times as tall). Nearby separate parts (a saucer, petals) are kept.
+- PNG download button on the Depth Map card.
+- Documentation: a sample photo (`samples/two-people-at-table.webp`, AI-generated) and a walkthrough with screenshots in the README; `docs/hugging-face-spaces.md` (tokens, gated models, the `HF_TOKEN` Space secret, GPU per Space, the changes a Hunyuan3D-2.1 duplicate needs on a dedicated GPU, common errors); `docs/roadmap.md`. All documents in English and Japanese.
+
+### Changed
+
+- Default Gemini models: `gemini-3-pro-preview` → `gemini-pro-latest`, `gemini-3-pro-image-preview` (shut down) → `gemini-3-pro-image`. Gemini calls use the `v1beta` API explicitly (SDK 3.x defaults to `v1`, where such aliases return 404). API keys can be entered in the app; the Google AI Studio key-selection integration was removed.
+- JSON output of all vision tasks is enforced with each provider's structured-output feature; the detection result is wrapped as `{"objects": [...]}`.
+- AKAZE matching: the homography (8 parameters) is replaced by a RANSAC fit of uniform scale + translation (3 parameters), the completed image is searched at 1, 1/2 and 1/4 scale, and transparent pixels are composited on white. Matches with too few agreeing points or boxes outside the image are rejected, so the whole-object box is used instead. (The paper, Eq. (2), uses a homography.)
+- OpenCV.js 4.10.0 is shipped with the app (`@techstark/opencv-js`, pinned) instead of being loaded from `docs.opencv.org/4.x`, which had stopped initializing.
+- Tailwind CSS is built with the app (Tailwind v3 + PostCSS) instead of the Play CDN.
+- Saved projects are named `<photo name>_<stage>_<YYYYMMDD-HHMMSS>.json`; the photo name is stored in the project.
+- Images sent to Hunyuan3D-2.1 are used as they are (no second background removal by the Space), with alpha below about 10% cleared and fully transparent pixels made white. Before, the Space's RGB conversion brought back the hidden background (a slab under the cups), and nearly invisible specks left by background removal (alpha = 1) became a board behind a chair or fragments at the edges of the generation volume.
+- Dependencies: `@google/genai` 1.30 → 3.4, `@gradio/client` 2.0 → 2.8; added `openai`; removed the unused `@google/generative-ai`.
+
+### Fixed
+
+- PC Box depth now follows Eq. (4) of the paper: the median depth of the non-transparent pixels (alpha > 128) of the object's background-removed image. This code path had never run; boxes and models were placed using the depth at a few fixed points.
+- Hugging Face Spaces could not be called from the browser ("Failed to fetch", CORS): `@gradio/client` 2.0 sent `credentials: 'include'`. The Hugging Face token was never sent (the app passed `hf_token`, the client reads `token`), so ZeroGPU usage was not counted against the user's quota.
+- AKAZE matching never ran (OpenCV.js did not load), leaked OpenCV objects and computed the box of projected corners wrongly.
+- The 3D scene could stay empty or turn blank: a WebGL context was left behind on every rebuild (the browser drops the visible one after about 16), an earlier initialization (React StrictMode) could clear the current scene's models, and a scene rebuilt while its tab was hidden got a 0×0 canvas. The scene now releases its context, ignores stale loads, follows the size of its container and rebuilds if the browser drops its context.
+- Person/object classification uses the VLM's `type` (it guessed from label words, so "woman" matched "man").
+- Selection counts (e.g. "Generate 3D (10)" with 8 cards) included deleted or replaced items.
+
+### Removed
+
+- The automatic fallback from the official Hugging Face Spaces to the author's private duplicate Spaces (`iwatsuki/*`); duplicates of your own can be entered in AI Settings instead.
+- The commercial API integrations (Stability AI, Remove.bg), Stable Fast 3D (it depended on a private Space) and TripoSR (low accuracy). Models generated with TripoSR in saved projects still load.
+- Unused code: utility functions, types, state, handlers, component props, never-wired card actions and debug logging; unused parts of `index.html` (AI Studio import map, `<model-viewer>`). TypeScript now reports unused variables (`npm run typecheck`).
 
 ## v1.1.0
 - **Enhanced 3D Object Placement**: Implemented anchor-based positioning using image vertical coordinates and object types (ground vs. table-top) for more realistic placement.
@@ -264,7 +258,7 @@ All notable changes to this project. Versions up to v1.18.1 were developed in th
 - **Simplified Landing Page**: Reduced from 4 workflow cards to 3 (Detect & Crop → Image Completion → 3D Generation).
 - **Code Cleanup**: Removed ~400 lines of dead code related to standalone BG removal state, functions, and UI.
 
-## v1.18.1 (Current)
+## v1.18.1 (last private version)
 - **Dead Code Removal**: Removed 6 unused functions (~428 lines) from `utils.ts` and `geminiService.ts`.
 - **ZeroGPU Fallback**: Added automatic fallback from original HF Spaces to dedicated GPU spaces (`iwatsuki/*`) when ZeroGPU quota is exhausted.
     - Supported services: RMBG (background removal), Depth Anything V2 (depth estimation), TRELLIS.2 (3D generation).

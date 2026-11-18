@@ -168,7 +168,7 @@ Projects (images, depth map, models and scene layout) can be saved and loaded.
 
 ## Future work
 
-Planned: [Pixal3D](https://huggingface.co/TencentARC/Pixal3D) (pixel-aligned image-to-3D) as a 3D generator, local 3D generation with [ComfyUI](https://www.comfy.org/) on your own GPU, better placement of objects that are only partly visible (e.g. table edges and chairs at the image border), and more accurate orientation estimation (a first version based on Orient Anything is implemented). See [docs/roadmap.md](docs/roadmap.md).
+Planned: [Pixal3D](https://huggingface.co/TencentARC/Pixal3D) (pixel-aligned image-to-3D) as a 3D generator, local 3D generation with [ComfyUI](https://www.comfy.org/) on your own GPU, better placement of objects that are only partly visible (e.g. table edges and chairs at the image border), more accurate orientation estimation (a first version based on Orient Anything is implemented), and calibration of the camera's field of view and the far/near depth ratio (perspective placement currently assumes a 60° field of view). See [docs/roadmap.md](docs/roadmap.md).
 
 ## Citation
 
