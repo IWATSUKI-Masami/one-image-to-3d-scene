@@ -94,7 +94,7 @@ npm run dev
 
 ## 今後の拡張
 
-[ComfyUI](https://www.comfy.org/) によるローカルでの3D生成（手元の GPU で TRELLIS.2 を動かすなど）を予定しています。詳しくは [docs/roadmap-jp.md](docs/roadmap-jp.md) を参照してください。
+3D生成への [Pixal3D](https://huggingface.co/TencentARC/Pixal3D)（ピクセル整合型の画像-to-3D）の追加と、[ComfyUI](https://www.comfy.org/) による手元の GPU での3D生成を予定しています。詳しくは [docs/roadmap-jp.md](docs/roadmap-jp.md) を参照してください。
 
 ## 引用
 

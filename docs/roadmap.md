@@ -2,11 +2,26 @@
 
 [日本語](roadmap-jp.md)
 
-Planned extensions that are not implemented yet.
+Planned extensions that are not implemented yet. Facts below were checked in November 2026.
 
-## Local 3D generation with ComfyUI
+## 1. Pixal3D as a 3D generator (Hugging Face Space)
 
-Add **ComfyUI (local)** as a third option for 3D generation, next to the Hugging Face Spaces (TRELLIS.2 and Hunyuan3D-2.1). The Spaces stay the default, because most users do not have a suitable GPU.
+[Pixal3D](https://huggingface.co/TencentARC/Pixal3D) (Tencent ARC, SIGGRAPH 2026, MIT license) is an image-to-3D model that outputs a mesh with PBR textures (GLB).
+
+### Why it suits this system
+
+Most 3D generators build the shape in a canonical space, so the correspondence between image pixels and the 3D model is loose. Pixal3D uses **pixel-aligned generation**: it back-projects pixels to 3D (with the camera field of view estimated by MoGe), so **the front of the generated model matches the input image one-to-one**.
+
+This system scales and places each model so that the object region in the completed image (tightBox2d) matches its PC Box (paper, Section 3.5.3). A model whose front matches the input image should make this alignment more accurate.
+
+### How
+
+- The official Space [TencentARC/Pixal3D](https://huggingface.co/spaces/TencentARC/Pixal3D) is running on ZeroGPU and exposes API endpoints `preprocess`, `generate_3d` and `extract_glb_api` — the same structure as TRELLIS.2, so it can be added the same way (no local GPU needed).
+- Things to check when implementing: parameters of `generate_3d`, the model orientation in the scene, and the alignment with tightBox2d.
+
+## 2. Local 3D generation with ComfyUI
+
+Add **ComfyUI (local)** as an option for 3D generation, next to the Hugging Face Spaces. The Spaces stay the default, because most users do not have a suitable GPU.
 
 ### Why
 
@@ -17,38 +32,42 @@ Add **ComfyUI (local)** as a third option for 3D generation, next to the Hugging
 
 ### Candidate models
 
-Checked against the ComfyUI documentation (2026-11).
+From the ComfyUI documentation.
 
 | Model | In ComfyUI | Output | Fit for this app |
 |---|---|---|---|
-| TRELLIS.2 | Core (native) nodes | Mesh with PBR textures | Good |
-| Pixal3D | Core (native) nodes | Mesh | To be evaluated |
-| Hunyuan3D-2 | Core nodes generate **shape only**; textures need a custom node | Mesh | Weaker than the Hunyuan3D-2.1 Space, which returns textured GLB |
-| TripoSplat | — | **Gaussian splats** | Not usable (see below) |
+| Pixal3D | Core nodes. Template "Pixal3D & TRELLIS.2: Image to Model" | Mesh with PBR textures (GLB) | Good (see section 1) |
+| TRELLIS.2 | Core nodes, in the same template (switch with `Boolean (Switch to Trellis2)`) | Mesh with PBR textures (GLB) | Good |
+| Hunyuan3D 2.0 / 2.1 | Core nodes generate **shape only (untextured)** | Mesh (GLB) | Weaker than the Hunyuan3D-2.1 Space, which returns a textured GLB |
+| TripoSplat | Core nodes | **Gaussian splats**; optional `SplatToMesh` conversion to GLB | Low priority (see below) |
 
-Gaussian-splat models do not fit this app: models are loaded as GLB meshes, scaled and offset from their mesh bounding box to match the PC Box (Eq. (10), (11) of the paper), and exported as glTF/GLB. Supporting splats would need a separate renderer, a bounding box computed from the splat distribution, and a non-GLB export format.
+This app loads models as GLB meshes, scales and offsets them from their mesh bounding box to match the PC Box (Eq. (10), (11) of the paper), and exports the scene as glTF/GLB. TripoSplat's main output, Gaussian splats, does not fit this. Its optional mesh conversion can produce a GLB, but a converted mesh is unlikely to beat models that generate meshes directly (Pixal3D, TRELLIS.2).
 
 ### Design sketch
 
 - Settings: ComfyUI address (default `http://127.0.0.1:8188`) and a workflow file in **API format** (exported from ComfyUI).
-- Ship a TRELLIS.2 workflow in the repository.
+- Ship the Pixal3D / TRELLIS.2 workflow in the repository.
 - Call sequence (ComfyUI HTTP API):
   1. `POST /upload/image` — upload the completed, background-removed image
-  2. `POST /prompt` — submit the workflow with the uploaded file name set in its image loader node
+  2. `POST /prompt` — submit the workflow with the uploaded file name set in its `LoadImage` node
   3. Poll `GET /history/{prompt_id}` until the job finishes
-  4. `GET /view?filename=…` — download the GLB from the save node
-- Reuse the existing placement logic; set the model orientation per workflow (TRELLIS.2 needs no rotation).
+  4. `GET /view?filename=…` — download the GLB written by the save node
+- The Pixal3D workflow has its own background removal (BiRefNet) and can skip it with a switch; our input is already background-removed.
+- Reuse the existing placement logic; set the model orientation per workflow.
 
 ### Constraints
 
-- **NVIDIA GPU required**: about 6–12 GB VRAM for Hunyuan3D-2 (shape / shape + texture), about 24 GB recommended for TRELLIS.2.
+- **NVIDIA GPU required**: about 6–12 GB VRAM for Hunyuan3D 2.0 (shape / shape + texture), about 24 GB recommended for TRELLIS.2 (third-party guide). The Pixal3D page does not state a figure.
+- **Model downloads**: Pixal3D needs its diffusion model plus the TRELLIS.2 shape/texture VAEs, DINOv3, MoGe and BiRefNet.
 - **Browser access**: ComfyUI must be started with `--enable-cors-header` so that the app can call it from the browser.
 - **Maintenance**: workflow files may need updates when ComfyUI renames nodes.
 - **Testing**: needs a machine with a GPU (it cannot be tested in a CPU-only environment).
 
-### References
+## References
 
+- [ComfyUI Docs: Pixal3D](https://docs.comfy.org/tutorials/3d/pixal3d)
 - [ComfyUI Docs: TRELLIS.2](https://docs.comfy.org/tutorials/3d/trellis2)
-- [ComfyUI Docs: Hunyuan3D-2](https://docs.comfy.org/tutorials/3d/hunyuan3d-2)
+- [ComfyUI Docs: Hunyuan3D 2.0 and 2.1](https://docs.comfy.org/tutorials/3d/hunyuan3D-2)
 - [ComfyUI Docs: TripoSplat](https://docs.comfy.org/tutorials/3d/triposplat)
-- [ComfyUI Blog: TRELLIS.2 and Pixal3D are now native](https://blog.comfy.org/p/trellis2-and-pixal3d-are-now-native)
+- [Hugging Face: TencentARC/Pixal3D (model)](https://huggingface.co/TencentARC/Pixal3D), [(Space)](https://huggingface.co/spaces/TencentARC/Pixal3D)
+- [TRELLIS.2 native vs legacy VRAM guide](https://book.st-hakky.com/en/data-science/trellis2-native-vs-legacy-vram-guide)

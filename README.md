@@ -94,7 +94,7 @@ Projects (images, depth map, models and scene layout) can be saved and loaded.
 
 ## Future work
 
-Local 3D generation with [ComfyUI](https://www.comfy.org/) (e.g. TRELLIS.2 on your own GPU) is planned. See [docs/roadmap.md](docs/roadmap.md).
+Planned: [Pixal3D](https://huggingface.co/TencentARC/Pixal3D) (pixel-aligned image-to-3D) as a 3D generator, and local 3D generation with [ComfyUI](https://www.comfy.org/) on your own GPU. See [docs/roadmap.md](docs/roadmap.md).
 
 ## Citation
 
