@@ -111,6 +111,15 @@ Estimate from the photo where a person is facing (**face and body**), or where a
 - **Order relative to scaling**: rotation changes the width and depth of the model's bounding box, so the scale fit to the PC Box (Eq. (10), (11) of the paper) must be computed after the rotation is applied.
 - **Evaluation**: compare methods against hand-set angles or against how well the rendered view matches the photo.
 
+## 5. Perspective placement (implemented)
+
+> **Status**: implemented as the **Perspective** checkbox in the 3D scene (on by default).
+
+The paper places each object at its size in the image and only moves it along the depth axis, so objects near the camera (e.g. the cups at the bottom of the sample photo) are magnified twice: once because they are near in the photo, and again by the scene camera. With **Perspective**, the point cloud, PC Boxes and models are back-projected through a pinhole camera (assumed 60° horizontal field of view), and the depth map is read as disparity (inverse depth). Remaining ideas:
+
+- **Estimate the field of view** instead of assuming 60° (e.g. from EXIF, or a model such as MoGe that estimates camera intrinsics).
+- **Metric depth**: Depth Anything V2's relative disparity is mapped to 0.5–5.0 (unknown scale and shift). A metric depth model would give real distances and therefore real sizes.
+
 ## References
 
 - [ComfyUI Docs: Pixal3D](https://docs.comfy.org/tutorials/3d/pixal3d)

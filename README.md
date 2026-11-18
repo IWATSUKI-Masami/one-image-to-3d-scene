@@ -31,7 +31,7 @@ The sample photo [`samples/two-people-at-table.webp`](samples/two-people-at-tabl
 | 4 | Feature matching | AKAZE (OpenCV.js) + Lowe's ratio test + RANSAC fit of a scale + translation, searched at several image scales, to localize the original crop inside the completed image (unreliable matches fall back to the whole object) |
 | 5 | Depth estimation | Depth Anything V2; object depth is the median depth inside the object mask |
 | 6 | 3D generation | TRELLIS.2 or Hunyuan3D-2.1 (Hugging Face Spaces) → textured GLB |
-| 7 | Scene composition | Three.js; models are aligned to point-cloud bounding boxes (PC Box) built from the depth map |
+| 7 | Scene composition | Three.js; models are aligned to point-cloud bounding boxes (PC Box) built from the depth map. By default the boxes are back-projected with perspective (see Usage) |
 | 8 | Orientation (optional) | [Orient Anything](https://huggingface.co/spaces/Viglong/Orient-Anything) estimates which way each person or object faces; models are rotated about the vertical axis |
 
 ### Walkthrough (sample photo)
@@ -142,6 +142,7 @@ The official Spaces run on ZeroGPU, which has a daily quota per user (larger wit
 2. **Image Completion** — complete the cropped objects (full body for people, missing parts for objects). The background is removed after completion.
 3. **3D Generation** — convert the completed images into 3D models.
 4. **3D Scene** — generate the depth map and view the assembled scene. Positions can be adjusted with the transform controls, and the scene can be exported as glTF/GLB.
+   - **Perspective** (checkbox, on by default): the point cloud, the PC Boxes and the models are back-projected through a pinhole camera at the origin with an assumed 60° horizontal field of view, and the depth map is read as disparity (inverse depth), which is what Depth Anything V2 outputs. Objects then keep their real relative size: a cup near the camera is no longer as large as a person further away, and the scene seen from its initial camera (the photo's camera) looks like the photo. **Uncheck it to reproduce the paper's placement**, which keeps every object at its size in the image and maps brightness linearly to depth, so objects near the camera end up magnified.
 5. **Estimate Orientation** (optional, in the 3D Scene header) — estimates which way each person or object faces and rotates the models about the vertical axis. The angle of each model is shown under the header; objects without a clear front (e.g. a vase) are not rotated. The **Orientation** checkbox in the scene turns the rotation on and off. It takes about 10–20 seconds per model.
 
    How it works: [Orient Anything](https://huggingface.co/spaces/Viglong/Orient-Anything) estimates the viewer's azimuth around the object for the completed image (the object as seen in the photo) and for a front render of the 3D model, so each generator's idea of "front" cancels out. The rotation is `view angle + azimuth(model) − azimuth(photo)`, where the view angle corrects for objects away from the image center (assuming a 60° horizontal field of view).

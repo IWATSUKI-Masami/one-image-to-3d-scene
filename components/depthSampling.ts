@@ -23,6 +23,12 @@ export interface ObjectMask {
 export interface DepthRange {
   min: number;
   max: number;
+  /**
+   * Treat brightness as inverse depth (disparity). Depth Anything V2 outputs
+   * relative disparity, so this is the physically consistent mapping; the
+   * paper's original placement maps brightness linearly to depth.
+   */
+  inverse?: boolean;
 }
 
 export interface DepthSample {
@@ -61,7 +67,9 @@ export const loadObjectMask = async (imageUrl: string, region: Box2D = [0, 0, 1,
 
 /** Eq. (3): depth-map brightness (R channel, 255 = near) to distance Z */
 export const depthFromBrightness = (b: number, range: DepthRange): number =>
-  range.max - (b / 255) * (range.max - range.min);
+  range.inverse
+    ? 1 / (1 / range.max + (b / 255) * (1 / range.min - 1 / range.max))
+    : range.max - (b / 255) * (range.max - range.min);
 
 const median = (values: number[]): number => {
   const sorted = [...values].sort((a, b) => a - b);

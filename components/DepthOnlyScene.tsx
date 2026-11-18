@@ -7,7 +7,7 @@ import { removeStrayFragments } from './meshCleanup';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { Spinner } from './Spinner';
 import { DetectedObject, Model3D } from '../types';
-import { Box2D, DepthRange, ObjectMask, loadObjectMask, medianDepthInBox, sameBox } from './depthSampling';
+import { Box2D, DepthRange, ObjectMask, depthFromBrightness, loadObjectMask, medianDepthInBox, sameBox } from './depthSampling';
 
 /**
  * Alpha masks for Eq. (4): the background-removed image of each model.
@@ -59,6 +59,8 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     const [showModelBoxes, setShowModelBoxes] = useState(false); // Model Boxes off by default
     // Rotate models about the vertical axis by their estimated orientation (if estimated)
     const [applyOrientation, setApplyOrientation] = useState(true);
+    // Perspective back-projection (see toWorldXY); off = the paper's image-plane placement
+    const [perspective, setPerspective] = useState(true);
     const [showWholeModelBoxes, setShowWholeModelBoxes] = useState(false); // Whole Boxes off by default
     const [transformMode, setTransformMode] = useState<'translate' | 'rotate' | 'scale'>('translate');
     const [selectedModelIndex, setSelectedModelIndex] = useState<number>(-1);
@@ -314,6 +316,19 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         // depth scale or selection changes) must not touch the new scene.
         let disposed = false;
 
+        // Image coordinates (u, v in 0..1) and distance D to scene X/Y.
+        // - Perspective (default): back-project through a pinhole camera at the origin
+        //   with an assumed horizontal field of view, so objects keep their real
+        //   relative size (a near cup is not as large as a far person) and the scene
+        //   seen from the photo's camera looks like the photo.
+        // - Off: the paper's placement, which keeps every object at its size in the
+        //   image regardless of its distance (near objects end up magnified).
+        const HFOV_DEG = 60; // assumed, as in the orientation estimation
+        const tanHalf = Math.tan((HFOV_DEG / 2) * Math.PI / 180);
+        const toWorldXY = (u: number, v: number, depth: number): [number, number] => perspective
+            ? [(u - 0.5) * 2 * tanHalf * depth * depthScale, -(v - 0.5) * 2 * (tanHalf / originalAspectRatio) * depth * depthScale]
+            : [(u - 0.5) * 2 * originalAspectRatio, -(v - 0.5) * 2];
+
         // Clear any existing canvas
         mountRef.current.innerHTML = '';
 
@@ -462,21 +477,17 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 const depthMin = 0.5;
                 const depthMax = 5.0;
                 const aspectCorrection = originalAspectRatio;
+                // Depth Anything V2 outputs disparity: with perspective, treat it as inverse depth
+                const depthRange: DepthRange = { min: depthMin, max: depthMax, inverse: perspective };
 
                 for (let y = 0; y < height; y++) {
                     for (let x = 0; x < width; x++) {
                         const idx = (y * width + x) * 4;
 
-                        // Get depth value (grayscale - use R channel)
-                        const depthValue = depthData.data[idx];
-                        // Invert: white (255) = close, black (0) = far
-                        const normalizedDepth = 1.0 - (depthValue / 255.0);
-                        const z = -(depthMin + normalizedDepth * (depthMax - depthMin)) * depthScale;
-
-                        // Calculate X and Y from pixel position
-                        // Center the point cloud
-                        const xPos = ((x / width) - 0.5) * 2 * aspectCorrection;
-                        const yPos = -((y / height) - 0.5) * 2; // Flip Y
+                        // Depth from brightness (R channel; white = near), then X/Y from the pixel position
+                        const depth = depthFromBrightness(depthData.data[idx], depthRange);
+                        const z = -depth * depthScale;
+                        const [xPos, yPos] = toWorldXY(x / width, y / height, depth);
 
                         positions.push(xPos, yPos, z);
 
@@ -512,15 +523,14 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 }
 
                 // Alpha masks of the models' background-removed images (Eq. (4))
-                const depthRange: DepthRange = { min: depthMin, max: depthMax };
                 const masks = await loadModelMasks(positionedModels);
                 if (disposed) return;
 
                 // Create PC Boxes for detected objects
-                createBoundingBoxes(depthData, depthRange, aspectCorrection, masks);
+                createBoundingBoxes(depthData, depthRange, masks);
 
                 // Load 3D models and position them
-                loadModels(depthData, depthRange, aspectCorrection, masks);
+                loadModels(depthData, depthRange, masks);
 
                 // Adjust camera to view the point cloud
                 const box = new THREE.Box3().setFromObject(points);
@@ -528,8 +538,18 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 const size = box.getSize(new THREE.Vector3());
                 const maxDim = Math.max(size.x, size.y, size.z);
 
-                camera.position.set(center.x, center.y, center.z + maxDim * 1.5);
-                controls.target.copy(center);
+                if (perspective) {
+                    // Start from the photo's camera: at the origin, with the assumed field of view
+                    camera.fov = 2 * Math.atan(tanHalf / aspectCorrection) * 180 / Math.PI;
+                    camera.near = 0.01;
+                    camera.updateProjectionMatrix();
+                    camera.position.set(0, 0, 0);
+                    controls.target.set(0, 0, center.z);
+                    gridHelper.position.y = box.min.y; // floor under the scene
+                } else {
+                    camera.position.set(center.x, center.y, center.z + maxDim * 1.5);
+                    controls.target.copy(center);
+                }
                 controls.update();
 
                 setLoading(false);
@@ -542,7 +562,6 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         const createBoundingBoxes = (
             depthData: ImageData,
             depthRange: DepthRange,
-            aspectCorrection: number,
             masks: Map<string, ObjectMask>
         ) => {
             if (disposed || detectedObjects.length === 0) return;
@@ -562,11 +581,9 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 const medianDepth = medianDepthInBox(depthData, obj.box_2d, depthRange, model ? masks.get(model.id) : null).z;
                 const zPos = -medianDepth * depthScale;
 
-                // Calculate 3D position and size
-                const x3dMin = ((xmin) - 0.5) * 2 * aspectCorrection;
-                const x3dMax = ((xmax) - 0.5) * 2 * aspectCorrection;
-                const y3dMin = -((ymax) - 0.5) * 2; // Flip Y
-                const y3dMax = -((ymin) - 0.5) * 2; // Flip Y
+                // Calculate 3D position and size (at the object's depth)
+                const [x3dMin, y3dMin] = toWorldXY(xmin, ymax, medianDepth);
+                const [x3dMax, y3dMax] = toWorldXY(xmax, ymin, medianDepth);
 
                 const boxWidth = x3dMax - x3dMin;
                 const boxHeight = y3dMax - y3dMin;
@@ -592,7 +609,6 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         const loadModels = (
             depthData: ImageData,
             depthRange: DepthRange,
-            aspectCorrection: number,
             masks: Map<string, ObjectMask>
         ) => {
             if (disposed || positionedModels.length === 0) return;
@@ -633,10 +649,8 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 const zPos = -medianDepth * depthScale;
 
                 // Calculate 3D position (same as bounding boxes)
-                const x3dMin = ((ds_xmin) - 0.5) * 2 * aspectCorrection;
-                const x3dMax = ((ds_xmax) - 0.5) * 2 * aspectCorrection;
-                const y3dMin = -((ds_ymax) - 0.5) * 2;
-                const y3dMax = -((ds_ymin) - 0.5) * 2;
+                const [x3dMin, y3dMin] = toWorldXY(ds_xmin, ds_ymax, medianDepth);
+                const [x3dMax, y3dMax] = toWorldXY(ds_xmax, ds_ymin, medianDepth);
 
                 const boxWidth = x3dMax - x3dMin;
                 const boxHeight = y3dMax - y3dMin;
@@ -953,7 +967,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             renderer.forceContextLoss();
             sceneRef.current = null;
         };
-    }, [imageUrl, depthMapUrl, originalAspectRatio, depthScale, detectedObjects, positionedModels, contextGeneration, applyOrientation]);
+    }, [imageUrl, depthMapUrl, originalAspectRatio, depthScale, detectedObjects, positionedModels, contextGeneration, applyOrientation, perspective]);
 
     // Helper function to load image
     const loadImageAsync = (url: string): Promise<HTMLImageElement> => {
@@ -1027,6 +1041,19 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                             </label>
                         </div>
                     )}
+                    {/* Perspective back-projection */}
+                    <div className="flex items-center gap-1" title="On: place objects with perspective (real relative sizes; the photo's camera sees the photo). Off: the paper's placement at image size.">
+                        <input
+                            type="checkbox"
+                            id="perspective"
+                            checked={perspective}
+                            onChange={(e) => setPerspective(e.target.checked)}
+                            className="w-3 h-3 text-indigo-500 bg-slate-700 border-slate-600 rounded focus:ring-indigo-500"
+                        />
+                        <label htmlFor="perspective" className="text-xs text-slate-300">
+                            Perspective
+                        </label>
+                    </div>
                     {/* Orientation (only when estimated) */}
                     {positionedModels.some(m => m.orientation) && (
                         <div className="flex items-center gap-1" title="Rotate models by their estimated orientation">
