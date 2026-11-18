@@ -80,7 +80,10 @@ Background removal, depth estimation and 3D generation call these Spaces. They c
 | Depth estimation | `depth-anything/Depth-Anything-V2` |
 | 3D generation | `microsoft/TRELLIS.2`, `tencent/Hunyuan3D-2.1` |
 
-The official Spaces run on ZeroGPU, which has a daily quota per user (larger with Hugging Face PRO). To process many objects, duplicate a Space to your account (**Duplicate this Space** on its page), give it a dedicated GPU (TRELLIS.2 needs about 48 GB VRAM, e.g. L40S), and enter its ID. Dedicated GPUs are billed per hour — pause the Space when you are done. Private Spaces need an HF token with read access.
+The official Spaces run on ZeroGPU, which has a daily quota per user (larger with Hugging Face PRO). To process many objects, duplicate a Space to your account (**Duplicate this Space** on its page), give it a dedicated GPU, and enter its ID. Dedicated GPUs are billed per hour — pause the Space when you are done.
+
+- **TRELLIS.2**: use an **A100** (80 GB). The TRELLIS.2 authors require at least 24 GB and verified only A100/H100, and the Space installs CUDA extensions prebuilt for specific GPUs (the current official Space targets the ZeroGPU hardware), so smaller or different GPUs may fail.
+- **Background removal / depth estimation**: a T4 is enough. Private Spaces need an HF token with read access.
 
 ## Usage
 

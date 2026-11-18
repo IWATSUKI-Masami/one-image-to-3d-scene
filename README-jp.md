@@ -80,7 +80,10 @@ npm run dev
 | 深度推定 | `depth-anything/Depth-Anything-V2` |
 | 3D生成 | `microsoft/TRELLIS.2`、`tencent/Hunyuan3D-2.1` |
 
-公式の Space は ZeroGPU で動いており、利用者ごとに1日の利用枠があります（Hugging Face PRO では枠が大きくなります）。多数の物体を処理する場合は、Space を自分のアカウントに複製し（Space のページの **Duplicate this Space**）、専用 GPU を割り当てて、その ID を入力してください（TRELLIS.2 には約 48GB の VRAM が必要です。例：L40S）。専用 GPU は時間課金なので、使い終わったら Space を一時停止してください。非公開の Space には、読み取り権限のある HF トークンが必要です。
+公式の Space は ZeroGPU で動いており、利用者ごとに1日の利用枠があります（Hugging Face PRO では枠が大きくなります）。多数の物体を処理する場合は、Space を自分のアカウントに複製し（Space のページの **Duplicate this Space**）、専用 GPU を割り当てて、その ID を入力してください。専用 GPU は時間課金なので、使い終わったら Space を一時停止してください。
+
+- **TRELLIS.2**：**A100**（80GB）を使ってください。TRELLIS.2 の開発元は 24GB 以上を必要とし、動作確認は A100/H100 だけです。また、Space は特定の GPU 向けにビルド済みの CUDA 拡張機能を読み込むため（今の公式 Space は ZeroGPU の GPU 向け）、それより小さい GPU や種類の違う GPU では動かないことがあります。
+- **背景除去・深度推定**：T4 で十分です。非公開の Space には、読み取り権限のある HF トークンが必要です。
 
 ## 使い方
 
