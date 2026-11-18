@@ -4,6 +4,7 @@ All notable changes to this project. Versions up to v1.18.1 were developed in th
 
 
 ## Unreleased
+- **Fixed** Hunyuan3D-2.1 could add a flat slab under objects (e.g. coffee cups). The app asked the Space to remove the background again; the Space then converted the already transparent image to RGB, which brought back the hidden background (the table) and modelled it. The transparent image is now used as is (`check_box_rembg: false`); non-transparent input is still background-removed by the Space.
 - **Added** `docs/hugging-face-spaces.md` (EN/JP): Hugging Face token, accepting the terms of gated models, the `HF_TOKEN` Space secret, GPU per Space, the file changes a Hunyuan3D-2.1 duplicate needs to run on a dedicated GPU, and common errors.
 - **Added** OpenAI as an AI provider. Object detection/checks and image completion can each use Gemini or OpenAI. Choose providers, enter API keys and change model IDs in the new **AI Settings** dialog.
 - **Changed** default Gemini models: `gemini-3-pro-preview` → `gemini-pro-latest`, `gemini-3-pro-image-preview` (shut down) → `gemini-3-pro-image`.

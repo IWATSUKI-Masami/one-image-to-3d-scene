@@ -640,7 +640,11 @@ export const generate3DModelWithHunyuan3D = async (imageUrl: string, hfToken?: s
       guidance_scale: 5.0,
       seed: 1234,
       octree_resolution: 256,
-      check_box_rembg: true,
+      // The input is already background-removed (RGBA). With rembg on, the Space
+      // converts it to RGB first, which brings back the hidden background colours
+      // (e.g. the table under a cup) and turns them into a slab under the model.
+      // With rembg off, RGBA input is used as is and RGB input is still rembg'd.
+      check_box_rembg: false,
       num_chunks: 8000,
       randomize_seed: true,
     });
