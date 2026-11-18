@@ -18,6 +18,8 @@ type AppMode = 'landing' | 'analyze' | 'batch-remove' | 'complete-body' | 'gener
 const App: React.FC = () => {
   const [mode, setMode] = useState<AppMode>('landing');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  // Name of the analyzed photo (without extension), used for saved file names
+  const [sourceImageName, setSourceImageName] = useState<string | null>(null);
   const [originalImageDimensions, setOriginalImageDimensions] = useState<{ width: number, height: number } | null>(null);
 
   // AI provider settings (API keys, providers, model IDs)
@@ -254,6 +256,7 @@ const App: React.FC = () => {
     }
 
     setMode('analyze');
+    setSourceImageName(file.name.replace(/\.[^/.]+$/, ''));
 
     // Convert to Data URL for persistence
     const reader = new FileReader();
@@ -910,6 +913,7 @@ const App: React.FC = () => {
   const resetAppState = () => {
     setMode('landing');
     setPreviewUrl(null);
+    setSourceImageName(null);
     setCompletionOriginalUrl(null);
     setCompletionResult(null);
     setModel3DSource(null);
@@ -968,24 +972,32 @@ const App: React.FC = () => {
         completedImages: archiveCompleted,
         models3D: archiveModels,
         depthMapUrl: archiveDepthMapUrl,
-        processingTimes: Object.fromEntries(processingTimes)
+        processingTimes: Object.fromEntries(processingTimes),
+        sourceImageName: sourceImageName ?? undefined
       };
 
-      // Construct filename based on phases
-      const phases: string[] = [];
-      if (archive.croppedImages.length > 0) phases.push('1'); // Phase 1: Detect & Crop
-
-      if (archive.completedImages.length > 0) phases.push('3'); // Phase 3: Image Completion
-      if (archive.models3D.length > 0) phases.push('4'); // Phase 4: 3D Generation
-
-      const phaseSuffix = phases.length > 0 ? `-phase${phases.join('-')}` : '';
+      // File name: <photo name>_<furthest stage>_<local date-time>.json
+      // e.g. 2PersonsAroundTable_3d-models_20261118-143005.json
+      const stage =
+        archive.models3D.length > 0 && archive.depthMapUrl ? 'scene'
+          : archive.models3D.length > 0 ? '3d-models'
+            : archive.completedImages.length > 0 ? 'completed'
+              : archive.croppedImages.length > 0 ? 'detected'
+                : 'empty';
+      const baseName = (sourceImageName || 'project')
+        .replace(/[\\/:*?"<>|\s]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 60) || 'project';
+      const now = new Date();
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
 
       // 3. Download JSON
       const blob = new Blob([JSON.stringify(archive)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `scenecraft-project${phaseSuffix}-${Date.now()}.json`;
+      link.download = `${baseName}_${stage}_${stamp}.json`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -1022,6 +1034,7 @@ const App: React.FC = () => {
       setMode(newMode);
 
       setOriginalImageDimensions(archive.originalImageDimensions);
+      setSourceImageName(archive.sourceImageName ?? null);
       setDetectedObjects(archive.detectedObjects);
 
       // Restore URLs

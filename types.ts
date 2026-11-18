@@ -47,6 +47,7 @@ export interface ProjectArchive {
   models3D: Model3D[];
   depthMapUrl?: string | null;
   processingTimes?: Record<string, number>;
+  sourceImageName?: string; // File name of the analyzed photo (without extension), used for saved file names
 }
 
 // ---- AI provider settings ----
