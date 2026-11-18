@@ -27,7 +27,7 @@
 |---|---|---|
 | 1 | 物体検出 | VLM（Gemini または OpenAI）でバウンディングボックス、ラベル、詳細な説明（姿勢・動作・服装）を取得 |
 | 2 | 切り出し | HTML5 Canvas API |
-| 3 | 画像補完 | 生成AI（Gemini または OpenAI の画像生成）によるアウトペインティングで、姿勢を保ったまま隠れた部分や切れた部分を復元し、背景を除去（BRIA RMBG 2.0） |
+| 3 | 画像補完 | 生成AI（Gemini または OpenAI の画像生成）によるアウトペインティングで、姿勢を保ったまま隠れた部分や切れた部分を復元し、背景を除去（BRIA RMBG 3.0） |
 | 4 | 特徴点マッチング | AKAZE（OpenCV.js）、Lowe's Ratio Test、RANSAC による拡大率と移動量の推定（複数の縮小率で探索）で、元の切り出し画像が補完画像のどこにあたるかを特定（信頼できない場合は物体全体の枠を使用） |
 | 5 | 深度推定 | Depth Anything V2。物体の深度はマスク内の深度の中央値 |
 | 6 | 3D生成 | TRELLIS.2 または Hunyuan3D-2.1（Hugging Face Spaces）でテクスチャ付きGLBを生成 |
@@ -94,7 +94,7 @@ npm run dev
 | 物体検出、キャンバス拡張量の推定、補完結果のチェック | Gemini / OpenAI | `gemini-pro-latest` / `gpt-5.6-sol` |
 | 画像補完（アウトペインティング） | Gemini / OpenAI | `gemini-3-pro-image` / `gpt-image-2.6-sunburst` |
 
-- OpenAI は補完画像を透明背景で返します。Gemini は透明背景を出力できないため、補完後に背景除去（BRIA RMBG 2.0）を行います。背景除去に失敗した場合は、補完画像のカードに表示されます。
+- OpenAI は補完画像を透明背景で返します。Gemini は透明背景を出力できないため、補完後に背景除去（BRIA RMBG 3.0）を行います。背景除去に失敗した場合は、補完画像のカードに表示されます。
 - モデルIDは頻繁に変わります。モデルが提供終了になった場合は、AI Settings で新しいIDを入力してください。コードの変更は不要です。
 - 論文の結果は `gemini-3-pro-preview` と `gemini-3-pro-image-preview`（どちらも提供終了）で得たものです。他のプロバイダーやモデルでも同じプロンプトを使いますが、検出精度や姿勢の保持には差が出る可能性があります。
 - APIキーはメモリ上にだけ保持します。プロバイダーとモデルIDはブラウザに記憶されます。
@@ -105,14 +105,15 @@ npm run dev
 
 | 処理 | 既定の Space |
 |---|---|
-| 背景除去 | `briaai/BRIA-RMBG-2.0` |
+| 背景除去 | `briaai/BRIA-RMBG-3.0` |
 | 深度推定 | `depth-anything/Depth-Anything-V2` |
 | 3D生成 | `microsoft/TRELLIS.2`、`tencent/Hunyuan3D-2.1` |
 
 公式の Space は ZeroGPU で動いており、利用者ごとに1日の利用枠があります（Hugging Face PRO では枠が大きくなります）。多数の物体を処理する場合は、Space を自分のアカウントに複製し（Space のページの **Duplicate this Space**）、専用 GPU を割り当てて、その ID を入力してください。専用 GPU は時間課金なので、使い終わったら Space を一時停止してください。
 
 - **TRELLIS.2**：**A100**（80GB）を使ってください。TRELLIS.2 の開発元は 24GB 以上を必要とし、動作確認は A100/H100 だけです。また、Space は特定の GPU 向けにビルド済みの CUDA 拡張機能を読み込むため（今の公式 Space は ZeroGPU の GPU 向け）、それより小さい GPU や種類の違う GPU では動かないことがあります。
-- **背景除去・深度推定**：T4 で十分です。非公開の Space には、読み取り権限のある HF トークンが必要です。
+- **背景除去・深度推定**：深度推定は T4 で十分です。BRIA RMBG 3.0 は4ステップの拡散モデルを使い、公式 Space では1枚あたり最大60秒の GPU を確保します。
+- BRIA RMBG のモデルは非商用利用（CC BY-NC 4.0）として公開されています。それ以外の用途では、モデルカードを確認してください。非公開の Space には、読み取り権限のある HF トークンが必要です。
 
 ## 使い方
 
@@ -164,7 +165,7 @@ npm run dev
 
 [MIT](LICENSE)
 
-このリポジトリに含まれるのはアプリケーションのコードのみです。呼び出している外部のモデルやAPI（Gemini、OpenAI、TRELLIS.2、Hunyuan3D-2.1、Depth Anything V2、BRIA RMBG 2.0 など）には、それぞれのライセンスと利用規約が適用されます。特に商用で利用する場合は、事前に確認してください。
+このリポジトリに含まれるのはアプリケーションのコードのみです。呼び出している外部のモデルやAPI（Gemini、OpenAI、TRELLIS.2、Hunyuan3D-2.1、Depth Anything V2、BRIA RMBG 3.0 など）には、それぞれのライセンスと利用規約が適用されます。特に商用で利用する場合は、事前に確認してください。
 
 特に [Tencent Hunyuan 3D 2.1 Community License](https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1/blob/main/LICENSE) は、EU、英国、韓国では適用されません。これらの地域では TRELLIS.2（MIT）を使ってください。
 

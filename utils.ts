@@ -152,11 +152,11 @@ export const removeBackgroundWithRembg = async (imageUrl: string, apiKey?: strin
       }
     }
 
-    throw new Error("No valid output from RMBG-2.0");
+    throw new Error("No valid output from the background removal Space");
 
   } catch (e: any) {
-    console.error(`RMBG-2.0 via Gradio failed (${space}):`, e);
-    throw new Error(`RMBG-2.0 Failed (${space}): ${e.message}`);
+    console.error(`Background removal via Gradio failed (${space}):`, e);
+    throw new Error(`Background removal failed (${space}): ${e.message}`);
   }
 };
 

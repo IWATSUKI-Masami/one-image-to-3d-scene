@@ -27,7 +27,7 @@ The sample photo [`samples/two-people-at-table.webp`](samples/two-people-at-tabl
 |---|---|---|
 | 1 | Object detection | Vision-Language Model (Gemini or OpenAI) returns bounding boxes, labels and detailed descriptions (pose, action, clothing) |
 | 2 | Cropping | HTML5 Canvas API |
-| 3 | Image completion | Generative AI outpainting (Gemini or OpenAI image generation) restores occluded / cut-off parts while preserving pose, followed by background removal (BRIA RMBG 2.0) |
+| 3 | Image completion | Generative AI outpainting (Gemini or OpenAI image generation) restores occluded / cut-off parts while preserving pose, followed by background removal (BRIA RMBG 3.0) |
 | 4 | Feature matching | AKAZE (OpenCV.js) + Lowe's ratio test + RANSAC fit of a scale + translation, searched at several image scales, to localize the original crop inside the completed image (unreliable matches fall back to the whole object) |
 | 5 | Depth estimation | Depth Anything V2; object depth is the median depth inside the object mask |
 | 6 | 3D generation | TRELLIS.2 or Hunyuan3D-2.1 (Hugging Face Spaces) → textured GLB |
@@ -94,7 +94,7 @@ Click the AI button in the header to open **AI Settings**, where you choose the 
 | Object detection, canvas expansion estimate, completion check | Gemini / OpenAI | `gemini-pro-latest` / `gpt-5.6-sol` |
 | Image completion (outpainting) | Gemini / OpenAI | `gemini-3-pro-image` / `gpt-image-2.6-sunburst` |
 
-- OpenAI returns completions with a transparent background. Gemini cannot, so its completions go through background removal (BRIA RMBG 2.0); a failed removal is marked on the completed card.
+- OpenAI returns completions with a transparent background. Gemini cannot, so its completions go through background removal (BRIA RMBG 3.0); a failed removal is marked on the completed card.
 - Model IDs change often. If a model is retired, type a new ID in AI Settings; no code change is needed.
 - The results in the paper were obtained with `gemini-3-pro-preview` and `gemini-3-pro-image-preview` (both since shut down). Other providers and models use the same prompts, but detection accuracy and pose preservation may differ.
 - API keys are kept in memory only. Providers and model IDs are remembered in the browser.
@@ -105,14 +105,15 @@ Background removal, depth estimation and 3D generation call these Spaces. They c
 
 | Task | Default Space |
 |---|---|
-| Background removal | `briaai/BRIA-RMBG-2.0` |
+| Background removal | `briaai/BRIA-RMBG-3.0` |
 | Depth estimation | `depth-anything/Depth-Anything-V2` |
 | 3D generation | `microsoft/TRELLIS.2`, `tencent/Hunyuan3D-2.1` |
 
 The official Spaces run on ZeroGPU, which has a daily quota per user (larger with Hugging Face PRO). To process many objects, duplicate a Space to your account (**Duplicate this Space** on its page), give it a dedicated GPU, and enter its ID. Dedicated GPUs are billed per hour — pause the Space when you are done.
 
 - **TRELLIS.2**: use an **A100** (80 GB). The TRELLIS.2 authors require at least 24 GB and verified only A100/H100, and the Space installs CUDA extensions prebuilt for specific GPUs (the current official Space targets the ZeroGPU hardware), so smaller or different GPUs may fail.
-- **Background removal / depth estimation**: a T4 is enough. Private Spaces need an HF token with read access.
+- **Background removal / depth estimation**: a T4 is enough for depth estimation. BRIA RMBG 3.0 runs a 4-step diffusion model; the official Space requests a large ZeroGPU slot for up to 60 s per image.
+- BRIA RMBG models are released for non-commercial use (CC BY-NC 4.0); check the model card before other uses. Private Spaces need an HF token with read access.
 
 ## Usage
 
@@ -162,7 +163,7 @@ If you use this software in your research, please cite:
 
 [MIT](LICENSE)
 
-This repository contains only the application code. The external models and APIs it calls (Gemini, OpenAI, TRELLIS.2, Hunyuan3D-2.1, Depth Anything V2, BRIA RMBG 2.0, etc.) are governed by their own licenses and terms of use; check them before use, especially for commercial purposes.
+This repository contains only the application code. The external models and APIs it calls (Gemini, OpenAI, TRELLIS.2, Hunyuan3D-2.1, Depth Anything V2, BRIA RMBG 3.0, etc.) are governed by their own licenses and terms of use; check them before use, especially for commercial purposes.
 
 In particular, the [Tencent Hunyuan 3D 2.1 Community License](https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1/blob/main/LICENSE) does not apply in the European Union, the United Kingdom and South Korea; use TRELLIS.2 (MIT) there.
 

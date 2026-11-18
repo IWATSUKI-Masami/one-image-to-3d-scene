@@ -25,7 +25,7 @@ export const DEFAULT_MODELS: AIModels = {
  * same API as the original Space.
  */
 export const DEFAULT_SPACES: HFSpaces = {
-  rmbg: 'briaai/BRIA-RMBG-2.0',
+  rmbg: 'briaai/BRIA-RMBG-3.0',
   depth: 'depth-anything/Depth-Anything-V2',
   trellis: 'microsoft/TRELLIS.2',
   hunyuan3d: 'tencent/Hunyuan3D-2.1',
@@ -54,6 +54,16 @@ export const hasRequiredKeys = (settings: AISettings): boolean =>
 const STORAGE_KEY = 'one-image-to-3d-scene:ai-settings';
 
 /**
+ * Former default values. Earlier versions stored every value, including
+ * untouched defaults, so a stored former default is treated as "not set" and
+ * replaced by the current default.
+ */
+const FORMER_DEFAULTS: { models: Partial<Record<keyof AIModels, string[]>>; spaces: Partial<Record<keyof HFSpaces, string[]>> } = {
+  models: {},
+  spaces: { rmbg: ['briaai/BRIA-RMBG-2.0'] },
+};
+
+/**
  * Initial settings. API keys come only from environment variables (never from
  * browser storage); providers, model IDs and Space IDs are remembered in localStorage.
  */
@@ -75,10 +85,12 @@ export const loadAISettings = (): AISettings => {
       if (isProvider(saved.visionProvider)) settings.visionProvider = saved.visionProvider;
       if (isProvider(saved.imageProvider)) settings.imageProvider = saved.imageProvider;
       for (const k of Object.keys(DEFAULT_MODELS) as (keyof AIModels)[]) {
-        if (typeof saved.models?.[k] === 'string' && saved.models[k].trim()) settings.models[k] = saved.models[k].trim();
+        const v = typeof saved.models?.[k] === 'string' ? saved.models[k].trim() : '';
+        if (v && !FORMER_DEFAULTS.models[k]?.includes(v)) settings.models[k] = v;
       }
       for (const k of Object.keys(DEFAULT_SPACES) as (keyof HFSpaces)[]) {
-        if (typeof saved.spaces?.[k] === 'string' && saved.spaces[k].trim()) settings.spaces[k] = saved.spaces[k].trim();
+        const v = typeof saved.spaces?.[k] === 'string' ? saved.spaces[k].trim() : '';
+        if (v && !FORMER_DEFAULTS.spaces[k]?.includes(v)) settings.spaces[k] = v;
       }
     }
   } catch {
@@ -87,14 +99,25 @@ export const loadAISettings = (): AISettings => {
   return settings;
 };
 
-/** Remember providers, model IDs and Space IDs (API keys are intentionally not stored). */
+/** Keep only the values that differ from the defaults */
+const overrides = <T extends object>(values: T, defaults: T): Partial<T> =>
+  Object.fromEntries(
+    Object.entries(values as Record<string, string>)
+      .filter(([k, v]) => v.trim() && v.trim() !== (defaults as Record<string, string>)[k]),
+  ) as Partial<T>;
+
+/**
+ * Remember providers, and model / Space IDs that were changed (API keys are
+ * intentionally not stored). Untouched defaults are not stored, so a new
+ * default in a later version takes effect.
+ */
 export const saveAISettings = (settings: AISettings): void => {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       visionProvider: settings.visionProvider,
       imageProvider: settings.imageProvider,
-      models: settings.models,
-      spaces: settings.spaces,
+      models: overrides(settings.models, DEFAULT_MODELS),
+      spaces: overrides(settings.spaces, DEFAULT_SPACES),
     }));
   } catch {
     // Ignore storage errors

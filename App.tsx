@@ -606,7 +606,7 @@ const App: React.FC = () => {
    * Background removal after completion.
    * - Completions that are already transparent (OpenAI with background: 'transparent')
    *   are used as they are, so BRIA RMBG is not needed.
-   * - Otherwise BRIA RMBG 2.0 removes the background of the completed image and of the
+   * - Otherwise BRIA RMBG (3.0 by default) removes the background of the completed image and of the
    *   original crop (the latter only helps feature matching).
    * `failed` is true when RMBG was needed but failed; the card then shows a warning.
    */
