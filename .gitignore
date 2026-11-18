@@ -1,0 +1,29 @@
+# Dependencies & build output
+node_modules
+dist
+dist-ssr
+
+# Environment files (API keys) — never commit these
+.env
+.env.*
+!.env.example
+*.local
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.sw?
+
+# Generated assets
+data/
