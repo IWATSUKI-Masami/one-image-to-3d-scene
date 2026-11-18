@@ -13,6 +13,7 @@ All notable changes to this project. Versions up to v1.18.1 were developed in th
 - **Fixed** AKAZE matching: OpenCV objects are always released (some were leaked), the bounding box of projected corners is computed correctly (`Number.MIN_VALUE` was used as -∞), and matching waits for OpenCV.js to finish loading instead of giving up.
 - **Cleanup** `index.html`: removed the Google AI Studio import map, the missing `/index.css` and the unused `<model-viewer>` script.
 - **Cleanup** removed unused code: utility functions (`trimTransparentEdges`, `refineOverlaps`, `refineSingleOverlap`, etc.), unused types, state, handlers, component props and the never-wired card actions (Finalize / Refine Overlap / Remove BG); removed debug `console.log` output (processing times are still recorded and exported as CSV).
+- **Changed** Tailwind CSS is now built with the app (Tailwind v3 + PostCSS) instead of being loaded from the Play CDN at runtime. The look is unchanged, and the app no longer needs `cdn.tailwindcss.com`.
 - **Cleanup** TypeScript now reports unused variables and parameters (`noUnusedLocals`, `noUnusedParameters`); added `npm run typecheck`.
 - **Removed** the automatic fallback from the official Hugging Face Spaces (BRIA RMBG 2.0, Depth Anything V2, TRELLIS.2) to the author's private duplicate Spaces.
 - **Removed** the commercial API integrations: Stability AI API (3D generation) and Remove.bg (background removal). Background removal now always uses BRIA RMBG 2.0.
