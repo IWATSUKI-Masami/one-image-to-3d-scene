@@ -1192,7 +1192,7 @@ const App: React.FC = () => {
                     value={hfToken}
                     onChange={(e) => setHfToken(e.target.value)}
                     className="w-24 px-2 py-0.5 text-xs border border-slate-300 rounded focus:outline-none focus:border-blue-500"
-                    title="Optional: Hugging Face Token"
+                    title="Hugging Face token: required for TRELLIS.2, recommended for background removal and depth estimation"
                   />
 
                 </div>
@@ -1222,16 +1222,6 @@ const App: React.FC = () => {
                       value={tripoSrApiUrl}
                       onChange={(e) => setTripoSrApiUrl(e.target.value)}
                       className="w-40 px-2 py-0.5 text-xs border border-slate-300 rounded focus:outline-none focus:border-orange-500 font-mono"
-                    />
-                  )}
-
-                  {modelProvider === 'trellis' && (
-                    <input
-                      type="password"
-                      placeholder="HF Token"
-                      value={hfToken}
-                      onChange={(e) => setHfToken(e.target.value)}
-                      className="w-24 px-2 py-0.5 text-xs border border-slate-300 rounded focus:outline-none focus:border-emerald-500"
                     />
                   )}
                 </div>
