@@ -112,7 +112,10 @@ Background removal, depth estimation and 3D generation call these Spaces. They c
 The official Spaces run on ZeroGPU, which has a daily quota per user (larger with Hugging Face PRO). To process many objects, duplicate a Space to your account (**Duplicate this Space** on its page), give it a dedicated GPU, and enter its ID. Dedicated GPUs are billed per hour — pause the Space when you are done.
 
 - **TRELLIS.2**: use an **A100** (80 GB). The TRELLIS.2 authors require at least 24 GB and verified only A100/H100, and the Space installs CUDA extensions prebuilt for specific GPUs (the current official Space targets the ZeroGPU hardware), so smaller or different GPUs may fail.
-- **Background removal / depth estimation**: a T4 is enough for depth estimation. BRIA RMBG 3.0 runs a 4-step diffusion model; the official Space requests a large ZeroGPU slot for up to 60 s per image.
+- **Hunyuan3D-2.1**: an **A100** (80 GB). Shape plus texture generation needs about 29 GB, and the Space builds its CUDA extensions for A100/A10G-class GPUs.
+- **Depth estimation**: a T4 is enough.
+- **Background removal**: BRIA RMBG 3.0 is a 4-step diffusion model of about 25 GB (bf16 weights), so it needs a 48 GB GPU such as an **L40S**; a T4 or 24 GB GPU runs out of memory. A duplicate of BRIA RMBG 2.0 (same API) runs on a T4. Its models are gated: accept the terms of `briaai/RMBG-3.0` and `briaai/Fibo-2.0-edit-turbo` and add your HF token as the Space secret `HF_TOKEN`.
+- With **OpenAI completion** the background is already transparent, so no background-removal Space is needed at all.
 - BRIA RMBG models are released for non-commercial use (CC BY-NC 4.0); check the model card before other uses. Private Spaces need an HF token with read access.
 
 ## Usage
