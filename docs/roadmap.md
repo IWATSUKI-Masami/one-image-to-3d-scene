@@ -92,6 +92,19 @@ People, the vase and the cups are mostly visible and are placed correctly.
 - **Silhouette fitting**: render the 3D model from the estimated camera and fit its scale and position so that its silhouette matches the visible mask in the photo.
 - **Pixel-aligned generation**: models such as Pixal3D (item 1) keep the front of the model aligned with the input image, which may make the visible part easier to locate.
 
+### Proposed approach
+
+A person places such objects from a few cues: the object's real size (relative to the people in the photo), where it stands (on the floor), and which part of it is visible (it continues beyond the image border). The approach uses the same cues instead of fitting the whole model into the small box:
+
+1. **Detect partial visibility**: the crop box touches the image border, or the VLM says that the object is cut off or occluded. Ask the VLM, in the same structured output as the detection, which part is visible (e.g. "front edge of the table top", "right edge of the chair back") and in which direction the object continues.
+2. **Scale from size priors, not from the box**: the people are mostly visible and placed correctly, so their height (about 1.7 m) gives the scene's scale. Ask the VLM for the typical size of each object (e.g. table about 0.75 m high, chair seat about 0.45 m) and scale the model to it.
+3. **Depth from the visible part**: the median depth of the visible mask (paper, eq. (4)) is still valid for the visible part.
+4. **Ground contact**: estimate the floor from the feet of the people (or the lowest points of standing objects) and put the bottom of furniture on it.
+5. **Position from the visible part**: move the scaled model so that its visible part (step 1) projects onto the visible region of the photo, and the rest extends outside the image or behind the occluder.
+6. **Refine by silhouette fitting** (optional): render the model from the estimated camera and adjust position and yaw so that its silhouette within the image matches the visible mask.
+
+Steps 1–5 need no new model and could be tried first on the sample photo.
+
 ## 4. More accurate orientation estimation
 
 A first version is implemented (see "Implemented" above): Orient Anything on the photo appearance and on a front render of each model, plus a viewing-direction correction. Ways to improve it:
@@ -110,6 +123,28 @@ Perspective placement (see "Implemented" above) still relies on two assumptions:
 - **Far/near distance ratio**: Depth Anything V2's relative disparity is stretched over the full range for every image, so the ratio is unknown and set with the Depth slider (default 1.5, tuned on the sample photo). A metric depth model (e.g. Depth Anything V2 Metric, Depth Pro, MoGe) would give real distances, or the ratio could be estimated from typical object sizes (a cup, a person's head) in the scene.
 
 The orientation estimation's viewing-direction correction uses the same field of view, so it would benefit as well.
+
+## 6. Better faces of people
+
+### Problem
+
+Faces of the 3D models of people look unnatural (uncanny).
+
+### Cause
+
+- In the completed full-body image (1024×1536), the face covers only a few dozen pixels.
+- General image-to-3D models (TRELLIS.2, Hunyuan3D-2.1) cannot reproduce the relief of a face (eye sockets, nose, mouth) at that size, so the result is a smooth shape with eyes and mouth painted on. TRELLIS.2 already runs near its limits (resolution 1024, texture 2048).
+- People are detected as `type: 'person'`, but completion and 3D generation treat them like any other object.
+
+### Ideas (in the suggested order)
+
+1. **Person-specific completion prompt**: for `person` only, ask for a clear, natural face (facing forward, eyes open, calm expression). Cheap, but a blurred face in the photo is redrawn, so it will not look like the actual person.
+2. **TRELLIS.2 resolution 1536**: slightly finer shape, at the cost of generation time and ZeroGPU quota.
+3. **Face restoration before 3D generation**: sharpen the face of the completed image with a face restoration model (e.g. CodeFormer) on another Space.
+4. **Not modelling the face**: blur the face texture or fill it with the skin color ("mannequin" look). This removes the uncanny effect and may be enough for scene reconstruction.
+5. **Human-specific 3D generators** (e.g. PSHuman, LHM, based on a human body model): best quality, but availability as a Space and licenses need checking.
+
+Try 1 and 2 first; offer 4 as an option if the result is still uncanny.
 
 ## References
 
