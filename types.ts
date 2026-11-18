@@ -68,10 +68,23 @@ export interface AIModels {
   openaiImage: string;
 }
 
+/**
+ * Hugging Face Spaces used by the pipeline (Space ID "owner/name" or a URL).
+ * Defaults are the official Spaces; they can be replaced with duplicates
+ * running on dedicated (paid) GPUs, which have no ZeroGPU quota.
+ */
+export interface HFSpaces {
+  rmbg: string;
+  depth: string;
+  trellis: string;
+  hunyuan3d: string;
+}
+
 export interface AISettings {
   visionProvider: VisionProvider;
   imageProvider: ImageProvider;
   keys: AIKeys;
   models: AIModels;
+  spaces: HFSpaces;
 }
 

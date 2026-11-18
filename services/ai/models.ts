@@ -1,4 +1,4 @@
-import { AIModels, AIProvider, AISettings } from '../../types';
+import { AIModels, AIProvider, AISettings, HFSpaces } from '../../types';
 
 /**
  * Default model IDs.
@@ -17,6 +17,18 @@ export const DEFAULT_MODELS: AIModels = {
   geminiImage: 'gemini-3-pro-image',
   openaiVision: 'gpt-5.6-sol',
   openaiImage: 'gpt-image-2.6-sunburst',
+};
+
+/**
+ * Official Hugging Face Spaces (ZeroGPU). Each can be replaced in AI Settings,
+ * e.g. with your own duplicate on a dedicated GPU. A duplicate must keep the
+ * same API as the original Space.
+ */
+export const DEFAULT_SPACES: HFSpaces = {
+  rmbg: 'briaai/BRIA-RMBG-2.0',
+  depth: 'depth-anything/Depth-Anything-V2',
+  trellis: 'microsoft/TRELLIS.2',
+  hunyuan3d: 'tencent/Hunyuan3D-2.1',
 };
 
 /** Suggestions shown in the model ID fields (any other ID can be typed in). */
@@ -43,7 +55,7 @@ const STORAGE_KEY = 'one-image-to-3d-scene:ai-settings';
 
 /**
  * Initial settings. API keys come only from environment variables (never from
- * browser storage); providers and model IDs are remembered in localStorage.
+ * browser storage); providers, model IDs and Space IDs are remembered in localStorage.
  */
 export const loadAISettings = (): AISettings => {
   const settings: AISettings = {
@@ -54,6 +66,7 @@ export const loadAISettings = (): AISettings => {
       openai: import.meta.env.VITE_OPENAI_API_KEY || '',
     },
     models: { ...DEFAULT_MODELS },
+    spaces: { ...DEFAULT_SPACES },
   };
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
@@ -64,6 +77,9 @@ export const loadAISettings = (): AISettings => {
       for (const k of Object.keys(DEFAULT_MODELS) as (keyof AIModels)[]) {
         if (typeof saved.models?.[k] === 'string' && saved.models[k].trim()) settings.models[k] = saved.models[k].trim();
       }
+      for (const k of Object.keys(DEFAULT_SPACES) as (keyof HFSpaces)[]) {
+        if (typeof saved.spaces?.[k] === 'string' && saved.spaces[k].trim()) settings.spaces[k] = saved.spaces[k].trim();
+      }
     }
   } catch {
     // Storage unavailable or corrupted: use defaults
@@ -71,13 +87,14 @@ export const loadAISettings = (): AISettings => {
   return settings;
 };
 
-/** Remember providers and model IDs (API keys are intentionally not stored). */
+/** Remember providers, model IDs and Space IDs (API keys are intentionally not stored). */
 export const saveAISettings = (settings: AISettings): void => {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       visionProvider: settings.visionProvider,
       imageProvider: settings.imageProvider,
       models: settings.models,
+      spaces: settings.spaces,
     }));
   } catch {
     // Ignore storage errors

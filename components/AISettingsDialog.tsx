@@ -1,7 +1,7 @@
 import React from 'react';
 import { X, RotateCcw } from 'lucide-react';
-import { AIKeys, AIModels, AIProvider, AISettings } from '../types';
-import { DEFAULT_MODELS, MODEL_SUGGESTIONS, PROVIDER_LABELS } from '../services/ai/models';
+import { AIKeys, AIModels, AIProvider, AISettings, HFSpaces } from '../types';
+import { DEFAULT_MODELS, DEFAULT_SPACES, MODEL_SUGGESTIONS, PROVIDER_LABELS } from '../services/ai/models';
 
 interface Props {
   settings: AISettings;
@@ -12,6 +12,13 @@ interface Props {
 const KEY_FIELDS: { key: keyof AIKeys; label: string; placeholder: string }[] = [
   { key: 'gemini', label: 'Google Gemini API key', placeholder: 'AIza...' },
   { key: 'openai', label: 'OpenAI API key', placeholder: 'sk-...' },
+];
+
+const SPACE_FIELDS: { key: keyof HFSpaces; label: string }[] = [
+  { key: 'rmbg', label: 'Background removal' },
+  { key: 'depth', label: 'Depth estimation' },
+  { key: 'trellis', label: 'TRELLIS.2' },
+  { key: 'hunyuan3d', label: 'Hunyuan3D-2.1' },
 ];
 
 const MODEL_FIELDS: { key: keyof AIModels; label: string; provider: AIProvider; role: 'vision' | 'image' }[] = [
@@ -44,6 +51,7 @@ export const AISettingsDialog: React.FC<Props> = ({ settings, onChange, onClose 
   const update = (patch: Partial<AISettings>) => onChange({ ...settings, ...patch });
   const setKey = (key: keyof AIKeys, value: string) => update({ keys: { ...settings.keys, [key]: value } });
   const setModel = (key: keyof AIModels, value: string) => update({ models: { ...settings.models, [key]: value } });
+  const setSpace = (key: keyof HFSpaces, value: string) => update({ spaces: { ...settings.spaces, [key]: value } });
 
   const neededKeys = new Set<AIProvider>([settings.visionProvider, settings.imageProvider]);
   const isActive = (field: typeof MODEL_FIELDS[number]) =>
@@ -137,6 +145,35 @@ export const AISettingsDialog: React.FC<Props> = ({ settings, onChange, onClose 
                 </datalist>
               </label>
             ))}
+          </section>
+
+          {/* Hugging Face Spaces */}
+          <section className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold text-slate-700">Hugging Face Spaces</div>
+              <button
+                type="button"
+                onClick={() => update({ spaces: { ...DEFAULT_SPACES } })}
+                className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700"
+              >
+                <RotateCcw size={12} /> Reset to defaults
+              </button>
+            </div>
+            {SPACE_FIELDS.map(field => (
+              <label key={field.key} className="flex items-center gap-2">
+                <span className="w-40 shrink-0 text-xs text-slate-700">{field.label}</span>
+                <input
+                  type="text"
+                  value={settings.spaces[field.key]}
+                  placeholder={DEFAULT_SPACES[field.key]}
+                  onChange={e => setSpace(field.key, e.target.value)}
+                  className="flex-1 min-w-0 px-2 py-1 text-sm border border-slate-300 rounded-md focus:outline-none focus:border-blue-500 font-mono"
+                />
+              </label>
+            ))}
+            <p className="text-xs text-slate-500">
+              The official Spaces run on ZeroGPU with a daily quota. To avoid it, duplicate a Space to your account, give it a dedicated GPU, and enter its ID (<code>your-name/Space-Name</code>). Private Spaces need an HF token with read access.
+            </p>
           </section>
         </div>
 

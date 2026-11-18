@@ -70,6 +70,18 @@ npm run dev
 - 論文の結果は `gemini-3-pro-preview` と `gemini-3-pro-image-preview`（どちらも提供終了）で得たものです。他のプロバイダーやモデルでも同じプロンプトを使いますが、検出精度や姿勢の保持には差が出る可能性があります。
 - APIキーはメモリ上にだけ保持します。プロバイダーとモデルIDはブラウザに記憶されます。
 
+### Hugging Face Spaces
+
+背景除去、深度推定、3D生成では、次の Space を呼び出します。AI Settings の **Hugging Face Spaces** で変更できます。
+
+| 処理 | 既定の Space |
+|---|---|
+| 背景除去 | `briaai/BRIA-RMBG-2.0` |
+| 深度推定 | `depth-anything/Depth-Anything-V2` |
+| 3D生成 | `microsoft/TRELLIS.2`、`tencent/Hunyuan3D-2.1` |
+
+公式の Space は ZeroGPU で動いており、利用者ごとに1日の利用枠があります（Hugging Face PRO では枠が大きくなります）。多数の物体を処理する場合は、Space を自分のアカウントに複製し（Space のページの **Duplicate this Space**）、専用 GPU を割り当てて、その ID を入力してください（TRELLIS.2 には約 48GB の VRAM が必要です。例：L40S）。専用 GPU は時間課金なので、使い終わったら Space を一時停止してください。非公開の Space には、読み取り権限のある HF トークンが必要です。
+
 ## 使い方
 
 1. **Detect & Crop**：画像をアップロードしてシーンを解析します。検出された物体は自動で切り出されます。

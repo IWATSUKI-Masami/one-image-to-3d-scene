@@ -1,4 +1,5 @@
 import { CroppedObject, DetectedObject } from './types';
+import { DEFAULT_SPACES } from './services/ai/models';
 import openCVUrl from '@techstark/opencv-js/dist/opencv.js?url';
 
 export const blobUrlToDataUrl = async (blobUrl: string): Promise<string> => {
@@ -90,8 +91,8 @@ export const cropObjectsFromImage = async (
   });
 };
 
-export const removeBackgroundWithRembg = async (imageUrl: string, apiKey?: string): Promise<Blob> => {
-  const space = 'briaai/BRIA-RMBG-2.0';
+export const removeBackgroundWithRembg = async (imageUrl: string, apiKey?: string, space: string = DEFAULT_SPACES.rmbg): Promise<Blob> => {
+  space = space.trim() || DEFAULT_SPACES.rmbg; // an empty setting means the official Space
 
   const { Client } = await import("@gradio/client");
   const options: any = {};
@@ -127,7 +128,7 @@ export const removeBackgroundWithRembg = async (imageUrl: string, apiKey?: strin
 
   } catch (e: any) {
     console.error(`RMBG-2.0 via Gradio failed (${space}):`, e);
-    throw new Error(`RMBG-2.0 Failed: ${e.message}`);
+    throw new Error(`RMBG-2.0 Failed (${space}): ${e.message}`);
   }
 };
 
@@ -399,13 +400,12 @@ export const findBestMatchPosition = async (
   }
 };
 
-export const generateDepthMap = async (imageUrl: string, apiKey?: string): Promise<string> => {
+export const generateDepthMap = async (imageUrl: string, apiKey?: string, space: string = DEFAULT_SPACES.depth): Promise<string> => {
+  space = space.trim() || DEFAULT_SPACES.depth; // an empty setting means the official Space
   const { Client } = await import("@gradio/client");
 
   // Ensure hfToken is undefined if empty string
   const token = apiKey && apiKey.trim().length > 0 ? apiKey : undefined;
-
-  const space = 'depth-anything/Depth-Anything-V2';
 
   try {
     const client = await Client.connect(space, token ? { token: token as `hf_${string}` } : {});
@@ -448,7 +448,7 @@ export const generateDepthMap = async (imageUrl: string, apiKey?: string): Promi
     console.error(`Depth Map generation failed (${space}):`, e);
     let errorMsg = e.message || "Unknown error";
     if (e.original_msg) errorMsg = e.original_msg;
-    throw new Error(`Depth Map Failed: ${errorMsg}`);
+    throw new Error(`Depth Map Failed (${space}): ${errorMsg}`);
   }
 };
 
@@ -583,7 +583,8 @@ export const calculateTightBoundingBox = async (imageUrl: string): Promise<[numb
  * Calls `generation_all` (shape + PBR texture) of the Space's Gradio app and
  * returns the textured GLB. Parameters are the app's defaults.
  */
-export const generate3DModelWithHunyuan3D = async (imageUrl: string, hfToken?: string): Promise<Blob> => {
+export const generate3DModelWithHunyuan3D = async (imageUrl: string, hfToken?: string, space: string = DEFAULT_SPACES.hunyuan3d): Promise<Blob> => {
+  space = space.trim() || DEFAULT_SPACES.hunyuan3d; // an empty setting means the official Space
   try {
     const { Client } = await import("@gradio/client");
 
@@ -593,7 +594,7 @@ export const generate3DModelWithHunyuan3D = async (imageUrl: string, hfToken?: s
       throw new Error("Hugging Face token is required for Hunyuan3D-2.1. Please enter your HF Token in the settings.");
     }
 
-    const client: any = await Client.connect('tencent/Hunyuan3D-2.1', { token: token as `hf_${string}` });
+    const client: any = await Client.connect(space, { token: token as `hf_${string}` });
 
     const imageBlob = await (await fetch(imageUrl)).blob();
     const imageFile = new File([imageBlob], 'input.png', { type: imageBlob.type || 'image/png' });
@@ -625,11 +626,12 @@ export const generate3DModelWithHunyuan3D = async (imageUrl: string, hfToken?: s
   } catch (e: any) {
     console.error("Hunyuan3D-2.1 via Gradio failed:", e);
     const errorMsg = e.original_msg ? `Gradio Error: ${e.original_msg}` : (e.message || "An unknown error occurred");
-    throw new Error(`Hunyuan3D-2.1 Failed: ${errorMsg}`);
+    throw new Error(`Hunyuan3D-2.1 Failed (${space}): ${errorMsg}`);
   }
 };
 
-export const generate3DModelWithTrellis = async (imageUrl: string, hfToken?: string): Promise<Blob> => {
+export const generate3DModelWithTrellis = async (imageUrl: string, hfToken?: string, space: string = DEFAULT_SPACES.trellis): Promise<Blob> => {
+  space = space.trim() || DEFAULT_SPACES.trellis; // an empty setting means the official Space
   try {
     const { Client } = await import("@gradio/client");
 
@@ -640,7 +642,7 @@ export const generate3DModelWithTrellis = async (imageUrl: string, hfToken?: str
       throw new Error("Hugging Face token is required for TRELLIS.2. Please enter your HF Token in the settings.");
     }
 
-    const client: any = await Client.connect('microsoft/TRELLIS.2', { token: token as `hf_${string}` });
+    const client: any = await Client.connect(space, { token: token as `hf_${string}` });
     await client.predict("/start_session", {});
 
     const img = await loadImageElement(imageUrl);
@@ -840,6 +842,6 @@ export const generate3DModelWithTrellis = async (imageUrl: string, hfToken?: str
       errorMsg = `Gradio Status: ${e.message}`;
     }
 
-    throw new Error(`TRELLIS.2 Failed: ${errorMsg}`);
+    throw new Error(`TRELLIS.2 Failed (${space}): ${errorMsg}`);
   }
 };

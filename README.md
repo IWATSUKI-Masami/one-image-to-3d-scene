@@ -70,6 +70,18 @@ Click the AI button in the header to open **AI Settings**, where you choose the 
 - The results in the paper were obtained with `gemini-3-pro-preview` and `gemini-3-pro-image-preview` (both since shut down). Other providers and models use the same prompts, but detection accuracy and pose preservation may differ.
 - API keys are kept in memory only. Providers and model IDs are remembered in the browser.
 
+### Hugging Face Spaces
+
+Background removal, depth estimation and 3D generation call these Spaces. They can be changed under **Hugging Face Spaces** in AI Settings.
+
+| Task | Default Space |
+|---|---|
+| Background removal | `briaai/BRIA-RMBG-2.0` |
+| Depth estimation | `depth-anything/Depth-Anything-V2` |
+| 3D generation | `microsoft/TRELLIS.2`, `tencent/Hunyuan3D-2.1` |
+
+The official Spaces run on ZeroGPU, which has a daily quota per user (larger with Hugging Face PRO). To process many objects, duplicate a Space to your account (**Duplicate this Space** on its page), give it a dedicated GPU (TRELLIS.2 needs about 48 GB VRAM, e.g. L40S), and enter its ID. Dedicated GPUs are billed per hour — pause the Space when you are done. Private Spaces need an HF token with read access.
+
 ## Usage
 
 1. **Detect & Crop** — upload an image and analyze the scene. Detected objects are cropped automatically.

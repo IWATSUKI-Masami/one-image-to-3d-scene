@@ -326,7 +326,7 @@ const App: React.FC = () => {
     setIsGeneratingDepth(true);
     const t0 = performance.now();
     try {
-      const depthUrl = await generateDepthMap(previewUrl, hfToken);
+      const depthUrl = await generateDepthMap(previewUrl, hfToken, aiSettings.spaces.depth);
       setDepthMapUrl(depthUrl);
     } catch (e: any) {
       console.error("Depth map generation failed", e);
@@ -356,8 +356,8 @@ const App: React.FC = () => {
       let glbBlob: Blob;
 
       glbBlob = modelProvider === 'hunyuan3d'
-        ? await generate3DModelWithHunyuan3D(item.imageUrl, hfToken)
-        : await generate3DModelWithTrellis(item.imageUrl, hfToken);
+        ? await generate3DModelWithHunyuan3D(item.imageUrl, hfToken, aiSettings.spaces.hunyuan3d)
+        : await generate3DModelWithTrellis(item.imageUrl, hfToken, aiSettings.spaces.trellis);
 
       const glbUrl = URL.createObjectURL(glbBlob);
 
@@ -419,7 +419,7 @@ const App: React.FC = () => {
     if (previewUrl && !depthMapUrl && !isGeneratingDepth) {
       try {
         setIsGeneratingDepth(true);
-        const depthUrl = await generateDepthMap(previewUrl, hfToken);
+        const depthUrl = await generateDepthMap(previewUrl, hfToken, aiSettings.spaces.depth);
         setDepthMapUrl(depthUrl);
       } catch (e: any) {
         console.warn("Auto depth map generation failed, continuing without it:", e);
@@ -641,12 +641,12 @@ const App: React.FC = () => {
           const tBg = performance.now();
           try {
             // Remove background from completed image (BRIA RMBG 2.0)
-            const bgRemovedBlob = await removeBackgroundWithRembg(generatedImageUrl, hfToken);
+            const bgRemovedBlob = await removeBackgroundWithRembg(generatedImageUrl, hfToken, aiSettings.spaces.rmbg);
             transparentUrl = URL.createObjectURL(bgRemovedBlob);
 
             // Also remove background from extracted image for matching
             try {
-              const extractedBgRemovedBlob = await removeBackgroundWithRembg(item.imageUrl, hfToken);
+              const extractedBgRemovedBlob = await removeBackgroundWithRembg(item.imageUrl, hfToken, aiSettings.spaces.rmbg);
               extractedTransparentUrl = URL.createObjectURL(extractedBgRemovedBlob);
             } catch (extractBgError) {
               console.warn('[Complete Body] Failed to remove BG from extracted image:', extractBgError);
@@ -788,12 +788,12 @@ const App: React.FC = () => {
             const tBg2 = performance.now();
             try {
               // Remove background from completed image (BRIA RMBG 2.0)
-              const bgRemovedBlob = await removeBackgroundWithRembg(generatedImageUrl, hfToken);
+              const bgRemovedBlob = await removeBackgroundWithRembg(generatedImageUrl, hfToken, aiSettings.spaces.rmbg);
               transparentUrl = URL.createObjectURL(bgRemovedBlob);
 
               // Also remove background from extracted image for matching
               try {
-                const extractedBgRemovedBlob = await removeBackgroundWithRembg(item.imageUrl, hfToken);
+                const extractedBgRemovedBlob = await removeBackgroundWithRembg(item.imageUrl, hfToken, aiSettings.spaces.rmbg);
                 extractedTransparentUrl = URL.createObjectURL(extractedBgRemovedBlob);
               } catch (extractBgError) {
                 console.warn('[Batch Complete] Failed to remove BG from extracted:', extractBgError);
