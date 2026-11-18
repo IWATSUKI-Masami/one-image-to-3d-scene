@@ -19,7 +19,7 @@
 | 3 | 画像補完 | 生成AI（Geminiの画像生成）によるアウトペインティングで、姿勢を保ったまま隠れた部分や切れた部分を復元し、背景を除去（BRIA RMBG 2.0） |
 | 4 | 特徴点マッチング | AKAZE（OpenCV.js）、Lowe's Ratio Test、RANSACによるホモグラフィ推定で、元の切り出し画像が補完画像のどこにあたるかを特定 |
 | 5 | 深度推定 | Depth Anything V2。物体の深度はマスク内の深度の中央値 |
-| 6 | 3D生成 | TRELLIS.2、Stable Fast 3D、TripoSR（ローカル）のいずれかでGLBを生成 |
+| 6 | 3D生成 | TRELLIS.2 または TripoSR（ローカル）でGLBを生成 |
 | 7 | シーン合成 | Three.js。深度マップから作った点群のバウンディングボックス（PC Box）にモデルを合わせて配置 |
 
 ## 必要な環境
@@ -102,7 +102,7 @@ npm run dev
 
 [MIT](LICENSE)
 
-このリポジトリに含まれるのはアプリケーションのコードのみです。呼び出している外部のモデルやAPI（Gemini、TRELLIS.2、Stable Fast 3D、Depth Anything V2、BRIA RMBG 2.0 など）には、それぞれのライセンスと利用規約が適用されます。特に商用で利用する場合は、事前に確認してください。
+このリポジトリに含まれるのはアプリケーションのコードのみです。呼び出している外部のモデルやAPI（Gemini、TRELLIS.2、TripoSR、Depth Anything V2、BRIA RMBG 2.0 など）には、それぞれのライセンスと利用規約が適用されます。特に商用で利用する場合は、事前に確認してください。
 
 ## 更新履歴
 

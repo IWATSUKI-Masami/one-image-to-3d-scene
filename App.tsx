@@ -7,7 +7,7 @@ import { Model3DCard } from './components/Model3DCard';
 import { DepthOnlyScene } from './components/DepthOnlyScene';
 import { BoundingBoxOverlay } from './components/BoundingBoxOverlay';
 import { detectObjectsInImage, generateCompletion, estimateCanvasExpansion, verifyCompletion } from './services/geminiService';
-import { cropObjectsFromImage, removeBackgroundWithRembg, refineOverlaps, refineSingleOverlap, trimTransparentEdges, generate3DModelWithGradio, generate3DModelWithTripoSRLocal, generate3DModelWithTrellis, blobUrlToDataUrl, dataUrlToBlobUrl, generateDepthMap, prepareImageForCompletion, calculateTightBoundingBox } from './utils';
+import { cropObjectsFromImage, removeBackgroundWithRembg, refineOverlaps, refineSingleOverlap, trimTransparentEdges, generate3DModelWithTripoSRLocal, generate3DModelWithTrellis, blobUrlToDataUrl, dataUrlToBlobUrl, generateDepthMap, prepareImageForCompletion, calculateTightBoundingBox } from './utils';
 import { DetectedObject, CroppedObject, Model3D, ProjectArchive } from './types';
 import { Scan, Sparkles, AlertCircle, Layers, Image as ImageIcon, Key, User, Box, ArrowLeft, Upload, Eraser, Plug, Wand2, RefreshCw, Star, Download, LayoutGrid, MonitorPlay, Cuboid, Save, FolderOpen, Eye, Trash2, Scissors } from 'lucide-react';
 
@@ -35,7 +35,7 @@ const App: React.FC = () => {
   const [isGeneratingDepth, setIsGeneratingDepth] = useState(false);
 
   // 3D generation settings
-  const [modelProvider, setModelProvider] = useState<'huggingface' | 'triposr-local' | 'trellis'>('trellis');
+  const [modelProvider, setModelProvider] = useState<'triposr-local' | 'trellis'>('trellis');
   const [tripoSrApiUrl, setTripoSrApiUrl] = useState('http://127.0.0.1:7860/');
   const [hfToken, setHfToken] = useState(import.meta.env.VITE_HF_TOKEN || '');
 
@@ -410,12 +410,9 @@ const App: React.FC = () => {
       if (modelProvider === 'triposr-local') {
         // Local TripoSR
         glbBlob = await generate3DModelWithTripoSRLocal(item.imageUrl, 256, tripoSrApiUrl);
-      } else if (modelProvider === 'trellis') {
+      } else {
         // TRELLIS.2 via Hugging Face
         glbBlob = await generate3DModelWithTrellis(item.imageUrl, hfToken);
-      } else {
-        // Hugging Face (Stable Fast 3D via Gradio)
-        glbBlob = await generate3DModelWithGradio(item.imageUrl, hfToken);
       }
 
       const glbUrl = URL.createObjectURL(glbBlob);
@@ -1303,12 +1300,6 @@ const App: React.FC = () => {
                     >
                       TRELLIS.2
                     </button>
-                    <button
-                      onClick={() => setModelProvider('huggingface')}
-                      className={`px-1.5 py-0.5 text-[11px] rounded-sm transition-colors ${modelProvider === 'huggingface' ? 'bg-blue-100 text-blue-700 font-medium' : 'text-slate-500 hover:text-slate-700'}`}
-                    >
-                      Stable Fast 3D
-                    </button>
                   </div>
 
                   {modelProvider === 'triposr-local' && (
@@ -1321,7 +1312,7 @@ const App: React.FC = () => {
                     />
                   )}
 
-                  {(modelProvider === 'trellis' || modelProvider === 'huggingface') && (
+                  {modelProvider === 'trellis' && (
                     <input
                       type="password"
                       placeholder="HF Token"
