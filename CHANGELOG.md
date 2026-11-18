@@ -9,6 +9,7 @@ All notable changes to this project. Versions up to v1.18.1 were developed in th
 - **Changed** JSON output of all vision tasks is now enforced with each provider's structured-output feature. The detection result is wrapped as `{"objects": [...]}`.
 - **Changed** the Gemini API key can now be entered in the app (previously only via `.env.local` or Google AI Studio). Removed the Google AI Studio key-selection integration.
 - **Changed** OpenAI completions request a transparent background (`background: 'transparent'`; retried without it if the model rejects it). Completions that are already transparent skip BRIA RMBG, so OpenAI completion no longer needs the background-removal Space. Gemini cannot output transparency, so RMBG is still used there.
+- **Fixed** selection counts (e.g. "Generate 3D (10)" with 8 cards) included deleted or replaced items; selections are now pruned when items change.
 - **Changed** completed images are shown on a light checkerboard, so a transparent background can be told apart from a white one.
 - **Changed** a failed background removal is now shown on the completed card ("Background removal failed") instead of passing silently.
 - **Added** a sample photo (`samples/two-people-at-table.webp`, AI-generated) and a screenshot of the reconstructed scene in the README.

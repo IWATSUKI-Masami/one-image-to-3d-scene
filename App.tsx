@@ -90,6 +90,27 @@ const App: React.FC = () => {
   // Get current tab's selection
   const selectedItems = selectedItemsPerTab[activeTab];
 
+  // Drop selections of items that no longer exist (deleted or replaced), so that
+  // counts such as "Generate 3D (n)" match the cards that are shown
+  useEffect(() => {
+    setSelectedItemsPerTab(prev => {
+      const keep = (set: Set<string>, ids: Set<string>) => {
+        const next = new Set([...set].filter(id => ids.has(id)));
+        return next.size === set.size ? set : next;
+      };
+      const croppedIds = new Set<string>(croppedImages.map(i => i.id));
+      const completedIds = new Set<string>(completedImages.map(i => i.id));
+      const modelIds = new Set<string>(models3D.map(m => m.id));
+      const next = {
+        original: keep(prev.original, croppedIds),
+        completed: keep(prev.completed, completedIds),
+        '3d': keep(prev['3d'], modelIds),
+        scene: keep(prev.scene, modelIds),
+      };
+      return (Object.keys(next) as (keyof typeof next)[]).every(k => next[k] === prev[k]) ? prev : next;
+    });
+  }, [croppedImages, completedImages, models3D]);
+
   // Helper to update selection for current tab
   const setSelectedItems = (newSelected: Set<string>) => {
     setSelectedItemsPerTab(prev => ({
