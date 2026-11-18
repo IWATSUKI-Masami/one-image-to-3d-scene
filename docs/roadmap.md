@@ -85,6 +85,30 @@ People, the vase and the cups are mostly visible and are placed correctly.
 - **Silhouette fitting**: render the 3D model from the estimated camera and fit its scale and position so that its silhouette matches the visible mask in the photo.
 - **Pixel-aligned generation**: models such as Pixal3D (item 1) keep the front of the model aligned with the input image, which may make the visible part easier to locate.
 
+## 4. Estimating orientation (rotation about the vertical axis)
+
+### Problem
+
+The depth position of people and objects is roughly right, but **their orientation is not corrected**. In the 3D scene every model keeps the orientation its generator treats as the front (zero rotation about the vertical axis). Two people talking face to face in the photo can therefore face the same direction in the scene. Today the only fix is rotating them by hand in Edit mode.
+
+### Goal
+
+Estimate from the photo where a person is facing (**face and body**), or where an object's **characteristic part** points (a chair's backrest, a cup's handle), compute the **rotation about the vertical (Y) axis**, and apply it when placing the model.
+
+### Ideas
+
+- **Viewing-direction correction (first step)**: TRELLIS.2 and Hunyuan3D-2.1 roughly reproduce the input view as the model's front, but an object away from the image center is seen from an angle. Rotating the model by the horizontal angle from the camera to the object (`atan2(x, z)`) brings it closer to how it looks in the photo. A simple baseline that needs no extra model.
+- **Use the depth map**: detect left/right point pairs in 2D, such as a person's shoulders (pose estimation, e.g. MediaPipe), and read their depth from the depth map. The depth difference gives the body's yaw. For objects, the depth difference between the left and right ends may give it as well.
+- **Ask the vision model (VLM)**: give the crop to Gemini / OpenAI and ask, with structured output (e.g. in 15° steps), which direction the subject faces relative to the camera. Easy to implement; the angle may be coarse.
+- **A dedicated orientation model**: call a model that estimates an object's orientation (azimuth etc.) from one image, such as Orient Anything, e.g. through a Hugging Face Space. Available Spaces or APIs need to be checked when implementing.
+- **Render and compare**: render the generated model from the scene camera at several yaw angles (e.g. every 10°) and pick the angle whose silhouette or appearance best matches the masked crop. Works for any object but costs more computation.
+
+### Things to watch
+
+- **The front of each generator**: generators may differ in which direction of the model they treat as the front; check each one so that the correction has a common reference.
+- **Order relative to scaling**: rotation changes the width and depth of the model's bounding box, so the scale fit to the PC Box (Eq. (10), (11) of the paper) must be computed after the rotation is applied.
+- **Evaluation**: compare methods against hand-set angles or against how well the rendered view matches the photo.
+
 ## References
 
 - [ComfyUI Docs: Pixal3D](https://docs.comfy.org/tutorials/3d/pixal3d)
