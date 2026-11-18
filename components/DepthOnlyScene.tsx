@@ -57,6 +57,8 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     const [showPointCloud, setShowPointCloud] = useState(false);
     const [showModelsToggle, setShowModelsToggle] = useState(showModels);
     const [showModelBoxes, setShowModelBoxes] = useState(false); // Model Boxes off by default
+    // Rotate models about the vertical axis by their estimated orientation (if estimated)
+    const [applyOrientation, setApplyOrientation] = useState(true);
     const [showWholeModelBoxes, setShowWholeModelBoxes] = useState(false); // Whole Boxes off by default
     const [transformMode, setTransformMode] = useState<'translate' | 'rotate' | 'scale'>('translate');
     const [selectedModelIndex, setSelectedModelIndex] = useState<number>(-1);
@@ -666,6 +668,10 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     if (model.provider !== 'trellis' && model.provider !== 'hunyuan3d') {
                         mesh.rotation.y = Math.PI; // Face camera for other providers
                     }
+                    // Estimated orientation (rotation about the vertical axis). Applied before the
+                    // bounds are measured, so the scale fit uses the box of the rotated model.
+                    const yawDeg = applyOrientation && model.orientation ? model.orientation.yawDeg : 0;
+                    mesh.rotation.y += yawDeg * Math.PI / 180;
 
                     // Fix texture color space for proper color rendering
                     mesh.traverse((child) => {
@@ -700,7 +706,8 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     meshContainer.add(mesh);
 
                     // Step 2: Calculate green box on centered mesh (BEFORE any scaling)
-                    const centeredBox = new THREE.Box3().setFromObject(mesh);
+                    // (precise bounds when rotated: the default box of a rotated mesh is too large)
+                    const centeredBox = new THREE.Box3().setFromObject(mesh, yawDeg !== 0);
                     const centeredSize = new THREE.Vector3();
                     centeredBox.getSize(centeredSize);
                     const cWidth = centeredSize.x;
@@ -946,7 +953,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             renderer.forceContextLoss();
             sceneRef.current = null;
         };
-    }, [imageUrl, depthMapUrl, originalAspectRatio, depthScale, detectedObjects, positionedModels, contextGeneration]);
+    }, [imageUrl, depthMapUrl, originalAspectRatio, depthScale, detectedObjects, positionedModels, contextGeneration, applyOrientation]);
 
     // Helper function to load image
     const loadImageAsync = (url: string): Promise<HTMLImageElement> => {
@@ -1017,6 +1024,21 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                             />
                             <label htmlFor="showModels" className="text-xs text-slate-300">
                                 3D Models ({positionedModels.length})
+                            </label>
+                        </div>
+                    )}
+                    {/* Orientation (only when estimated) */}
+                    {positionedModels.some(m => m.orientation) && (
+                        <div className="flex items-center gap-1" title="Rotate models by their estimated orientation">
+                            <input
+                                type="checkbox"
+                                id="applyOrientation"
+                                checked={applyOrientation}
+                                onChange={(e) => setApplyOrientation(e.target.checked)}
+                                className="w-3 h-3 text-indigo-500 bg-slate-700 border-slate-600 rounded focus:ring-indigo-500"
+                            />
+                            <label htmlFor="applyOrientation" className="text-xs text-slate-300">
+                                Orientation
                             </label>
                         </div>
                     )}

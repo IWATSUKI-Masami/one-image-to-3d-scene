@@ -87,6 +87,8 @@ People, the vase and the cups are mostly visible and are placed correctly.
 
 ## 4. Estimating orientation (rotation about the vertical axis)
 
+> **Status**: a first version is implemented (**Estimate Orientation** in the 3D Scene header). It combines the viewing-direction correction with a dedicated orientation model, [Orient Anything](https://huggingface.co/spaces/Viglong/Orient-Anything), run on both the photo appearance and a front render of the model (`services/orientation.ts`). The other ideas below remain options for improving accuracy, and the assumed field of view (60°) could be replaced by an estimate.
+
 ### Problem
 
 The depth position of people and objects is roughly right, but **their orientation is not corrected**. In the 3D scene every model keeps the orientation its generator treats as the front (zero rotation about the vertical axis). Two people talking face to face in the photo can therefore face the same direction in the scene. Today the only fix is rotating them by hand in Edit mode.

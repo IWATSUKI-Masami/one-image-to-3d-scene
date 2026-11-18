@@ -30,6 +30,7 @@ export const DEFAULT_SPACES: HFSpaces = {
   depth: 'depth-anything/Depth-Anything-V2',
   trellis: 'microsoft/TRELLIS.2',
   hunyuan3d: 'tencent/Hunyuan3D-2.1',
+  orient: 'Viglong/Orient-Anything',
 };
 
 /** Suggestions shown in the model ID fields (any other ID can be typed in). */

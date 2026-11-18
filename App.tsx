@@ -7,11 +7,12 @@ import { Model3DCard } from './components/Model3DCard';
 import { DepthOnlyScene } from './components/DepthOnlyScene';
 import { BoundingBoxOverlay } from './components/BoundingBoxOverlay';
 import { detectObjectsInImage, generateCompletion, estimateCanvasExpansion, verifyCompletion } from './services/aiService';
-import { loadAISettings, saveAISettings, hasRequiredKeys, bgRemovalSpace, PROVIDER_LABELS } from './services/ai/models';
+import { loadAISettings, saveAISettings, hasRequiredKeys, bgRemovalSpace, DEFAULT_SPACES, PROVIDER_LABELS } from './services/ai/models';
+import { estimateModelOrientation, MIN_ORIENTATION_CONFIDENCE } from './services/orientation';
 import { AISettingsDialog } from './components/AISettingsDialog';
 import { cropObjectsFromImage, removeBackgroundWithRembg, findBestMatchPosition, hasTransparentBackground, generate3DModelWithHunyuan3D, generate3DModelWithTrellis, blobUrlToDataUrl, dataUrlToBlobUrl, generateDepthMap, prepareImageForCompletion, calculateTightBoundingBox } from './utils';
-import { DetectedObject, CroppedObject, Model3D, ModelProvider, ProjectArchive, AISettings } from './types';
-import { Scan, Sparkles, AlertCircle, Layers, Image as ImageIcon, User, Box, ArrowLeft, Upload, Plug, Wand2, RefreshCw, Star, Download, MonitorPlay, Cuboid, Save, FolderOpen, Trash2 } from 'lucide-react';
+import { DetectedObject, CroppedObject, Model3D, ModelOrientation, ModelProvider, ProjectArchive, AISettings } from './types';
+import { Scan, Sparkles, AlertCircle, Layers, Image as ImageIcon, User, Box, ArrowLeft, Upload, Plug, Wand2, RefreshCw, Star, Download, MonitorPlay, Cuboid, Save, FolderOpen, Trash2, Compass } from 'lucide-react';
 
 type AppMode = 'landing' | 'analyze' | 'batch-remove' | 'complete-body' | 'generate-3d';
 
@@ -33,6 +34,8 @@ const App: React.FC = () => {
   const [detectedObjects, setDetectedObjects] = useState<DetectedObject[]>([]);
   const [croppedImages, setCroppedImages] = useState<CroppedObject[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // Progress of the orientation estimation, e.g. "3 / 8" (null when idle)
+  const [orientationProgress, setOrientationProgress] = useState<string | null>(null);
 
   // Depth Map State
   const [depthMapUrl, setDepthMapUrl] = useState<string | null>(null);
@@ -360,6 +363,44 @@ const App: React.FC = () => {
   };
 
 
+
+  /**
+   * Estimate the rotation about the vertical axis of the models in the scene
+   * (Orient Anything on the photo appearance and on a front render of the model).
+   * All results are applied at once, so the scene is rebuilt only once.
+   */
+  const handleEstimateOrientation = async () => {
+    const targets = positionedModels;
+    if (targets.length === 0 || orientationProgress) return;
+    const space = aiSettings.spaces.orient.trim() || DEFAULT_SPACES.orient;
+    const results = new Map<string, ModelOrientation>();
+    const failures: string[] = [];
+    let done = 0;
+    setOrientationProgress(`0 / ${targets.length}`);
+    const start = performance.now();
+    // Two at a time: the Space has a queue, and each model needs two requests
+    const queue = [...targets];
+    const worker = async () => {
+      for (let model = queue.shift(); model; model = queue.shift()) {
+        const t0 = performance.now();
+        try {
+          results.set(model.id, await estimateModelOrientation(model, space, hfToken));
+          setProcessingTimes(prev => new Map(prev).set(`Orientation: ${model.label}`, (performance.now() - t0) / 1000));
+        } catch (e) {
+          console.error(`Orientation estimation failed for ${model.label}:`, e);
+          failures.push(model.label);
+        }
+        setOrientationProgress(`${++done} / ${targets.length}`);
+      }
+    };
+    await Promise.all([worker(), worker()]);
+    setModels3D(prev => prev.map(m => (results.has(m.id) ? { ...m, orientation: results.get(m.id) } : m)));
+    setProcessingTimes(prev => new Map(prev).set('Orientation (all)', (performance.now() - start) / 1000));
+    setOrientationProgress(null);
+    if (failures.length > 0) {
+      setError(`Orientation estimation failed for: ${failures.join(', ')} (${space}). See the console for details.`);
+    }
+  };
 
   const handleGenerate3D = async (item: CroppedObject) => {
     setActiveTab('3d');
@@ -2016,6 +2057,16 @@ const App: React.FC = () => {
                           <h3 className="font-semibold text-slate-700 flex items-center gap-2">
                             <Cuboid size={20} /> 3D Scene
                           </h3>
+                          <div className="flex items-center gap-2">
+                          <button
+                            onClick={handleEstimateOrientation}
+                            disabled={!!orientationProgress || positionedModels.length === 0}
+                            title="Estimate which way each person or object faces (Orient Anything) and rotate the models about the vertical axis"
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-indigo-700 border border-indigo-200 bg-white hover:bg-indigo-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                          >
+                            <Compass size={14} className={orientationProgress ? 'animate-spin' : ''} />
+                            {orientationProgress ? `Estimating orientation ${orientationProgress}` : 'Estimate Orientation'}
+                          </button>
                           <button
                             onClick={() => {
                               if (depthMapUrl) URL.revokeObjectURL(depthMapUrl);
@@ -2027,10 +2078,28 @@ const App: React.FC = () => {
                             <Trash2 size={14} />
                             Delete Scene
                           </button>
+                          </div>
                         </div>
                         <p className="text-sm text-slate-600 mb-4">
                           Interactive 3D scene with models positioned using depth map information.
                         </p>
+                        {positionedModels.some(m => m.orientation) && (
+                          <div className="flex flex-wrap gap-1.5 mb-4 text-xs">
+                            {positionedModels.filter(m => m.orientation).map(m => {
+                              const o = m.orientation!;
+                              const meaningful = o.confidence >= MIN_ORIENTATION_CONFIDENCE;
+                              return (
+                                <span
+                                  key={m.id}
+                                  title={`Photo azimuth ${o.photoAzimuth}° (confidence ${o.confidence}), model front azimuth ${o.modelAzimuth}° (confidence ${o.modelConfidence}), view angle ${o.viewAngle.toFixed(1)}°`}
+                                  className={`px-2 py-0.5 rounded-full border ${meaningful ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-slate-50 border-slate-200 text-slate-400'}`}
+                                >
+                                  {m.label}: {meaningful ? `${o.yawDeg > 0 ? '+' : ''}${Math.round(o.yawDeg)}°` : 'no clear front'}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
                         <div className="min-h-[600px]">
                           <DepthOnlyScene
                             key={`${depthMapUrl}-${models3D.filter(m => selectedItemsPerTab['3d'].has(m.id)).map(m => m.id).join('-')}`}

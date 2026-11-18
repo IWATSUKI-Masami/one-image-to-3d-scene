@@ -19,6 +19,22 @@ export interface CroppedObject extends DetectedObject {
 /** 3D generation service (Hugging Face Spaces) */
 export type ModelProvider = 'trellis' | 'hunyuan3d';
 
+/** Estimated rotation of a model about the vertical axis (see services/orientation.ts) */
+export interface ModelOrientation {
+  /** Rotation applied in the 3D scene, degrees (three.js rotation.y; 0 = facing the camera) */
+  yawDeg: number;
+  /** Orient Anything azimuth of the object in the photo, degrees */
+  photoAzimuth: number;
+  /** Orient Anything azimuth of the model rendered from the front, degrees */
+  modelAzimuth: number;
+  /** Confidence that the object in the photo has a meaningful orientation (0..1) */
+  confidence: number;
+  /** Same for the front render of the model */
+  modelConfidence: number;
+  /** Direction from the object towards the photo camera, degrees */
+  viewAngle: number;
+}
+
 export interface Model3D {
   id: string;
   label: string;
@@ -31,6 +47,7 @@ export interface Model3D {
   completionExpansionRatio?: number;
   originalPartBox2d?: [number, number, number, number];
   tightBox2d?: [number, number, number, number]; // Bounds of the non-transparent object in the image
+  orientation?: ModelOrientation; // Estimated orientation, if estimated
   provider?: ModelProvider | 'triposr-local'; // Service that generated the model ('triposr-local': projects saved by earlier versions)
 }
 
@@ -81,6 +98,8 @@ export interface HFSpaces {
   depth: string;
   trellis: string;
   hunyuan3d: string;
+  /** Orientation estimation (Orient Anything) */
+  orient: string;
 }
 
 /** Background-removal model; both Spaces have the same API */

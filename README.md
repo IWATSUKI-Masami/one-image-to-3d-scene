@@ -32,6 +32,7 @@ The sample photo [`samples/two-people-at-table.webp`](samples/two-people-at-tabl
 | 5 | Depth estimation | Depth Anything V2; object depth is the median depth inside the object mask |
 | 6 | 3D generation | TRELLIS.2 or Hunyuan3D-2.1 (Hugging Face Spaces) → textured GLB |
 | 7 | Scene composition | Three.js; models are aligned to point-cloud bounding boxes (PC Box) built from the depth map |
+| 8 | Orientation (optional) | [Orient Anything](https://huggingface.co/spaces/Viglong/Orient-Anything) estimates which way each person or object faces; models are rotated about the vertical axis |
 
 ### Walkthrough (sample photo)
 
@@ -122,6 +123,7 @@ Background removal, depth estimation and 3D generation call these Spaces. They c
 | Background removal (RMBG 3.0 / 2.0) | `briaai/BRIA-RMBG-3.0`, `briaai/BRIA-RMBG-2.0` |
 | Depth estimation | `depth-anything/Depth-Anything-V2` |
 | 3D generation | `microsoft/TRELLIS.2`, `tencent/Hunyuan3D-2.1` |
+| Orientation estimation | `Viglong/Orient-Anything` (runs on CPU; no ZeroGPU quota) |
 
 The official Spaces run on ZeroGPU, which has a daily quota per user (larger with Hugging Face PRO). To process many objects, duplicate a Space to your account (**Duplicate this Space** on its page), give it a dedicated GPU, and enter its ID. Dedicated GPUs are billed per hour — pause the Space when you are done.
 
@@ -140,6 +142,9 @@ The official Spaces run on ZeroGPU, which has a daily quota per user (larger wit
 2. **Image Completion** — complete the cropped objects (full body for people, missing parts for objects). The background is removed after completion.
 3. **3D Generation** — convert the completed images into 3D models.
 4. **3D Scene** — generate the depth map and view the assembled scene. Positions can be adjusted with the transform controls, and the scene can be exported as glTF/GLB.
+5. **Estimate Orientation** (optional, in the 3D Scene header) — estimates which way each person or object faces and rotates the models about the vertical axis. The angle of each model is shown under the header; objects without a clear front (e.g. a vase) are not rotated. The **Orientation** checkbox in the scene turns the rotation on and off. It takes about 10–20 seconds per model.
+
+   How it works: [Orient Anything](https://huggingface.co/spaces/Viglong/Orient-Anything) estimates the viewer's azimuth around the object for the completed image (the object as seen in the photo) and for a front render of the 3D model, so each generator's idea of "front" cancels out. The rotation is `view angle + azimuth(model) − azimuth(photo)`, where the view angle corrects for objects away from the image center (assuming a 60° horizontal field of view).
 
 Projects (images, depth map, models and scene layout) can be saved and loaded.
 
@@ -159,7 +164,7 @@ Projects (images, depth map, models and scene layout) can be saved and loaded.
 
 ## Future work
 
-Planned: [Pixal3D](https://huggingface.co/TencentARC/Pixal3D) (pixel-aligned image-to-3D) as a 3D generator, local 3D generation with [ComfyUI](https://www.comfy.org/) on your own GPU, better placement of objects that are only partly visible (e.g. table edges and chairs at the image border), and estimating each person's or object's orientation (rotation about the vertical axis, from the direction of the face or of characteristic parts). See [docs/roadmap.md](docs/roadmap.md).
+Planned: [Pixal3D](https://huggingface.co/TencentARC/Pixal3D) (pixel-aligned image-to-3D) as a 3D generator, local 3D generation with [ComfyUI](https://www.comfy.org/) on your own GPU, better placement of objects that are only partly visible (e.g. table edges and chairs at the image border), and more accurate orientation estimation (a first version based on Orient Anything is implemented). See [docs/roadmap.md](docs/roadmap.md).
 
 ## Citation
 
@@ -182,7 +187,7 @@ If you use this software in your research, please cite:
 
 [MIT](LICENSE)
 
-This repository contains only the application code. The external models and APIs it calls (Gemini, OpenAI, TRELLIS.2, Hunyuan3D-2.1, Depth Anything V2, BRIA RMBG 3.0 / 2.0, etc.) are governed by their own licenses and terms of use; check them before use, especially for commercial purposes.
+This repository contains only the application code. The external models and APIs it calls (Gemini, OpenAI, TRELLIS.2, Hunyuan3D-2.1, Depth Anything V2, BRIA RMBG 3.0 / 2.0, Orient Anything, etc.) are governed by their own licenses and terms of use; check them before use, especially for commercial purposes.
 
 In particular, the [Tencent Hunyuan 3D 2.1 Community License](https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1/blob/main/LICENSE) does not apply in the European Union, the United Kingdom and South Korea; use TRELLIS.2 (MIT) there.
 

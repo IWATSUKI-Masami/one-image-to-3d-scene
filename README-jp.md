@@ -32,6 +32,7 @@
 | 5 | 深度推定 | Depth Anything V2。物体の深度はマスク内の深度の中央値 |
 | 6 | 3D生成 | TRELLIS.2 または Hunyuan3D-2.1（Hugging Face Spaces）でテクスチャ付きGLBを生成 |
 | 7 | シーン合成 | Three.js。深度マップから作った点群のバウンディングボックス（PC Box）にモデルを合わせて配置 |
+| 8 | 向きの推定（任意） | [Orient Anything](https://huggingface.co/spaces/Viglong/Orient-Anything) で人物や物体の向きを推定し、モデルを垂直軸まわりに回転 |
 
 ### 処理の流れ（サンプル画像）
 
@@ -122,6 +123,7 @@ AI Settings では次の項目を設定できます。
 | 背景除去（RMBG 3.0 / 2.0） | `briaai/BRIA-RMBG-3.0`、`briaai/BRIA-RMBG-2.0` |
 | 深度推定 | `depth-anything/Depth-Anything-V2` |
 | 3D生成 | `microsoft/TRELLIS.2`、`tencent/Hunyuan3D-2.1` |
+| 向きの推定 | `Viglong/Orient-Anything`（CPU で動作。ZeroGPU の利用枠を使わない） |
 
 公式の Space は ZeroGPU で動いており、利用者ごとに1日の利用枠があります（Hugging Face PRO では枠が大きくなります）。多数の物体を処理する場合は、Space を自分のアカウントに複製し（Space のページの **Duplicate this Space**）、専用 GPU を割り当てて、その ID を入力してください。専用 GPU は時間課金なので、使い終わったら Space を一時停止してください。
 
@@ -140,6 +142,9 @@ AI Settings では次の項目を設定できます。
 2. **Image Completion**：切り出した物体を補完します（人物は全身、物体は欠けた部分）。補完後に背景が除去されます。
 3. **3D Generation**：補完した画像から3Dモデルを生成します。
 4. **3D Scene**：深度マップを生成し、組み立てられたシーンを表示します。位置はTransformControlsで調整でき、glTF/GLBで書き出せます。
+5. **Estimate Orientation**（任意。3D Scene の見出しの右）：人物や物体がどちらを向いているかを推定し、モデルを垂直軸まわりに回転させます。モデルごとの角度は見出しの下に表示されます。花瓶のように正面のはっきりしない物体は回転させません。シーンの **Orientation** チェックボックスで、回転のオン・オフを切り替えられます。1つのモデルあたり 10〜20 秒ほどかかります。
+
+   仕組み：[Orient Anything](https://huggingface.co/spaces/Viglong/Orient-Anything) で、補完画像（写真での見え方）と、3D モデルを正面から描画した画像のそれぞれについて、物体のまわりの視点の方位角を推定します。両者の差をとるので、生成モデルごとの「正面」の違いは打ち消されます。回転角は `視線方向の角度 + 方位角（モデル）− 方位角（写真）` です。視線方向の角度は、画像の中央から外れた物体の見え方を補正するもので、写真の水平画角を 60° と仮定しています。
 
 プロジェクト（画像、深度マップ、モデル、配置）は保存と読み込みができます。
 
@@ -159,7 +164,7 @@ AI Settings では次の項目を設定できます。
 
 ## 今後の拡張
 
-3D生成への [Pixal3D](https://huggingface.co/TencentARC/Pixal3D)（ピクセル整合型の画像-to-3D）の追加と、[ComfyUI](https://www.comfy.org/) による手元の GPU での3D生成、一部しか写っていない物体（テーブルの端や画像の端の椅子など）の配置の改善、人物や物体の向き（顔や特徴的な部分の向きから求める、垂直軸まわりの回転角）の推定を予定しています。詳しくは [docs/roadmap-jp.md](docs/roadmap-jp.md) を参照してください。
+3D生成への [Pixal3D](https://huggingface.co/TencentARC/Pixal3D)（ピクセル整合型の画像-to-3D）の追加と、[ComfyUI](https://www.comfy.org/) による手元の GPU での3D生成、一部しか写っていない物体（テーブルの端や画像の端の椅子など）の配置の改善、向きの推定の精度向上（Orient Anything による最初の版は実装済み）を予定しています。詳しくは [docs/roadmap-jp.md](docs/roadmap-jp.md) を参照してください。
 
 ## 引用
 
@@ -184,7 +189,7 @@ AI Settings では次の項目を設定できます。
 
 [MIT](LICENSE)
 
-このリポジトリに含まれるのはアプリケーションのコードのみです。呼び出している外部のモデルやAPI（Gemini、OpenAI、TRELLIS.2、Hunyuan3D-2.1、Depth Anything V2、BRIA RMBG 3.0 / 2.0 など）には、それぞれのライセンスと利用規約が適用されます。特に商用で利用する場合は、事前に確認してください。
+このリポジトリに含まれるのはアプリケーションのコードのみです。呼び出している外部のモデルやAPI（Gemini、OpenAI、TRELLIS.2、Hunyuan3D-2.1、Depth Anything V2、BRIA RMBG 3.0 / 2.0、Orient Anything など）には、それぞれのライセンスと利用規約が適用されます。特に商用で利用する場合は、事前に確認してください。
 
 特に [Tencent Hunyuan 3D 2.1 Community License](https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1/blob/main/LICENSE) は、EU、英国、韓国では適用されません。これらの地域では TRELLIS.2（MIT）を使ってください。
 
