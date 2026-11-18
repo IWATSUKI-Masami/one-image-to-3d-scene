@@ -8,6 +8,7 @@ All notable changes to this project. Versions up to v1.18.1 were developed in th
 - **Changed** default Gemini models: `gemini-3-pro-preview` → `gemini-pro-latest`, `gemini-3-pro-image-preview` (shut down) → `gemini-3-pro-image`.
 - **Changed** JSON output of all vision tasks is now enforced with each provider's structured-output feature. The detection result is wrapped as `{"objects": [...]}`.
 - **Changed** the Gemini API key can now be entered in the app (previously only via `.env.local` or Google AI Studio). Removed the Google AI Studio key-selection integration.
+- **Added** a sample photo (`samples/two-people-at-table.webp`, AI-generated) and a screenshot of the reconstructed scene in the README.
 - **Fixed** the 3D scene could turn blank (dark panel) after generating models or moving the depth slider: each rebuild of the scene left a WebGL context behind, and after about 16 the browser dropped the visible one. The scene now releases its WebGL context and GPU resources on every rebuild.
 - **Added** the Hugging Face Spaces (background removal, depth estimation, TRELLIS.2, Hunyuan3D-2.1) can be changed in AI Settings, e.g. to your own duplicate on a dedicated GPU to avoid the ZeroGPU quota. Defaults are the official Spaces; an empty field means the official Space.
 - **Changed** saved projects are named `<photo name>_<stage>_<YYYYMMDD-HHMMSS>.json` (stage: `detected`, `completed`, `3d-models` or `scene`) instead of `scenecraft-project-phase1-3-<milliseconds>.json`. The photo name is stored in the project file and kept when the project is loaded again.

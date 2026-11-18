@@ -8,7 +8,18 @@
 
 [引用](#引用) に記載した論文の実装です。
 
-<!-- TODO: サンプル入力画像と復元結果のスクリーンショットを追加 -->
+<table>
+  <tr>
+    <td><img src="samples/two-people-at-table.webp" alt="入力：テーブルで話す2人" width="420"></td>
+    <td><img src="docs/images/scene-result.webp" alt="深度に基づいて3Dモデルを配置した3Dシーン" width="420"></td>
+  </tr>
+  <tr>
+    <td align="center">入力：1枚の写真</td>
+    <td align="center">復元した3Dシーン（3Dモデル、PC Box、モデルの枠）</td>
+  </tr>
+</table>
+
+サンプル画像 [`samples/two-people-at-table.webp`](samples/two-people-at-table.webp) は生成AIで作成したもので、論文でも入力として使っています。アプリを試す際にお使いください。
 
 ## 処理の流れ
 
@@ -104,7 +115,8 @@ npm run dev
 │   └── ai/                 # プロバイダー層（Gemini / OpenAI）と既定のモデル
 ├── utils.ts                # 切り出し、AKAZEマッチング、深度推定、3D生成API
 ├── types.ts                # 型定義
-└── docs/                   # 開発の経緯と今後の拡張
+├── samples/                # サンプル画像
+└── docs/                   # 開発の経緯、今後の拡張、README の画像
 ```
 
 ## 今後の拡張

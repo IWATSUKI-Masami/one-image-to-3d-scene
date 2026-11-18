@@ -8,7 +8,18 @@ Instead of reconstructing a point cloud from multiple views or a depth sensor, t
 
 This is the reference implementation of the paper listed in [Citation](#citation).
 
-<!-- TODO: add a sample input image and a screenshot of the reconstructed scene -->
+<table>
+  <tr>
+    <td><img src="samples/two-people-at-table.webp" alt="Input: two people talking at a table" width="420"></td>
+    <td><img src="docs/images/scene-result.webp" alt="Reconstructed 3D scene with 3D models placed by depth" width="420"></td>
+  </tr>
+  <tr>
+    <td align="center">Input: a single photo</td>
+    <td align="center">Reconstructed 3D scene (3D models, PC Boxes and model boxes)</td>
+  </tr>
+</table>
+
+The sample photo [`samples/two-people-at-table.webp`](samples/two-people-at-table.webp) is AI-generated and is the input used in the paper. You can use it to try the app.
 
 ## Pipeline
 
@@ -104,7 +115,8 @@ Projects (images, depth map, models and scene layout) can be saved and loaded.
 │   └── ai/                 # Provider layer (Gemini / OpenAI) and default models
 ├── utils.ts                # Cropping, AKAZE matching, depth, 3D generation APIs
 ├── types.ts                # Type definitions
-└── docs/                   # Development history and roadmap
+├── samples/                # Sample photo
+└── docs/                   # Development history, roadmap and README images
 ```
 
 ## Future work
