@@ -50,6 +50,8 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     const mountRef = useRef<HTMLDivElement>(null);
     const [loading, setLoading] = useState(true);
     const [depthScale, setDepthScale] = useState(0.5);
+    // Bumped to rebuild the scene after the browser drops its WebGL context
+    const [contextGeneration, setContextGeneration] = useState(0);
     const [pointSize, setPointSize] = useState(2.0);
     const [showBoxes, setShowBoxes] = useState(false); // PC Boxes off by default
     const [showPointCloud, setShowPointCloud] = useState(false);
@@ -875,16 +877,31 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         };
         renderer.domElement.addEventListener('click', handleClick);
 
-        // Resize handler
+        // Resize handler. The container can still have zero size when the scene is set
+        // up (e.g. while the tab is being laid out), which leaves a 0×0 canvas, so follow
+        // the container itself rather than only the window.
         const handleResize = () => {
             if (!mountRef.current) return;
             const width = mountRef.current.clientWidth;
             const height = mountRef.current.clientHeight;
+            if (width === 0 || height === 0) return;
             renderer.setSize(width, height);
             camera.aspect = width / height;
             camera.updateProjectionMatrix();
         };
         window.addEventListener('resize', handleResize);
+        const resizeObserver = new ResizeObserver(handleResize);
+        resizeObserver.observe(mountRef.current);
+
+        // The browser can drop a WebGL context (e.g. when too many are open), which
+        // leaves an empty canvas. Rebuild the scene when that happens.
+        const handleContextLost = (event: Event) => {
+            event.preventDefault();
+            if (disposed) return; // our own forceContextLoss() during cleanup
+            console.warn('3D scene: WebGL context lost; rebuilding the scene');
+            setContextGeneration(g => g + 1);
+        };
+        renderer.domElement.addEventListener('webglcontextlost', handleContextLost);
 
         // Animation loop
         let animationId: number;
@@ -899,6 +916,8 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         return () => {
             disposed = true;
             window.removeEventListener('resize', handleResize);
+            resizeObserver.disconnect();
+            renderer.domElement.removeEventListener('webglcontextlost', handleContextLost);
             renderer.domElement.removeEventListener('click', handleClick);
             cancelAnimationFrame(animationId);
             if (transformControlsRef.current) {
@@ -927,7 +946,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             renderer.forceContextLoss();
             sceneRef.current = null;
         };
-    }, [imageUrl, depthMapUrl, originalAspectRatio, depthScale, detectedObjects, positionedModels]);
+    }, [imageUrl, depthMapUrl, originalAspectRatio, depthScale, detectedObjects, positionedModels, contextGeneration]);
 
     // Helper function to load image
     const loadImageAsync = (url: string): Promise<HTMLImageElement> => {
