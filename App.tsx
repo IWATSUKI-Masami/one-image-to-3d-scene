@@ -853,12 +853,45 @@ const App: React.FC = () => {
     isRefined: !!r.partBox2d,
   });
 
-  /** How far the object extends beyond its crop, from the whole photo */
-  const hiddenExtentOf = (item: CroppedObject) => previewUrl
-    ? estimateHiddenExtent(previewUrl, item.box_2d, item.label, item.type, aiSettings)
-    : Promise.resolve(item.type === 'person'
-      ? { left: 0.15, right: 0.15, top: 0.05, bottom: 1.2 }
-      : { left: 0.3, right: 0.3, top: 0.3, bottom: 0.3 });
+  /**
+   * How far the object extends beyond its crop, from the whole photo. The estimate
+   * is enlarged: extra canvas only stays white, while too little makes the image
+   * model squash the object.
+   */
+  const hiddenExtentOf = async (item: CroppedObject): Promise<HiddenExtent> => {
+    const e = previewUrl
+      ? await estimateHiddenExtent(previewUrl, item.box_2d, item.label, item.type, aiSettings)
+      : item.type === 'person'
+        ? { left: 0.15, right: 0.15, top: 0.05, bottom: 1.2 }
+        : { left: 0.3, right: 0.3, top: 0.3, bottom: 0.3 };
+    const grow = (v: number) => v * 1.3 + (v > 0.05 ? 0.15 : 0);
+    return { left: grow(e.left), right: grow(e.right), top: grow(e.top), bottom: grow(e.bottom) };
+  };
+
+  /**
+   * Complete an object, check the result (nothing cut off, natural proportions),
+   * and retry on a larger canvas if needed: the sides into which the object extends
+   * grow with each attempt.
+   */
+  const completeWithRetries = async (item: CroppedObject, tag: string) => {
+    const MAX_RETRIES = 2;
+    const extent = await hiddenExtentOf(item);
+    let result: Awaited<ReturnType<typeof completeWithLayout>> | undefined;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      const grow = (v: number) => v * (1 + 0.5 * attempt) + (v > 0.05 ? 0.4 * attempt : 0);
+      result = await completeWithLayout(item, {
+        left: grow(extent.left), right: grow(extent.right), top: grow(extent.top), bottom: grow(extent.bottom),
+      }, tag);
+      const { isComplete, missingParts } = await verifyCompletion(result.transparentUrl, item.label, item.type, aiSettings);
+      if (isComplete) break;
+      if (attempt === MAX_RETRIES) {
+        console.warn(`[${tag}] ${item.label}: still incomplete after ${MAX_RETRIES + 1} attempts (${missingParts.join(', ')}), using the last result`);
+      } else {
+        console.warn(`[${tag}] ${item.label}: incomplete or unnatural (${missingParts.join(', ')}), retrying with a larger canvas...`);
+      }
+    }
+    return result!;
+  };
 
   const handleCompleteBody = async (item: CroppedObject) => {
     if (!hasAIKeys) {
@@ -869,35 +902,12 @@ const App: React.FC = () => {
     // Add to processing IDs for persistent indicator
     setProcessingIds(prev => new Set(prev).add(item.id));
     const t0 = performance.now();
-    const MAX_RETRIES = 2;
 
     try {
-      // Step 1: how far the object extends beyond its crop on each side
-      const extent = await hiddenExtentOf(item);
-
-      let result: Awaited<ReturnType<typeof completeWithLayout>> | undefined;
-      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-        // Steps 2-3: complete on a larger canvas with each retry
-        const grow = 1 + attempt * 0.3;
-        result = await completeWithLayout(item, {
-          left: extent.left * grow, right: extent.right * grow, top: extent.top * grow, bottom: extent.bottom * grow,
-        }, 'Complete Body');
-
-        // Step 4: verify that nothing is cut off
-        const { isComplete, missingParts } = await verifyCompletion(result.transparentUrl, item.label, item.type, aiSettings);
-        if (isComplete) break;
-        if (attempt === MAX_RETRIES) {
-          console.warn(`[Complete Body] Still incomplete after ${MAX_RETRIES + 1} attempts, using best result`);
-        } else {
-          console.warn(`[Complete Body] Incomplete (missing: ${missingParts.join(', ')}), retrying with larger canvas...`);
-        }
-      }
-
-      const generatedObject = makeCompletedItem(item, result!);
+      const generatedObject = makeCompletedItem(item, await completeWithRetries(item, 'Complete Body'));
       setCompletedImages(prev => [generatedObject, ...prev]);
       addToSelection('completed', [generatedObject.id]);
       setActiveTab('completed');
-
     } catch (e) {
       console.error("Failed to generate completion", e);
       alert("Failed to generate image completion. You may need to reconnect your Google API Key.");
@@ -931,9 +941,7 @@ const App: React.FC = () => {
       for (const item of itemsToProcess) {
         const tItem = performance.now();
         try {
-          const extent = await hiddenExtentOf(item);
-          const result = await completeWithLayout(item, extent, 'Batch Complete');
-          const generatedObject = makeCompletedItem(item, result);
+          const generatedObject = makeCompletedItem(item, await completeWithRetries(item, 'Batch Complete'));
           setCompletedImages(prev => [generatedObject, ...prev]);
           addToSelection('completed', [generatedObject.id]);
         } catch (e) {

@@ -263,22 +263,26 @@ Is the ENTIRE body visible? Check:
 - Arms and hands (fully visible?)
 - Legs (fully visible?)
 - Feet (fully visible?)
+- Proportions: are the legs, arms and torso NATURALLY proportioned for an adult (or the apparent age)?
+  Legs or limbs that look shortened, compressed or squashed to fit the frame count as NOT complete
+  (report them in missingParts, e.g. "legs too short").
 
 Return ONLY valid JSON:
 {
   "isComplete": true/false,
-  "missingParts": ["feet", "legs", etc] or []
+  "missingParts": ["feet", "legs", "legs too short", etc] or []
 }
 
-Be strict: if ANY body part is cut off at the edge, it's NOT complete.`
+Be strict: if ANY body part is cut off at the edge, or the body is unnaturally squashed, it's NOT complete.`
       : `Analyze this image of "${label}" (an object).
 
-Is the ENTIRE object visible with nothing cut off at the edges?
+Is the ENTIRE object visible with nothing cut off at the edges, and does it have natural proportions
+(not squashed or shortened to fit the frame, e.g. legs of furniture of normal length)?
 
 Return ONLY valid JSON:
 {
   "isComplete": true/false,
-  "missingParts": ["base", "top", etc] or []
+  "missingParts": ["base", "top", "legs too short", etc] or []
 }`;
 
     const parsed = await analyzeImageJson<{ isComplete: boolean, missingParts: string[] }>(

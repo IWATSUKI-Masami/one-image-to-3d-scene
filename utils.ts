@@ -573,8 +573,9 @@ export const prepareCompletionCanvas = async (
 ): Promise<CompletionCanvas> => {
   const crop = await loadImageElement(cropUrl);
   const cw = crop.naturalWidth, ch = crop.naturalHeight;
-  // A small white margin around the whole object
-  const margin = 0.06;
+  // A white margin around the whole object. Extra room only stays white, while too
+  // little makes the image model squash the object (e.g. shortened legs).
+  const margin = 0.1;
   const wantW = cw * (1 + extent.left + extent.right) * (1 + 2 * margin);
   const wantH = ch * (1 + extent.top + extent.bottom) * (1 + 2 * margin);
   const wantAspect = wantW / wantH;
