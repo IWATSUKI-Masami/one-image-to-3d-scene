@@ -36,27 +36,27 @@ The sample photo [`samples/two-people-at-table.webp`](samples/two-people-at-tabl
 
 ### Walkthrough (sample photo)
 
-Results with OpenAI (detection and completion; the right chair in the completion image was completed with Gemini) and TRELLIS.2 (3D generation), on the current version. People were completed with the **Calm** face style. The scene uses perspective placement (far/near ratio 1.5), the paper's box placement with the visible-part boxes kept through completion, and front alignment of each model to its completed image.
+Results of the current version. Detection and completion use OpenAI (only the right chair in the completion image was completed with Gemini), 3D generation uses TRELLIS.2, and people were completed with the **Calm** face style. The scene uses perspective placement (far/near ratio 1.5) and front alignment, and each model is placed by the box of its visible part, kept through completion (the paper's box placement).
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/images/step1-detection.webp" alt="Object detection"><br><sub><b>1. Detection</b> — 8 objects with labels and boxes (VLM)</sub></td>
-    <td width="50%"><img src="docs/images/step1-masks.webp" alt="Object masks"><br><sub><b>Segmentation</b> — the visible pixels of each object (SAM 2.1 in the browser, prompted with its box); the chairs at the borders are thin strips of their backrests</sub></td>
+    <td width="50%"><img src="docs/images/step1-detection.webp" alt="Object detection"><br><sub><b>Detection</b> — the VLM finds 8 objects and gives each a label and a box.</sub></td>
+    <td width="50%"><img src="docs/images/step1-masks.webp" alt="Object masks"><br><sub><b>Segmentation</b> — SAM 2.1, running in the browser, segments the visible pixels of each object from its box. Only thin strips of the chairs' backrests are visible at the borders.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/step2-extracted.webp" alt="Extracted objects"><br><sub><b>2. Cropping</b> — each object cut out of the photo</sub></td>
-    <td width="50%"><img src="docs/images/step3-completed.webp" alt="Completed objects"><br><sub><b>3. Completion</b> — hidden parts generated with a transparent background; the visible part stayed in place (green box, "Part: kept"), so no feature matching was needed</sub></td>
+    <td width="50%"><img src="docs/images/step2-extracted.webp" alt="Extracted objects"><br><sub><b>Cropping</b> — each object is cut out of the photo.</sub></td>
+    <td width="50%"><img src="docs/images/step3-completed.webp" alt="Completed objects"><br><sub><b>Completion</b> — the hidden parts are drawn with a transparent background. The visible part stays in place (green box, "Part: kept"), so no feature matching is needed.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/step4-3d-models.webp" alt="3D models"><br><sub><b>6. 3D generation</b> — one textured 3D model per object (TRELLIS.2)</sub></td>
-    <td width="50%"><img src="docs/images/step5-depth-map.webp" alt="Depth map"><br><sub><b>5. Depth estimation</b> — Depth Anything V2 (brighter = nearer)</sub></td>
+    <td width="50%"><img src="docs/images/step4-3d-models.webp" alt="3D models"><br><sub><b>3D generation</b> — one textured 3D model per object (TRELLIS.2).</sub></td>
+    <td width="50%"><img src="docs/images/step5-depth-map.webp" alt="Depth map"><br><sub><b>Depth estimation</b> — the depth map from Depth Anything V2 (brighter is nearer).</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/scene-result.webp" alt="3D scene"><br><sub><b>7. Scene composition</b> — all 8 objects placed with perspective at the depth of their PC Boxes; the chairs, of which only strips of the backrests are visible, stand behind the people. The table, visible only as the front of its top, is still placed only roughly</sub></td>
-    <td width="50%"><img src="docs/images/step7-scene-ui.webp" alt="3D scene with its controls"><br><sub><b>3D Scene tab</b> — the scene with its controls: depth range and point size, <b>Perspective</b>, <b>Align</b> (front alignment), boxes and point cloud, <b>Save</b> / <b>Load</b> of the layout and <b>Edit</b> for moving models by hand</sub></td>
+    <td width="50%"><img src="docs/images/scene-result.webp" alt="3D scene"><br><sub><b>Scene composition</b> — the 8 objects are placed with perspective at the depth of their PC Boxes. The chairs, of which only the backrests are visible, stand behind the people; the table, visible only as the front of its top, is still placed only roughly.</sub></td>
+    <td width="50%"><img src="docs/images/step7-scene-ui.webp" alt="3D scene with its controls"><br><sub><b>3D Scene tab</b> — the scene and its controls: depth range, point size, <b>Perspective</b>, <b>Align</b> (front alignment), boxes and point cloud, <b>Save</b> / <b>Load</b> of the layout, and <b>Edit</b> for moving models by hand.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/scene-edited.webp" alt="3D scene edited by hand"><br><sub><b>Edited by hand</b> — the table and chairs moved and resized in the scene's edit mode (<b>Edit ON</b>, transform controls shown); the table, of which only the front of its top is visible, is the object that needed it most</sub></td>
+    <td width="50%"><img src="docs/images/scene-edited.webp" alt="3D scene edited by hand"><br><sub><b>Edited by hand</b> — the table and chairs moved and resized in edit mode (<b>Edit ON</b>); the transform controls are visible.</sub></td>
     <td width="50%"></td>
   </tr>
 </table>

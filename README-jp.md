@@ -36,27 +36,27 @@
 
 ### 処理の流れ（サンプル画像）
 
-最新版で、OpenAI（物体検出と画像補完。補完の画像の右の椅子は Gemini で補完）と TRELLIS.2（3D生成）を使った結果です。人物は顔の描き方 **Calm** で補完しました。3Dシーンは、遠近を考慮した配置（遠/近の比 1.5）、補完を通して保った見えていた部分の枠による論文の箱による配置、各モデルの補完画像への向き合わせを使っています。
+最新版での結果です。物体検出と画像補完には OpenAI（補完の画像の右の椅子だけは Gemini）、3D生成には TRELLIS.2 を使い、人物の顔は **Calm** で補完しました。3Dシーンでは、遠近を考慮した配置（遠/近の比 1.5）と向き合わせを使い、各モデルを、補完の間に保った見えていた部分の枠に合わせて置いています（論文の箱による配置）。
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/images/step1-detection.webp" alt="物体検出"><br><sub><b>1. 物体検出</b>：VLM が8物体のラベルと枠を取得</sub></td>
-    <td width="50%"><img src="docs/images/step1-masks.webp" alt="物体のマスク"><br><sub><b>切り分け</b>：各物体の見えている画素（ブラウザ内の SAM 2.1、枠をプロンプトに使用）。両端の椅子は背もたれの細い部分だけが見えている</sub></td>
+    <td width="50%"><img src="docs/images/step1-detection.webp" alt="物体検出"><br><sub><b>物体検出</b>：VLM が8つの物体を見つけ、ラベルと枠を付けます。</sub></td>
+    <td width="50%"><img src="docs/images/step1-masks.webp" alt="物体のマスク"><br><sub><b>切り分け</b>：SAM 2.1（ブラウザ内で実行）が、枠を手がかりに各物体の見えている画素を切り分けます。両端の椅子は、背もたれの細い部分だけが見えています。</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/step2-extracted.webp" alt="切り出し"><br><sub><b>2. 切り出し</b>：物体ごとに写真から切り出す</sub></td>
-    <td width="50%"><img src="docs/images/step3-completed.webp" alt="画像補完"><br><sub><b>3. 画像補完</b>：隠れた部分を透明背景で生成。見えていた部分が位置を保った（緑の枠、「Part: kept」）ので、特徴点マッチングは不要</sub></td>
+    <td width="50%"><img src="docs/images/step2-extracted.webp" alt="切り出し"><br><sub><b>切り出し</b>：物体ごとに写真から切り出します。</sub></td>
+    <td width="50%"><img src="docs/images/step3-completed.webp" alt="画像補完"><br><sub><b>画像補完</b>：隠れた部分を透明背景で描き足します。見えていた部分は元の位置に保たれる（緑の枠、「Part: kept」）ので、特徴点マッチングは要りません。</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/step4-3d-models.webp" alt="3Dモデル"><br><sub><b>6. 3D生成</b>：物体ごとにテクスチャ付き3Dモデルを生成（TRELLIS.2）</sub></td>
-    <td width="50%"><img src="docs/images/step5-depth-map.webp" alt="深度マップ"><br><sub><b>5. 深度推定</b>：Depth Anything V2（明るいほど手前）</sub></td>
+    <td width="50%"><img src="docs/images/step4-3d-models.webp" alt="3Dモデル"><br><sub><b>3D生成</b>：物体ごとにテクスチャ付きの3Dモデルを作ります（TRELLIS.2）。</sub></td>
+    <td width="50%"><img src="docs/images/step5-depth-map.webp" alt="深度マップ"><br><sub><b>深度推定</b>：Depth Anything V2 による深度マップです（明るいほど手前）。</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/scene-result.webp" alt="3Dシーン"><br><sub><b>7. シーン合成</b>：8物体すべてを遠近を考慮して PC Box の奥行きに配置。背もたれの細い部分しか見えない椅子も、人物の後ろに置かれる。天板の手前しか見えないテーブルの位置は、まだおおよそ</sub></td>
-    <td width="50%"><img src="docs/images/step7-scene-ui.webp" alt="操作パネル付きの3Dシーン"><br><sub><b>3D Scene タブ</b>：操作パネル付きのシーン。深度の範囲と点の大きさ、<b>Perspective</b>、<b>Align</b>（向き合わせ）、各種の枠と点群、配置の <b>Save</b> / <b>Load</b>、モデルを手で動かす <b>Edit</b></sub></td>
+    <td width="50%"><img src="docs/images/scene-result.webp" alt="3Dシーン"><br><sub><b>シーン合成</b>：8つの物体を、遠近を考慮してそれぞれの PC Box の奥行きに置きます。背もたれしか見えない椅子も人物の後ろに置かれますが、天板の手前しか見えないテーブルの位置はまだおおよそです。</sub></td>
+    <td width="50%"><img src="docs/images/step7-scene-ui.webp" alt="操作パネル付きの3Dシーン"><br><sub><b>3D Scene タブ</b>：シーンと操作パネルです。深度の範囲、点の大きさ、<b>Perspective</b>、<b>Align</b>（向き合わせ）、各種の枠と点群の表示、配置の <b>Save</b> / <b>Load</b>、モデルを手で動かす <b>Edit</b> があります。</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/scene-edited.webp" alt="手で編集した3Dシーン"><br><sub><b>手で編集した結果</b>：シーンの編集モード（<b>Edit ON</b>。移動・回転・拡大の操作つまみが表示されている）で、テーブルと椅子の位置と大きさを直したもの。天板の手前しか見えないテーブルが、最も直す必要があった</sub></td>
+    <td width="50%"><img src="docs/images/scene-edited.webp" alt="手で編集した3Dシーン"><br><sub><b>手で編集した結果</b>：編集モード（<b>Edit ON</b>）で、テーブルと椅子の位置と大きさを直しました。操作つまみが表示されています。</sub></td>
     <td width="50%"></td>
   </tr>
 </table>
