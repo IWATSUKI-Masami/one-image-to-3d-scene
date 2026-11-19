@@ -101,7 +101,7 @@ Mostly solved (see "Implemented"). Objects of which only a small part is visible
 
 ### Remaining
 
-- **Small, featureless visible parts**: the table of the sample, visible only as the front of its top, is still placed only roughly. Its box gives little information about where the rest of the table is.
+- **Small, featureless visible parts**: the table of the sample, visible only as the front of its top, is still placed only roughly. Its box gives little information about where the rest of the table is. For now it can be corrected by hand in the scene's edit mode (the README shows the sample scene edited this way); scaling now follows the model's own axes, also for turned models.
 - **Ideas**: ground contact (furniture stands on the floor, estimated from the people's feet), typical sizes relative to the people, or pixel-aligned generation (Pixal3D, item 1) with registration to the point cloud.
 - **Evaluation** on several photos with partially visible objects, with the same settings, so that the method is not tuned to the sample.
 

@@ -37,7 +37,7 @@ User interface and documentation:
 
 - PNG download button on the Depth Map card.
 - The info panel at the bottom left of the 3D scene can be hidden (×) and shown again (i).
-- Documentation: a sample photo (`samples/two-people-at-table.webp`, AI-generated) and a walkthrough with a screenshot of every step (detection, masks, cropping, completion, 3D models, depth map, scene and the 3D Scene tab) in the README; a README section on which steps use API credits and how to keep usage low; `docs/hugging-face-spaces.md` (tokens, gated models, the `HF_TOKEN` Space secret, GPU per Space, the changes a Hunyuan3D-2.1 duplicate needs on a dedicated GPU, common errors); `docs/roadmap.md`. All documents in English and Japanese.
+- Documentation: a sample photo (`samples/two-people-at-table.webp`, AI-generated) and a walkthrough with a screenshot of every step (detection, masks, cropping, completion, 3D models, depth map, scene, the 3D Scene tab and the scene edited by hand) in the README; a README section on which steps use API credits and how to keep usage low; `docs/hugging-face-spaces.md` (tokens, gated models, the `HF_TOKEN` Space secret, GPU per Space, the changes a Hunyuan3D-2.1 duplicate needs on a dedicated GPU, common errors); `docs/roadmap.md`. All documents in English and Japanese.
 
 ### Changed
 
