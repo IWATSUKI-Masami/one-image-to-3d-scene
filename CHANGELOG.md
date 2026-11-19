@@ -59,6 +59,7 @@ User interface and documentation:
 - Person/object classification uses the VLM's `type` (it guessed from label words, so "woman" matched "man").
 - Selection counts (e.g. "Generate 3D (10)" with 8 cards) included deleted or replaced items.
 - The selection toolbar (All / None / Delete All) overflowed its column on narrow screens; it now wraps.
+- Scaling a turned model (e.g. an aligned table) along one axis in the scene's edit mode sheared it: the rotation was on the mesh inside the container that the edit controls scale. The rotation is now on the container, so scaling follows the model's own axes; the placement is unchanged.
 
 ### Removed
 

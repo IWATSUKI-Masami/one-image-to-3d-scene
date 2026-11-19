@@ -820,6 +820,16 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                         zPos - centeredCenter.z * scale - halfDepthOffset
                     );
 
+                    // Move the model's rotation about the vertical axis from the mesh to its container,
+                    // keeping the result identical (the scale is uniform, so rotation and scale commute).
+                    // The edit controls then move, rotate and scale the container along the model's
+                    // own axes, so a non-uniform scale no longer shears a turned model.
+                    if (mesh.rotation.y !== 0) {
+                        meshContainer.rotation.y = mesh.rotation.y;
+                        mesh.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), -mesh.rotation.y);
+                        mesh.rotation.y = 0;
+                    }
+
                     group.add(meshContainer);
 
                     // Store meshContainer reference and set index for selection
