@@ -78,6 +78,8 @@ const App: React.FC = () => {
   const [completionTarget, setCompletionTarget] = useState<'person' | 'object'>('person');
   const [bgRemovalAfterCompletion, setBgRemovalAfterCompletion] = useState(true); // Default: ON, uses RMBG
   const [faceStyle, setFaceStyle] = useState<FaceStyle>('calm'); // People: how faces are rendered during completion
+  // Completion attempts per object: 3 = check and retry (accurate placement), 1 = one image generation, no check (fewest credits)
+  const [maxAttempts, setMaxAttempts] = useState<1 | 3>(3);
 
   // 3D Generation states
   const [models3D, setModels3D] = useState<Model3D[]>([]);
@@ -831,8 +833,10 @@ const App: React.FC = () => {
    * The best attempt is used (complete first, then the visible part kept).
    */
   const completeWithRetries = async (item: CroppedObject, tag: string) => {
-    const MAX_ATTEMPTS = 3;
+    const MAX_ATTEMPTS = maxAttempts;
     const extent = await hiddenExtentOf(item);
+    // A single attempt: one image generation, no check (fewest API calls)
+    if (MAX_ATTEMPTS === 1) return completeWithLayout(item, extent, tag);
     let growth = 0;
     let best: { result: Awaited<ReturnType<typeof completeWithLayout>>; score: number } | undefined;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -1863,6 +1867,18 @@ const App: React.FC = () => {
 
                       {activeTab === 'original' && croppedImages.length > 0 && (
                         <>
+                          <label className="flex items-center gap-2 text-xs font-medium text-slate-600 border border-slate-200 px-3 py-1 rounded-full bg-white"
+                            title="Completion attempts per object. Up to 3: each result is checked (cut-off parts, proportions, visible part kept in place) and retried if needed, for accurate automatic placement. 1: one image generation per object without the check, using the fewest API credits; adjust the placement by hand in the 3D scene.">
+                            Attempts
+                            <select
+                              value={maxAttempts}
+                              onChange={(e) => setMaxAttempts(Number(e.target.value) === 1 ? 1 : 3)}
+                              className="text-xs bg-transparent focus:outline-none cursor-pointer"
+                            >
+                              <option value={3}>Up to 3</option>
+                              <option value={1}>1 (fewest credits)</option>
+                            </select>
+                          </label>
                           <label className="flex items-center gap-2 text-xs font-medium text-slate-600 border border-slate-200 px-3 py-1 rounded-full bg-white"
                             title={FACE_STYLE_HINT}>
                             Face

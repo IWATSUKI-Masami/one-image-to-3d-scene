@@ -152,6 +152,26 @@ The official Spaces run on ZeroGPU, which has a daily quota per user (larger wit
    - **Perspective** (checkbox, on by default): the point cloud, the PC Boxes and the models are back-projected through a pinhole camera at the origin with an assumed 60° horizontal field of view, and the depth map is read as disparity (inverse depth), which is what Depth Anything V2 outputs. Depth Anything V2 stretches its output over the full range for every image, so the ratio between the farthest and the nearest point is unknown: with Perspective on, the **Depth** slider sets this far/near ratio (default 1.5, chosen so that in the sample photo a cup's size relative to a person's head is realistic; use larger values for scenes with more depth). Objects then keep their real relative size: a cup near the camera is no longer as large as a person further away, and the scene seen from its initial camera (the photo's camera) looks like the photo. **Uncheck it to reproduce the paper's placement**, which keeps every object at its size in the image and maps brightness linearly to depth, so objects near the camera end up magnified.
 Projects (images, depth map, models and scene layout) can be saved and loaded.
 
+### Cost: keeping AI usage low
+
+The automatic placement aims for accuracy, and that costs API calls (OpenAI / Gemini credits) and GPU time:
+
+| Step | Calls |
+|---|---|
+| Detection | 1 VLM call per photo |
+| Completion (per object) | 1 VLM call (how far the object extends beyond its box), then per attempt 1 image generation (with the whole photo as a second, reference image) and 1 VLM check. An attempt is repeated, up to 3 attempts, when parts are cut off, the proportions look wrong or the visible part moved — so one object can cost up to 3 image generations and 4 VLM calls. With **Attempts: 1** it is 1 image generation and 1 VLM call |
+| 3D generation (per object) | 1 Hugging Face Space call (GPU time / ZeroGPU quota, not API credits); people use a higher resolution |
+| Segment Objects, front alignment, depth-based placement | Run in the browser (the depth map is 1 Space call per photo); no API credits |
+
+The repeated attempts are there so that the objects can be placed automatically. **If exact automatic placement is not important to you and you are going to adjust the scene yourself, use only what you need:**
+
+- Set **Attempts** (next to **Complete**) to **1 (fewest credits)**: each object is completed once, without the check and the retries.
+- Complete and generate 3D models only for the objects you want (select their cards). For example, leave out the partly visible chairs or the table.
+- Accept the first result: do not complete an object again just because its card shows "Part: matched" or "Part: not found"; correct its placement by hand instead.
+- Adjust the scene by hand: turn on **Edit ON** in the 3D scene, click a model, and move / rotate / scale it with the transform controls (the reset button restores it). **Save** in the scene panel saves the layout.
+- Segment Objects, front alignment and the scene itself cost no credits and can stay on.
+
+
 ## Project structure
 
 ```

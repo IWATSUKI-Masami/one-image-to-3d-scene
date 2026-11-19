@@ -11,6 +11,7 @@ Items of earlier versions of this roadmap that are now in the app (see the READM
 - **Perspective placement**: the **Perspective** checkbox back-projects the point cloud, PC Boxes and models through a pinhole camera, so near objects are no longer magnified. Remaining assumptions: item 5.
 - **Placing partially visible objects** (item 3): object masks in the photo (SAM 2.1 in the browser), layout-preserving completion that keeps the visible part at a known box in the completed image (no feature matching needed), and the paper's box placement with that box. The partly visible chairs at the image borders of the sample now stand behind the people.
 - **Orientation** (item 4): front alignment turns each model so that its front view matches its completed image (render and compare), and by the view angle; the two people of the sample turn towards each other.
+- **Faces of people** (item 6, partly): the **Face** completion option (Calm by default) and a higher 3D resolution for people.
 
 Tried and removed during development: orientation estimation with Orient Anything (replaced by front alignment) and a render-and-fit search over position, size and rotation for partially visible objects (the box placement with the kept part box worked better).
 
@@ -22,7 +23,7 @@ Tried and removed during development: orientation estimation with Orient Anythin
 
 Most 3D generators build the shape in a canonical space, so the correspondence between image pixels and the 3D model is loose. Pixal3D uses **pixel-aligned generation**: it back-projects pixels to 3D (with the camera field of view estimated by MoGe), so **the front of the generated model matches the input image one-to-one**.
 
-This system scales and places each model so that the object region in the completed image (tightBox2d) matches its PC Box (paper, Section 3.5.3). A model whose front matches the input image should make this alignment more accurate.
+This system scales and places each model so that the visible part of the completed image (kept through completion) and the whole object (tightBox2d) map onto its PC Box (paper, Section 3.5.3). Front alignment (item 4) now corrects the generator's rotation about the vertical axis, but not other differences between the model's front and the image (proportions, tilt). A pixel-aligned model would make this mapping exact.
 
 ### How
 
@@ -40,7 +41,7 @@ Pixal3D could also give position, orientation and size together, when combined w
 To check first:
 
 - Whether the output GLB stays in the camera frame or is normalized in size and position.
-- The input is the completed crop, not the original photo. The crop's position in the photo gives the camera transform, but the image model may redraw or re-center the object during completion.
+- The input is the completed crop, not the original photo. Layout-preserving completion keeps the visible part at a known box, which with the crop's position in the photo gives the camera transform.
 - The point cloud depends on the assumptions of item 5 (field of view, far/near ratio).
 
 ## 2. Local 3D generation with ComfyUI
@@ -126,25 +127,16 @@ The view-angle correction of the front alignment uses the same field of view, so
 
 ## 6. Better faces of people
 
-### Problem
+### Status
 
-Faces of the 3D models of people look unnatural (uncanny).
+Partly implemented (see "Implemented"). Faces of the 3D models of people looked unnatural (uncanny): in the completed full-body image (1024×1536) the face covers only a few dozen pixels, and general image-to-3D models (TRELLIS.2, Hunyuan3D-2.1) cannot reproduce its relief at that size, so the result was a smooth shape with eyes and mouth painted on.
 
-### Cause
+- **Done**: the **Face** completion option — **Calm** (default; sharp face, closed mouth, since open mouths and teeth looked uncanny), **Redraw**, **Mannequin** (no painted features), **As in photo** — and a higher resolution for people (TRELLIS.2 1536 with texture 4096; Hunyuan3D-2.1 octree 384). Faces are much better, but still not fully natural.
 
-- In the completed full-body image (1024×1536), the face covers only a few dozen pixels.
-- General image-to-3D models (TRELLIS.2, Hunyuan3D-2.1) cannot reproduce the relief of a face (eye sockets, nose, mouth) at that size, so the result is a smooth shape with eyes and mouth painted on. TRELLIS.2 already runs near its limits (resolution 1024, texture 2048).
-- People are detected as `type: 'person'`, but completion and 3D generation treat them like any other object.
+### Remaining
 
-### Ideas (in the suggested order)
-
-1. **Person-specific completion prompt**: for `person` only, ask for a clear, natural face (facing forward, eyes open, calm expression). Cheap, but a blurred face in the photo is redrawn, so it will not look like the actual person.
-2. **TRELLIS.2 resolution 1536**: slightly finer shape, at the cost of generation time and ZeroGPU quota.
-3. **Face restoration before 3D generation**: sharpen the face of the completed image with a face restoration model (e.g. CodeFormer) on another Space.
-4. **Not modelling the face**: blur the face texture or fill it with the skin color ("mannequin" look). This removes the uncanny effect and may be enough for scene reconstruction.
-5. **Human-specific 3D generators** (e.g. PSHuman, LHM, based on a human body model): best quality, but availability as a Space and licenses need checking.
-
-**Status**: 1, 2 and 4 are implemented as the **Face** completion option (Calm / Redraw / Mannequin / As in photo) and the higher resolution for people (also octree resolution 384 for Hunyuan3D-2.1). Redraw alone still looked uncanny on the sample, mainly because of open mouths with teeth, so **Calm** (closed mouth) is the default. Next, if needed: 3 or 5.
+- **Face restoration before 3D generation**: sharpen the face of the completed image with a face restoration model (e.g. CodeFormer) on another Space.
+- **Human-specific 3D generators** (e.g. PSHuman, LHM, based on a human body model): best quality, but availability as a Space and licenses need checking.
 
 ## References
 
