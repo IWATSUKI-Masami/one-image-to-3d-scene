@@ -131,7 +131,20 @@ export interface CompletionOptions {
    * that its box carries over to the completed image without matching.
    */
   layout?: ImageLayout;
+  /**
+   * The whole photo with the object marked by a red box (data URL), given to the
+   * image model as a second image for reference: the object's appearance, viewpoint
+   * and where its hidden parts go.
+   */
+  referenceUrl?: string;
 }
+
+const REFERENCE_RULE = `
+    ***REFERENCE IMAGE***:
+    A SECOND image is attached: the whole original photo, with this subject marked by a RED BOX.
+    Use it ONLY as a reference for the subject's appearance, style, viewpoint and orientation, and for how its hidden
+    parts continue behind other objects or beyond the photo border (e.g. other objects of the same kind in the photo).
+    Do NOT copy the photo, its background or other objects. Your output is the FIRST image, completed.`;
 
 /** Added to the prompt when the visible part must keep its place on the canvas */
 const LOCKED_LAYOUT_RULE = `
@@ -231,9 +244,12 @@ export const generateCompletion = async (
 
     // Use 9:16 for persons (more vertical space for sitting figures), 3:4 for objects
     if (options.layout) prompt += LOCKED_LAYOUT_RULE;
+    if (options.referenceUrl) prompt += REFERENCE_RULE;
     // Without a layout: 9:16 for persons (more vertical space for sitting figures), 3:4 for objects
-    const layout: ImageLayout = options.layout
-      ?? { size: '1024x1536', aspect: type === 'person' ? '9:16' : '3:4' };
+    const layout: ImageLayout = {
+      ...(options.layout ?? { size: '1024x1536', aspect: type === 'person' ? '9:16' : '3:4' }),
+      ...(options.referenceUrl ? { reference: await loadImageData(options.referenceUrl) } : {}),
+    };
     return await generateImage(settings, image, prompt, layout);
   } catch (error) {
     console.error("Error generating completion:", error);

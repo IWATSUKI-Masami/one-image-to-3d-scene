@@ -28,7 +28,7 @@ const FACE_STYLE_HINT = 'Faces of people in completion. Calm: sharp face, relaxe
 import { loadAISettings, saveAISettings, hasRequiredKeys, bgRemovalSpace, DEFAULT_SPACES, PROVIDER_LABELS, FACE_STYLE_LABELS } from './services/ai/models';
 import { estimateModelOrientation, MIN_ORIENTATION_CONFIDENCE } from './services/orientation';
 import { AISettingsDialog } from './components/AISettingsDialog';
-import { cropObjectsFromImage, removeBackgroundWithRembg, findBestMatchPosition, hasTransparentBackground, generate3DModelWithHunyuan3D, generate3DModelWithTrellis, blobUrlToDataUrl, dataUrlToBlobUrl, generateDepthMap, prepareImageForCompletion, calculateTightBoundingBox, prepareCompletionCanvas, verifyPartPlacement } from './utils';
+import { cropObjectsFromImage, removeBackgroundWithRembg, findBestMatchPosition, hasTransparentBackground, generate3DModelWithHunyuan3D, generate3DModelWithTrellis, blobUrlToDataUrl, dataUrlToBlobUrl, generateDepthMap, prepareImageForCompletion, calculateTightBoundingBox, prepareCompletionCanvas, verifyPartPlacement, makeReferenceImage } from './utils';
 import { DetectedObject, CroppedObject, Model3D, ModelOrientation, ModelProvider, ProjectArchive, AISettings, FaceStyle, CompletionInfo, PartBoxSource } from './types';
 import { Scan, Sparkles, AlertCircle, Layers, Image as ImageIcon, User, Box, ArrowLeft, Upload, Plug, Wand2, RefreshCw, Star, Download, MonitorPlay, Cuboid, Save, FolderOpen, Trash2, Compass } from 'lucide-react';
 
@@ -787,9 +787,12 @@ const App: React.FC = () => {
     const objectMask = await loadCropObjectMask(item).catch(() => undefined);
     const prepared = await prepareCompletionCanvas(item.imageUrl, extent, aiSettings.imageProvider, objectMask);
 
+    // The whole photo with the object marked, for the object's appearance and viewpoint
+    const referenceUrl = previewUrl ? await makeReferenceImage(previewUrl, item.box_2d).catch(() => undefined) : undefined;
+
     const tGen = performance.now();
     const generatedImageUrl = await generateCompletion(
-      prepared.imageUrl, item.label, item.type, aiSettings, item.description, { faceStyle, layout: prepared.layout });
+      prepared.imageUrl, item.label, item.type, aiSettings, item.description, { faceStyle, layout: prepared.layout, referenceUrl });
     setProcessingTimes(prev => new Map(prev).set(`Generation: ${item.label}`, (performance.now() - tGen) / 1000));
 
     // Did the visible part stay where it was put?
@@ -869,28 +872,37 @@ const App: React.FC = () => {
   };
 
   /**
-   * Complete an object, check the result (nothing cut off, natural proportions),
-   * and retry on a larger canvas if needed: the sides into which the object extends
-   * grow with each attempt.
+   * Complete an object, check the result, and retry if needed (up to three attempts):
+   * - cut off or unnatural proportions: retry on a larger canvas (the sides into
+   *   which the object extends grow);
+   * - the visible part did not stay in place: retry on the same canvas.
+   * The best attempt is used (complete first, then the visible part kept).
    */
   const completeWithRetries = async (item: CroppedObject, tag: string) => {
-    const MAX_RETRIES = 2;
+    const MAX_ATTEMPTS = 3;
     const extent = await hiddenExtentOf(item);
-    let result: Awaited<ReturnType<typeof completeWithLayout>> | undefined;
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      const grow = (v: number) => v * (1 + 0.5 * attempt) + (v > 0.05 ? 0.4 * attempt : 0);
-      result = await completeWithLayout(item, {
+    let growth = 0;
+    let best: { result: Awaited<ReturnType<typeof completeWithLayout>>; score: number } | undefined;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      const grow = (v: number) => v * (1 + 0.5 * growth) + (v > 0.05 ? 0.4 * growth : 0);
+      const result = await completeWithLayout(item, {
         left: grow(extent.left), right: grow(extent.right), top: grow(extent.top), bottom: grow(extent.bottom),
       }, tag);
       const { isComplete, missingParts } = await verifyCompletion(result.transparentUrl, item.label, item.type, aiSettings);
-      if (isComplete) break;
-      if (attempt === MAX_RETRIES) {
-        console.warn(`[${tag}] ${item.label}: still incomplete after ${MAX_RETRIES + 1} attempts (${missingParts.join(', ')}), using the last result`);
-      } else {
+      const kept = result.partSource === 'layout';
+      const score = (isComplete ? 2 : 0) + (kept ? 1 : 0);
+      if (!best || score > best.score) best = { result, score };
+      if (isComplete && kept) break;
+      if (attempt === MAX_ATTEMPTS) {
+        console.warn(`[${tag}] ${item.label}: no complete result with the visible part kept after ${MAX_ATTEMPTS} attempts; using the best one`);
+      } else if (!isComplete) {
+        growth++;
         console.warn(`[${tag}] ${item.label}: incomplete or unnatural (${missingParts.join(', ')}), retrying with a larger canvas...`);
+      } else {
+        console.warn(`[${tag}] ${item.label}: the visible part did not stay in place, retrying...`);
       }
     }
-    return result!;
+    return best!.result;
   };
 
   const handleCompleteBody = async (item: CroppedObject) => {

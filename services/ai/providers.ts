@@ -48,6 +48,8 @@ export interface ImageLayout {
   size: OpenAIImageSize;
   aspect: string;
   maskUrl?: string;
+  /** Second input image for reference only (e.g. the whole photo with the object marked) */
+  reference?: ImageData;
 }
 export type OpenAIImageSize = '1024x1024' | '1536x1024' | '1024x1536';
 
@@ -164,6 +166,7 @@ export const generateImage = async (
       contents: {
         parts: [
           { inlineData: { mimeType: image.mimeType, data: image.base64 } },
+          ...(layout.reference ? [{ inlineData: { mimeType: layout.reference.mimeType, data: layout.reference.base64 } }] : []),
           { text: prompt },
         ],
       },
@@ -189,7 +192,12 @@ export const generateImage = async (
     : null;
   const edit = async (background?: 'transparent') => client.images.edit({
     model: settings.models.openaiImage,
-    image: await toFile(bytes, `input.${ext}`, { type: image.mimeType }),
+    // The edit mask applies to the first image; a reference image follows it
+    image: layout.reference
+      ? [await toFile(bytes, `input.${ext}`, { type: image.mimeType }), await toFile(
+        Uint8Array.from(atob(layout.reference.base64), c => c.charCodeAt(0)),
+        `reference.${layout.reference.mimeType.split('/')[1] || 'png'}`, { type: layout.reference.mimeType })]
+      : await toFile(bytes, `input.${ext}`, { type: image.mimeType }),
     ...(maskBytes ? { mask: await toFile(maskBytes, 'mask.png', { type: 'image/png' }) } : {}),
     prompt,
     size: layout.size,

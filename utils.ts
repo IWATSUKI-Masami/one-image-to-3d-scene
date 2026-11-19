@@ -673,6 +673,29 @@ export const prepareCompletionCanvas = async (
 };
 
 /**
+ * The whole photo with one object marked by a red box, as a reference image for
+ * completion (longest side at most 1024 px, JPEG).
+ */
+export const makeReferenceImage = async (photoUrl: string, box: [number, number, number, number]): Promise<string> => {
+  const img = await loadImageElement(photoUrl);
+  const k = Math.min(1, 1024 / Math.max(img.naturalWidth, img.naturalHeight));
+  const w = Math.round(img.naturalWidth * k), h = Math.round(img.naturalHeight * k);
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d')!;
+  ctx.drawImage(img, 0, 0, w, h);
+  const [ymin, xmin, ymax, xmax] = box;
+  const lw = Math.max(3, Math.round(Math.max(w, h) / 200));
+  ctx.strokeStyle = '#FF0000';
+  ctx.lineWidth = lw;
+  // Keep the frame inside the image so that boxes at the border stay visible
+  const x0 = Math.max(lw / 2, xmin * w), y0 = Math.max(lw / 2, ymin * h);
+  const x1 = Math.min(w - lw / 2, xmax * w), y1 = Math.min(h - lw / 2, ymax * h);
+  ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+  return c.toDataURL('image/jpeg', 0.9);
+};
+
+/**
  * Check that the image model kept the visible part in place: normalized cross-
  * correlation (grayscale) between the canvas and the completed image inside the
  * part's box (on the object's pixels when known). Returns the correlation (-1..1);
