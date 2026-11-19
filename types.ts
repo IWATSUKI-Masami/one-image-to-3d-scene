@@ -45,6 +45,26 @@ export interface CompletionInfo {
   faceStyle?: FaceStyle;
   /** How the visible part was located in the completed image */
   partSource?: PartBoxSource;
+  /** Every completion attempt, in order (the chosen one is `chosenAttempt`) */
+  attempts?: CompletionAttempt[];
+  /** Index (0-based) of the attempt that was used */
+  chosenAttempt?: number;
+  /** Visible pixels were locked with an edit mask (OpenAI with photo masks) */
+  editMask?: boolean;
+  /** Estimated extent of the object beyond its box (fractions of the box size; before enlargement) */
+  hiddenExtent?: { left: number; right: number; top: number; bottom: number };
+}
+
+/** One completion attempt */
+export interface CompletionAttempt {
+  /** Check result: nothing cut off and natural proportions (null: not checked, single-attempt mode) */
+  complete: boolean | null;
+  /** Problems reported by the check (e.g. "legs too short") */
+  missingParts: string[];
+  /** How the visible part was located in this attempt */
+  partSource: PartBoxSource;
+  /** Correlation of the visible part near its box (-1..1) */
+  placementScore: number;
 }
 
 /**

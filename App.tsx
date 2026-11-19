@@ -9,7 +9,16 @@ import { BoundingBoxOverlay } from './components/BoundingBoxOverlay';
 import { MaskOverlay } from './components/MaskOverlay';
 import { segmentObjects } from './services/segmentation';
 import { estimateFrontAlignment } from './services/frontAlignment';
+import { buildStatsCsv } from './services/stats';
 import { sameBox } from './components/depthSampling';
+
+/** Result of completing one object, with the record of every attempt */
+interface CompletionRun {
+  result: { transparentUrl: string; bgRemovalFailed: boolean; tightBox2d?: [number, number, number, number]; partBox2d?: [number, number, number, number]; partSource: PartBoxSource; placementScore: number; expansionRatio: number; editMask: boolean };
+  attempts: CompletionAttempt[];
+  chosen: number;
+  extent: { left: number; right: number; top: number; bottom: number };
+}
 
 /** Correlation above which the visible part is taken to have stayed in place during completion */
 const PART_PLACEMENT_MIN_SCORE = 0.6;
@@ -29,7 +38,7 @@ const FACE_STYLE_HINT = 'Faces of people in completion. Calm: sharp face, relaxe
 import { loadAISettings, saveAISettings, hasRequiredKeys, bgRemovalSpace, PROVIDER_LABELS, FACE_STYLE_LABELS } from './services/ai/models';
 import { AISettingsDialog } from './components/AISettingsDialog';
 import { cropObjectsFromImage, removeBackgroundWithRembg, findBestMatchPosition, hasTransparentBackground, generate3DModelWithHunyuan3D, generate3DModelWithTrellis, blobUrlToDataUrl, dataUrlToBlobUrl, generateDepthMap, prepareImageForCompletion, calculateTightBoundingBox, prepareCompletionCanvas, verifyPartPlacement, makeReferenceImage } from './utils';
-import { DetectedObject, CroppedObject, Model3D, ModelProvider, ProjectArchive, AISettings, FaceStyle, CompletionInfo, PartBoxSource } from './types';
+import { DetectedObject, CroppedObject, Model3D, ModelProvider, ProjectArchive, AISettings, FaceStyle, CompletionInfo, PartBoxSource, CompletionAttempt } from './types';
 import { Scan, Sparkles, AlertCircle, Layers, Image as ImageIcon, User, Box, ArrowLeft, Upload, Plug, Wand2, RefreshCw, Star, Download, MonitorPlay, Cuboid, Save, FolderOpen, Trash2 } from 'lucide-react';
 
 type AppMode = 'landing' | 'analyze' | 'batch-remove' | 'complete-body' | 'generate-3d';
@@ -792,37 +801,48 @@ const App: React.FC = () => {
     return {
       transparentUrl, bgRemovalFailed, tightBox2d, partBox2d, partSource, placementScore,
       expansionRatio: 1 + extent.top + extent.bottom,
+      editMask: !!prepared.layout.maskUrl,
     };
   };
 
   /** Completed item from the result of completeWithLayout */
-  const makeCompletedItem = (item: CroppedObject, r: Awaited<ReturnType<typeof completeWithLayout>>): CroppedObject => ({
+  const makeCompletedItem = (item: CroppedObject, run: CompletionRun): CroppedObject => {
+    const r = run.result;
+    return {
     ...item,
     id: `generated-${item.id}-${Date.now()}`,
     label: `${item.label} (Completed)`,
     imageUrl: r.transparentUrl,
     bgRemovalFailed: r.bgRemovalFailed,
     completionExpansionRatio: r.expansionRatio,
-    completion: { ...completionInfo(item.type), partSource: r.partSource },
+    completion: {
+      ...completionInfo(item.type),
+      partSource: r.partSource,
+      attempts: run.attempts,
+      chosenAttempt: run.chosen,
+      editMask: r.editMask,
+      hiddenExtent: run.extent,
+    },
     originalCroppedImageUrl: item.imageUrl,
     originalPartBox2d: r.partBox2d,
     tightBox2d: r.tightBox2d,
     isRefined: !!r.partBox2d,
-  });
+    };
+  };
 
   /**
    * How far the object extends beyond its crop, from the whole photo. The estimate
    * is enlarged: extra canvas only stays white, while too little makes the image
    * model squash the object.
    */
-  const hiddenExtentOf = async (item: CroppedObject): Promise<HiddenExtent> => {
+  const hiddenExtentOf = async (item: CroppedObject): Promise<{ raw: HiddenExtent; enlarged: HiddenExtent }> => {
     const e = previewUrl
       ? await estimateHiddenExtent(previewUrl, item.box_2d, item.label, item.type, aiSettings)
       : item.type === 'person'
         ? { left: 0.15, right: 0.15, top: 0.05, bottom: 1.2 }
         : { left: 0.3, right: 0.3, top: 0.3, bottom: 0.3 };
     const grow = (v: number) => v * 1.3 + (v > 0.05 ? 0.15 : 0);
-    return { left: grow(e.left), right: grow(e.right), top: grow(e.top), bottom: grow(e.bottom) };
+    return { raw: e, enlarged: { left: grow(e.left), right: grow(e.right), top: grow(e.top), bottom: grow(e.bottom) } };
   };
 
   /**
@@ -832,22 +852,28 @@ const App: React.FC = () => {
    * - the visible part did not stay in place: retry on the same canvas.
    * The best attempt is used (complete first, then the visible part kept).
    */
-  const completeWithRetries = async (item: CroppedObject, tag: string) => {
+  const completeWithRetries = async (item: CroppedObject, tag: string): Promise<CompletionRun> => {
     const MAX_ATTEMPTS = maxAttempts;
-    const extent = await hiddenExtentOf(item);
+    const { raw, enlarged: extent } = await hiddenExtentOf(item);
+    const attempts: CompletionAttempt[] = [];
     // A single attempt: one image generation, no check (fewest API calls)
-    if (MAX_ATTEMPTS === 1) return completeWithLayout(item, extent, tag);
+    if (MAX_ATTEMPTS === 1) {
+      const result = await completeWithLayout(item, extent, tag);
+      attempts.push({ complete: null, missingParts: [], partSource: result.partSource, placementScore: result.placementScore });
+      return { result, attempts, chosen: 0, extent: raw };
+    }
     let growth = 0;
-    let best: { result: Awaited<ReturnType<typeof completeWithLayout>>; score: number } | undefined;
+    let best: { result: Awaited<ReturnType<typeof completeWithLayout>>; score: number; index: number } | undefined;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const grow = (v: number) => v * (1 + 0.5 * growth) + (v > 0.05 ? 0.4 * growth : 0);
       const result = await completeWithLayout(item, {
         left: grow(extent.left), right: grow(extent.right), top: grow(extent.top), bottom: grow(extent.bottom),
       }, tag);
       const { isComplete, missingParts } = await verifyCompletion(result.transparentUrl, item.label, item.type, aiSettings);
+      attempts.push({ complete: isComplete, missingParts, partSource: result.partSource, placementScore: result.placementScore });
       const kept = result.partSource === 'layout';
       const score = (isComplete ? 2 : 0) + (kept ? 1 : 0);
-      if (!best || score > best.score) best = { result, score };
+      if (!best || score > best.score) best = { result, score, index: attempt - 1 };
       if (isComplete && kept) break;
       if (attempt === MAX_ATTEMPTS) {
         console.warn(`[${tag}] ${item.label}: no complete result with the visible part kept after ${MAX_ATTEMPTS} attempts; using the best one`);
@@ -858,7 +884,7 @@ const App: React.FC = () => {
         console.warn(`[${tag}] ${item.label}: the visible part did not stay in place, retrying...`);
       }
     }
-    return best!.result;
+    return { result: best!.result, attempts, chosen: best!.index, extent: raw };
   };
 
   const handleCompleteBody = async (item: CroppedObject) => {
@@ -980,6 +1006,18 @@ const App: React.FC = () => {
   };
 
   // --- Project Archiving Functions ---
+
+  /** Download processing statistics of the completed objects as CSV */
+  const handleExportStats = () => {
+    const csv = buildStatsCsv(completedImages, models3D, detectedObjects, processingTimes);
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-');
+    link.href = url;
+    link.download = `${sourceImageName || 'project'}_stats_${stamp}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   const handleSaveProject = async () => {
     setIsArchiving(true);
@@ -1200,6 +1238,19 @@ const App: React.FC = () => {
               >
                 {isArchiving ? <Spinner /> : <Save size={14} />}
                 Save
+              </button>
+
+              <button
+                onClick={handleExportStats}
+                disabled={completedImages.length === 0}
+                className={`flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full border transition-colors
+                    ${completedImages.length === 0
+                    ? 'bg-slate-50 text-slate-400 border-slate-200 cursor-not-allowed'
+                    : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'}`}
+                title="Download processing statistics (CSV): per completed object, how it was completed (attempts, checks, how the visible part was located), the front alignment of its 3D model and processing times"
+              >
+                <Download size={14} />
+                Stats
               </button>
 
               <div className="relative">

@@ -1,3 +1,4 @@
+import { MIN_ALIGNMENT_SCORE } from '../services/frontAlignment';
 import React from 'react';
 import { Model3D } from '../types';
 import { Download, Trash2, Box } from 'lucide-react';
@@ -71,6 +72,14 @@ export const Model3DCard: React.FC<Model3DCardProps> = ({ model, onDelete, selec
         <p className="font-medium text-slate-800 capitalize text-center truncate" title={model.label}>
           {model.label}
         </p>
+        {model.frontAlignment && (
+          <p className="text-[11px] text-indigo-600 mt-1 text-center truncate"
+            title="Front alignment: rotation that makes the model's front view match its completed image (score: silhouette overlap + brightness correlation − aspect-ratio difference; IoU: silhouette overlap)">
+            {model.frontAlignment.score >= MIN_ALIGNMENT_SCORE
+              ? `Align: ${Math.round(model.frontAlignment.yawDeg)}° (score ${model.frontAlignment.score.toFixed(2)})`
+              : `Align: not used (score ${model.frontAlignment.score.toFixed(2)})`}
+          </p>
+        )}
       </div>
     </div>
   );

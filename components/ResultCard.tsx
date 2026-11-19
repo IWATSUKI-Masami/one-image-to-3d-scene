@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { CroppedObject } from '../types';
 import { FACE_STYLE_LABELS } from '../services/ai/models';
+import { describeAttempts } from '../services/stats';
 
 /** How the visible part was located in the completed image (green box) */
 const PART_SOURCE_LABELS = { layout: 'kept', matching: 'matched', whole: 'not found' } as const;
@@ -291,10 +292,11 @@ export const ResultCard: React.FC<ResultCardProps> = ({ item, onCompleteBody, on
         </p>
         {item.completion && (
           <p className="text-[11px] text-indigo-600 mt-1 text-center truncate"
-            title="Settings used for the completion: image provider, face style (people), and how the visible part was located (kept in place / matched / not found)">
+            title={item.completion.attempts?.length ? `Attempts: ${describeAttempts(item)}` : "Settings used for the completion: image provider, face style (people), and how the visible part was located (kept in place / matched / not found)"}>
             {item.completion.provider}
             {item.completion.faceStyle && ` · Face: ${FACE_STYLE_LABELS[item.completion.faceStyle]}`}
             {item.completion.partSource && ` · Part: ${PART_SOURCE_LABELS[item.completion.partSource]}`}
+            {item.completion.attempts && item.completion.attempts.length > 1 && ` · ${item.completion.attempts.length} attempts`}
           </p>
         )}
         {item.description && (
