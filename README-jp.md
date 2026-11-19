@@ -36,7 +36,7 @@
 
 ### 処理の流れ（サンプル画像）
 
-OpenAI（物体検出と画像補完）と TRELLIS.2（3D生成）を使った結果です。3Dシーンは、遠近を考慮した配置（遠/近の比 1.5）と向きの推定を適用しています。
+OpenAI（物体検出と画像補完）と TRELLIS.2（3D生成）を使った結果です。人物は顔の描き方 **Redraw** で補完しました。3Dシーンは遠近を考慮した配置（遠/近の比 1.5）で、人物、花瓶、カップを表示しています（一部しか写っていない椅子とテーブルは非表示。ロードマップを参照）。
 
 <table>
   <tr>
@@ -44,12 +44,12 @@ OpenAI（物体検出と画像補完）と TRELLIS.2（3D生成）を使った�
     <td width="50%"><img src="docs/images/step2-extracted.webp" alt="切り出し"><br><sub><b>2. 切り出し</b>：物体ごとに写真から切り出す</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/step3-completed.webp" alt="画像補完"><br><sub><b>3. 画像補完</b>：隠れた部分を透明背景で生成（OpenAI）。緑の枠は写真に写っていた部分</sub></td>
+    <td width="50%"><img src="docs/images/step3-completed.webp" alt="画像補完"><br><sub><b>3. 画像補完</b>：隠れた部分を透明背景で生成（OpenAI）。カードには補完に使ったサービスと、人物では顔の描き方を表示</sub></td>
     <td width="50%"><img src="docs/images/step4-3d-models.webp" alt="3Dモデル"><br><sub><b>6. 3D生成</b>：物体ごとにテクスチャ付き3Dモデルを生成（TRELLIS.2）</sub></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/images/step5-depth-map.webp" alt="深度マップ"><br><sub><b>5. 深度推定</b>：Depth Anything V2（明るいほど手前）</sub></td>
-    <td width="50%"><img src="docs/images/scene-result.webp" alt="3Dシーン"><br><sub><b>7〜8. シーン合成と向きの推定</b>：人物、花瓶、カップを遠近を考慮して PC Box の奥行きに配置し、推定した向きに回転（2人が向かい合う姿勢を再現）</sub></td>
+    <td width="50%"><img src="docs/images/scene-result.webp" alt="3Dシーン"><br><sub><b>7. シーン合成</b>：人物、花瓶、カップを遠近を考慮して PC Box の奥行きに配置</sub></td>
   </tr>
 </table>
 

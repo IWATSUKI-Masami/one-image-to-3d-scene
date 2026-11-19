@@ -36,7 +36,7 @@ The sample photo [`samples/two-people-at-table.webp`](samples/two-people-at-tabl
 
 ### Walkthrough (sample photo)
 
-Results with OpenAI (detection and completion) and TRELLIS.2 (3D generation). The scene uses perspective placement (far/near ratio 1.5) and orientation estimation.
+Results with OpenAI (detection and completion) and TRELLIS.2 (3D generation). People were completed with the **Redraw** face style. The scene uses perspective placement (far/near ratio 1.5) and shows the people, vase and cups (the partly visible chairs and table are hidden; see the roadmap).
 
 <table>
   <tr>
@@ -44,12 +44,12 @@ Results with OpenAI (detection and completion) and TRELLIS.2 (3D generation). Th
     <td width="50%"><img src="docs/images/step2-extracted.webp" alt="Extracted objects"><br><sub><b>2. Cropping</b> — each object cut out of the photo</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/step3-completed.webp" alt="Completed objects"><br><sub><b>3. Completion</b> — hidden parts generated with a transparent background (OpenAI); the green box marks the part visible in the photo</sub></td>
+    <td width="50%"><img src="docs/images/step3-completed.webp" alt="Completed objects"><br><sub><b>3. Completion</b> — hidden parts generated with a transparent background (OpenAI); each card shows the provider and, for people, the face style</sub></td>
     <td width="50%"><img src="docs/images/step4-3d-models.webp" alt="3D models"><br><sub><b>6. 3D generation</b> — one textured 3D model per object (TRELLIS.2)</sub></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/images/step5-depth-map.webp" alt="Depth map"><br><sub><b>5. Depth estimation</b> — Depth Anything V2 (brighter = nearer)</sub></td>
-    <td width="50%"><img src="docs/images/scene-result.webp" alt="3D scene"><br><sub><b>7–8. Scene composition and orientation</b> — people, vase and cups placed with perspective at the depth of their PC Boxes and rotated by their estimated orientation (the face-to-face pose of the two people is recovered)</sub></td>
+    <td width="50%"><img src="docs/images/scene-result.webp" alt="3D scene"><br><sub><b>7. Scene composition</b> — people, vase and cups placed with perspective at the depth of their PC Boxes</sub></td>
   </tr>
 </table>
 
