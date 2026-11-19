@@ -55,6 +55,10 @@
     <td width="50%"><img src="docs/images/scene-result.webp" alt="3Dシーン"><br><sub><b>7. シーン合成</b>：8物体すべてを遠近を考慮して PC Box の奥行きに配置。背もたれの細い部分しか見えない椅子も、人物の後ろに置かれる。天板の手前しか見えないテーブルの位置は、まだおおよそ</sub></td>
     <td width="50%"><img src="docs/images/step7-scene-ui.webp" alt="操作パネル付きの3Dシーン"><br><sub><b>3D Scene タブ</b>：操作パネル付きのシーン。深度の範囲と点の大きさ、<b>Perspective</b>、<b>Align</b>（向き合わせ）、各種の枠と点群、配置の <b>Save</b> / <b>Load</b>、モデルを手で動かす <b>Edit</b></sub></td>
   </tr>
+  <tr>
+    <td width="50%"><img src="docs/images/scene-edited.webp" alt="手で編集した3Dシーン"><br><sub><b>手で編集した結果</b>：シーンの編集モード（<b>Edit ON</b>。移動・回転・拡大の操作つまみが表示されている）で、テーブルと椅子の位置と大きさを直したもの。天板の手前しか見えないテーブルが、最も直す必要があった</sub></td>
+    <td width="50%"></td>
+  </tr>
 </table>
 
 ## 必要な環境
