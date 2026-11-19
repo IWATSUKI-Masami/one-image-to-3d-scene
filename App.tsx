@@ -6,6 +6,8 @@ import { Model3DCard } from './components/Model3DCard';
 
 import { DepthOnlyScene } from './components/DepthOnlyScene';
 import { BoundingBoxOverlay } from './components/BoundingBoxOverlay';
+import { MaskOverlay } from './components/MaskOverlay';
+import { segmentObjects } from './services/segmentation';
 import { detectObjectsInImage, generateCompletion, estimateCanvasExpansion, verifyCompletion } from './services/aiService';
 
 /** Face styles for the completion of people */
@@ -41,6 +43,8 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   // Progress of the orientation estimation, e.g. "3 / 8" (null when idle)
   const [orientationProgress, setOrientationProgress] = useState<string | null>(null);
+  const [segmentationProgress, setSegmentationProgress] = useState<string | null>(null);
+  const [showMasks, setShowMasks] = useState(true);
 
   // Depth Map State
   const [depthMapUrl, setDepthMapUrl] = useState<string | null>(null);
@@ -375,6 +379,29 @@ const App: React.FC = () => {
    * (Orient Anything on the photo appearance and on a front render of the model).
    * All results are applied at once, so the scene is rebuilt only once.
    */
+  /** Segment the visible part of each detected object in the photo (SAM 2.1 in the browser) */
+  const handleSegmentObjects = async () => {
+    if (!previewUrl || detectedObjects.length === 0 || segmentationProgress) return;
+    setError(null);
+    const start = performance.now();
+    try {
+      const results = await segmentObjects(previewUrl, detectedObjects.map(o => o.box_2d), undefined, setSegmentationProgress);
+      setDetectedObjects(prev => prev.map((obj, i) => {
+        const r = results[i];
+        return r ? { ...obj, mask: { url: r.maskUrl, score: r.score, coverage: r.coverage } } : obj;
+      }));
+      setShowMasks(true);
+      setProcessingTimes(prev => new Map(prev).set('Segmentation (all)', (performance.now() - start) / 1000));
+      const failed = detectedObjects.filter((_, i) => !results[i]).map(o => o.label);
+      if (failed.length > 0) setError(`Segmentation failed for: ${failed.join(', ')}. See the console for details.`);
+    } catch (e: any) {
+      console.error('Segmentation failed:', e);
+      setError(`Segmentation failed: ${e?.message || e}`);
+    } finally {
+      setSegmentationProgress(null);
+    }
+  };
+
   const handleEstimateOrientation = async () => {
     const targets = positionedModels;
     if (targets.length === 0 || orientationProgress) return;
@@ -1676,6 +1703,30 @@ const App: React.FC = () => {
                         <span className="bg-slate-200 text-slate-600 w-6 h-6 rounded-full flex items-center justify-center text-xs">1</span>
                         Original Image
                       </h3>
+                      {detectedObjects.length > 0 && !isAnalyzing && (
+                        <div className="flex items-center gap-2">
+                          {detectedObjects.some(o => o.mask) && (
+                            <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={showMasks}
+                                onChange={(e) => setShowMasks(e.target.checked)}
+                                className="w-3.5 h-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                              />
+                              Masks
+                            </label>
+                          )}
+                          <button
+                            onClick={handleSegmentObjects}
+                            disabled={!!segmentationProgress}
+                            title="Segment the visible pixels of each detected object (SAM 2.1, runs in the browser; the model is downloaded on first use). Used for object depth and for fitting partially visible objects."
+                            className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium text-emerald-700 border border-emerald-200 bg-white hover:bg-emerald-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                          >
+                            {segmentationProgress ? <Spinner size={12} /> : <Layers size={12} />}
+                            {segmentationProgress ? `Segmenting: ${segmentationProgress}` : detectedObjects.some(o => o.mask) ? 'Segment Again' : 'Segment Objects'}
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     <div className="relative rounded-xl overflow-hidden shadow-sm border border-slate-200 bg-white group">
@@ -1687,6 +1738,9 @@ const App: React.FC = () => {
                             className="w-full h-auto block"
                           />
                           {/* Bounding Boxes Layer */}
+                          {!isAnalyzing && showMasks && detectedObjects.some(o => o.mask) && (
+                            <MaskOverlay objects={detectedObjects} />
+                          )}
                           {!isAnalyzing && detectedObjects.length > 0 && (
                             <BoundingBoxOverlay objects={detectedObjects} />
                           )}

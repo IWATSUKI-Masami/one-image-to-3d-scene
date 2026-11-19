@@ -106,18 +106,27 @@ People, the vase and the cups are mostly visible and are placed correctly.
 - **Silhouette fitting**: render the 3D model from the estimated camera and fit its scale and position so that its silhouette matches the visible mask in the photo.
 - **Pixel-aligned generation**: models such as Pixal3D (item 1) keep the front of the model aligned with the input image, which may make the visible part easier to locate.
 
-### Proposed approach
+### Approach (adopted): fit the model by rendering it
 
-A person places such objects from a few cues: the object's real size (relative to the people in the photo), where it stands (on the floor), and which part of it is visible (it continues beyond the image border). The approach uses the same cues instead of fitting the whole model into the small box:
+Render the 3D model from the photo's camera and search for the position, size and rotation (about the vertical axis) at which the rendering does not contradict the photo (analysis-by-synthesis). Which part of the model is visible then follows from the fit. Only physical conditions that hold in any scene are used — no rules per object category.
 
-1. **Detect partial visibility**: the crop box touches the image border, or the VLM says that the object is cut off or occluded. Ask the VLM, in the same structured output as the detection, which part is visible (e.g. "front edge of the table top", "right edge of the chair back") and in which direction the object continues.
-2. **Scale from size priors, not from the box**: the people are mostly visible and placed correctly, so their height (about 1.7 m) gives the scene's scale. Ask the VLM for the typical size of each object (e.g. table about 0.75 m high, chair seat about 0.45 m) and scale the model to it.
-3. **Depth from the visible part**: the median depth of the visible mask (paper, eq. (4)) is still valid for the visible part.
-4. **Ground contact**: estimate the floor from the feet of the people (or the lowest points of standing objects) and put the bottom of furniture on it.
-5. **Position from the visible part**: move the scaled model so that its visible part (step 1) projects onto the visible region of the photo, and the rest extends outside the image or behind the occluder.
-6. **Refine by silhouette fitting** (optional): render the model from the estimated camera and adjust position and yaw so that its silhouette within the image matches the visible mask.
+Cues from the photo: the mask of the object's visible pixels, the depth map, the masks and depths of the other objects (what is in front), and the image border (beyond it nothing is seen).
 
-Steps 1–5 need no new model and could be tried first on the sample photo.
+Conditions:
+
+1. **Cover the visible part**: every pixel of the object's mask is covered by the rendered model.
+2. **No unexplained absence**: where the model would be drawn inside the image but the photo shows something farther away (e.g. the wall), the placement is wrong. Behind a nearer object and outside the image the model may extend freely.
+3. **Matching depth**: on the visible part, the model's surface depth agrees with the depth map (weighted lightly, because the depth is relative and the camera is assumed; see item 5).
+4. **Semantic correspondence** (later stage): match the same parts (e.g. "top of the backrest", "legs") between the photo and the rendering, with image features (e.g. DINOv2) or by asking a VLM for corresponding points. This works even when the generated model's colors differ from the photo.
+
+Initial values: orientation from Orient Anything, size from fully visible objects (people) and typical sizes, depth from the median of the visible part. Then a coarse search and a local refinement on small renderings (e.g. 128 px) in the browser.
+
+Stages:
+
+1. **Object masks** — **done**: SAM 2.1 in the browser (transformers.js), prompted with each detected box (**Segment Objects**). The masks are also used for each object's depth (Eq. (4)).
+2. **Fitting with conditions 1–3** (next).
+3. **Semantic correspondence** (condition 4): compare DINOv2 in the browser with VLM-based correspondence.
+4. **Evaluation** on several photos with partially visible objects, with the same settings, so that the method is not tuned to the sample.
 
 ## 4. More accurate orientation estimation
 

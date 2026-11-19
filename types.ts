@@ -3,6 +3,17 @@ export interface DetectedObject {
   box_2d: [number, number, number, number]; // [ymin, xmin, ymax, xmax]
   type: 'person' | 'object';
   description?: string; // Detailed description including pose, clothing, etc.
+  /** Mask of the visible part of the object in the photo (SAM 2.1), if segmented */
+  mask?: ObjectPhotoMask;
+}
+
+export interface ObjectPhotoMask {
+  /** PNG data URL covering the whole photo; alpha 255 on the object's visible pixels */
+  url: string;
+  /** SAM's predicted IoU of the mask (0..1) */
+  score: number;
+  /** Fraction of the object's box covered by the mask (0..1) */
+  coverage: number;
 }
 
 export interface CroppedObject extends DetectedObject {

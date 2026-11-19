@@ -9,25 +9,45 @@ import { Spinner } from './Spinner';
 import { DetectedObject, Model3D } from '../types';
 import { Box2D, DepthRange, ObjectMask, depthFromBrightness, loadObjectMask, medianDepthInBox, sameBox } from './depthSampling';
 
+const boxKey = (box: Box2D): string => box.map(v => v.toFixed(6)).join(',');
+
 /**
- * Alpha masks for Eq. (4): the background-removed image of each model.
- * A completed image is larger than the original crop; `originalPartBox2d`
- * (found by AKAZE) tells which part of it matches the object's box in the scene.
- * Without that alignment the mask cannot be placed, so none is used.
+ * Alpha masks for Eq. (4).
+ * - Photo masks (SAM 2.1, `DetectedObject.mask`) cover the whole photo, so the
+ *   object's box is also its region in the mask. They show exactly the visible
+ *   pixels and are preferred.
+ * - Otherwise the background-removed image of each model is used. A completed
+ *   image is larger than the original crop; `originalPartBox2d` (found by AKAZE)
+ *   tells which part of it matches the object's box in the scene. Without that
+ *   alignment the mask cannot be placed, so none is used.
  */
-const loadModelMasks = async (models: Model3D[]): Promise<Map<string, ObjectMask>> => {
-    const masks = new Map<string, ObjectMask>();
+const loadSceneMasks = async (models: Model3D[], objects: DetectedObject[]) => {
+    const byBox = new Map<string, ObjectMask>();
+    await Promise.all(objects.map(async (obj) => {
+        if (!obj.mask) return;
+        try {
+            byBox.set(boxKey(obj.box_2d), await loadObjectMask(obj.mask.url, obj.box_2d));
+        } catch (e) {
+            console.warn(`Failed to load the photo mask of ${obj.label}`, e);
+        }
+    }));
+    const byModel = new Map<string, ObjectMask>();
     await Promise.all(models.map(async (model) => {
+        const photoMask = model.box_2d ? byBox.get(boxKey(model.box_2d)) : undefined;
+        if (photoMask) {
+            byModel.set(model.id, photoMask);
+            return;
+        }
         const region: Box2D | null = model.originalPartBox2d
             ?? (model.completionExpansionRatio === undefined ? [0, 0, 1, 1] : null);
         if (!region || !model.posterUrl) return;
         try {
-            masks.set(model.id, await loadObjectMask(model.posterUrl, region));
+            byModel.set(model.id, await loadObjectMask(model.posterUrl, region));
         } catch (e) {
             console.warn(`Failed to load mask for ${model.label}; using all pixels in the box`, e);
         }
     }));
-    return masks;
+    return { byModel, byBox };
 };
 
 interface DepthOnlySceneProps {
@@ -536,15 +556,15 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     points.visible = showPointCloudRef.current;
                 }
 
-                // Alpha masks of the models' background-removed images (Eq. (4))
-                const masks = await loadModelMasks(positionedModels);
+                // Alpha masks for Eq. (4): photo masks (SAM) or the models' background-removed images
+                const masks = await loadSceneMasks(positionedModels, detectedObjects);
                 if (disposed) return;
 
                 // Create PC Boxes for detected objects
                 createBoundingBoxes(depthData, depthRange, masks);
 
                 // Load 3D models and position them
-                loadModels(depthData, depthRange, masks);
+                loadModels(depthData, depthRange, masks.byModel);
 
                 // Adjust camera to view the point cloud
                 const box = new THREE.Box3().setFromObject(points);
@@ -577,7 +597,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         const createBoundingBoxes = (
             depthData: ImageData,
             depthRange: DepthRange,
-            masks: Map<string, ObjectMask>
+            masks: { byModel: Map<string, ObjectMask>; byBox: Map<string, ObjectMask> }
         ) => {
             if (disposed || detectedObjects.length === 0) return;
 
@@ -593,7 +613,8 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 // Eq. (4): median depth of the object's mask. The mask comes from the
                 // 3D model generated from this object (same box), if there is one.
                 const model = positionedModels.find(m => m.box_2d && sameBox(m.box_2d, obj.box_2d));
-                const medianDepth = medianDepthInBox(depthData, obj.box_2d, depthRange, model ? masks.get(model.id) : null).z;
+                const mask = (model ? masks.byModel.get(model.id) : undefined) ?? masks.byBox.get(boxKey(obj.box_2d));
+                const medianDepth = medianDepthInBox(depthData, obj.box_2d, depthRange, mask).z;
                 const zPos = toWorldZ(medianDepth);
 
                 // Calculate 3D position and size (at the object's depth)

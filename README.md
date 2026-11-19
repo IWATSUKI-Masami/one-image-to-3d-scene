@@ -142,6 +142,7 @@ The official Spaces run on ZeroGPU, which has a daily quota per user (larger wit
 ## Usage
 
 1. **Detect & Crop** — upload an image and analyze the scene. Detected objects are cropped automatically.
+   - **Segment Objects** (optional, above the photo) — segments the visible pixels of each detected object with [SAM 2.1](https://huggingface.co/onnx-community/sam2.1-hiera-small-ONNX), prompted with its box. It runs in the browser (transformers.js; WebGPU if available, otherwise WebAssembly) and needs no key or token; the model (about 70–90 MB) is downloaded from Hugging Face on first use and cached by the browser. The masks are shown over the photo (**Masks** checkbox), saved with the project, and used for the depth of each object (Eq. (4)) instead of the completed image's alpha. They are the first step towards fitting partially visible objects (see the roadmap).
 2. **Image Completion** — complete the cropped objects (full body for people, missing parts for objects). The background is removed after completion. **Face** sets how faces of people are drawn: **Calm** (default; sharp face with a relaxed, closed-mouth expression, since open mouths and teeth look uncanny in 3D), **Redraw** (sharp face, same expression), **Mannequin** (smooth face without painted features) or **As in photo**. Each completed card shows the provider and face style used (e.g. "OpenAI · Face: Calm"). People are always generated in 3D at a higher resolution.
 3. **3D Generation** — convert the completed images into 3D models.
 4. **3D Scene** — generate the depth map and view the assembled scene. Positions can be adjusted with the transform controls, and the scene can be exported as glTF/GLB.
@@ -159,6 +160,8 @@ Projects (images, depth map, models and scene layout) can be saved and loaded.
 ├── components/             # React components (3D viewers, cards, overlays)
 ├── services/
 │   ├── aiService.ts        # Prompts for detection, completion and checks
+│   ├── segmentation.ts     # Object masks in the photo (SAM 2.1 in the browser)
+│   ├── orientation.ts      # Orientation estimation (Orient Anything)
 │   └── ai/                 # Provider layer (OpenAI / Gemini) and default models
 ├── utils.ts                # Cropping, AKAZE matching, depth, 3D generation APIs
 ├── types.ts                # Type definitions
@@ -191,7 +194,7 @@ If you use this software in your research, please cite:
 
 [MIT](LICENSE)
 
-This repository contains only the application code. The external models and APIs it calls (Gemini, OpenAI, TRELLIS.2, Hunyuan3D-2.1, Depth Anything V2, BRIA RMBG 3.0 / 2.0, Orient Anything, etc.) are governed by their own licenses and terms of use; check them before use, especially for commercial purposes.
+This repository contains only the application code. The external models and APIs it calls (Gemini, OpenAI, TRELLIS.2, Hunyuan3D-2.1, Depth Anything V2, BRIA RMBG 3.0 / 2.0, Orient Anything, SAM 2.1, etc.) are governed by their own licenses and terms of use; check them before use, especially for commercial purposes.
 
 In particular, the [Tencent Hunyuan 3D 2.1 Community License](https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1/blob/main/LICENSE) does not apply in the European Union, the United Kingdom and South Korea; use TRELLIS.2 (MIT) there.
 

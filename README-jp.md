@@ -142,6 +142,7 @@ AI Settings では次の項目を設定できます。
 ## 使い方
 
 1. **Detect & Crop**：画像をアップロードしてシーンを解析します。検出された物体は自動で切り出されます。
+   - **Segment Objects**（任意。写真の上）：検出した各物体の見えている画素を、その枠をプロンプトにして [SAM 2.1](https://huggingface.co/onnx-community/sam2.1-hiera-small-ONNX) で切り分けます。ブラウザ内で動き（transformers.js。WebGPU があれば使い、なければ WebAssembly）、API キーやトークンは不要です。モデル（約 70〜90 MB）は初回に Hugging Face からダウンロードされ、ブラウザにキャッシュされます。マスクは写真に重ねて表示され（**Masks** チェックボックス）、プロジェクトに保存されます。各物体の奥行き（式(4)）には、補完画像の透明度の代わりにこのマスクを使います。一部しか写っていない物体を当てはめるための最初の段階です（ロードマップを参照）。
 2. **Image Completion**：切り出した物体を補完します（人物は全身、物体は欠けた部分）。補完後に背景が除去されます。**Face** で人物の顔の描き方を選べます。**Calm**（既定。顔をくっきり描き、口を閉じた穏やかな表情にする。開いた口や歯は3Dで不気味に見えやすいため）、**Redraw**（顔をくっきり描き、表情はそのまま）、**Mannequin**（目鼻を描かないマネキン風）、**As in photo**（写真のまま）です。Completed のカードには、補完に使ったサービスと顔の描き方（例：「OpenAI · Face: Calm」）が表示されます。人物の3Dモデルは、オプションによらず高い解像度で生成します。
 3. **3D Generation**：補完した画像から3Dモデルを生成します。
 4. **3D Scene**：深度マップを生成し、組み立てられたシーンを表示します。位置はTransformControlsで調整でき、glTF/GLBで書き出せます。
@@ -159,6 +160,8 @@ AI Settings では次の項目を設定できます。
 ├── components/             # Reactコンポーネント（3Dビューア、カード、オーバーレイ）
 ├── services/
 │   ├── aiService.ts        # 物体検出・補完・チェックのプロンプト
+│   ├── segmentation.ts     # 写真上の物体マスク（ブラウザ内の SAM 2.1）
+│   ├── orientation.ts      # 向きの推定（Orient Anything）
 │   └── ai/                 # プロバイダー層（OpenAI / Gemini）と既定のモデル
 ├── utils.ts                # 切り出し、AKAZEマッチング、深度推定、3D生成API
 ├── types.ts                # 型定義
@@ -193,7 +196,7 @@ AI Settings では次の項目を設定できます。
 
 [MIT](LICENSE)
 
-このリポジトリに含まれるのはアプリケーションのコードのみです。呼び出している外部のモデルやAPI（Gemini、OpenAI、TRELLIS.2、Hunyuan3D-2.1、Depth Anything V2、BRIA RMBG 3.0 / 2.0、Orient Anything など）には、それぞれのライセンスと利用規約が適用されます。特に商用で利用する場合は、事前に確認してください。
+このリポジトリに含まれるのはアプリケーションのコードのみです。呼び出している外部のモデルやAPI（Gemini、OpenAI、TRELLIS.2、Hunyuan3D-2.1、Depth Anything V2、BRIA RMBG 3.0 / 2.0、Orient Anything、SAM 2.1 など）には、それぞれのライセンスと利用規約が適用されます。特に商用で利用する場合は、事前に確認してください。
 
 特に [Tencent Hunyuan 3D 2.1 Community License](https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1/blob/main/LICENSE) は、EU、英国、韓国では適用されません。これらの地域では TRELLIS.2（MIT）を使ってください。
 
