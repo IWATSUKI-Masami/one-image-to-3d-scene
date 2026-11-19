@@ -9,7 +9,7 @@ Planned extensions. Facts below were checked in November 2026.
 Items of earlier versions of this roadmap that are now in the app (see the README for how to use them):
 
 - **Perspective placement**: the **Perspective** checkbox back-projects the point cloud, PC Boxes and models through a pinhole camera, so near objects are no longer magnified. Remaining assumptions: item 5.
-- **Placing partially visible objects** (item 3): object masks in the photo (SAM 2.1 in the browser), layout-preserving completion that keeps the visible part at a known box in the completed image (no feature matching needed), and the paper's box placement with that box. The partly visible chairs at the image borders of the sample now stand behind the people.
+- **Placing partially visible objects** (item 3): object masks in the photo (SAM 2.1 in the browser), editable annotations (English or Japanese) used in the completion prompt, layout-preserving completion that keeps the visible part at a known box in the completed image (no feature matching needed), and the paper's box placement with that box. The partly visible chairs at the image borders of the sample now stand behind the people.
 - **Orientation** (item 4): front alignment turns each model so that its front view matches its completed image (render and compare), and by the view angle; the two people of the sample turn towards each other.
 - **Faces of people** (item 6, partly): the **Face** completion option (Calm by default) and a higher 3D resolution for people.
 
@@ -103,17 +103,18 @@ Mostly solved (see "Implemented"). Objects of which only a small part is visible
 
 - **Small, featureless visible parts**: the table of the sample, visible only as the front of its top, is still placed only roughly. Its box gives little information about where the rest of the table is. For now it can be corrected by hand in the scene's edit mode (the README shows the sample scene edited this way); scaling now follows the model's own axes, also for turned models.
 - **Ideas**: ground contact (furniture stands on the floor, estimated from the people's feet), typical sizes relative to the people, or pixel-aligned generation (Pixal3D, item 1) with registration to the point cloud.
-- **Evaluation** on several photos with partially visible objects, with the same settings, so that the method is not tuned to the sample.
+- **Hidden shapes guessed wrong**: in a second test photo, an L-shaped desk was described by the VLM as rectangular and completed as a rectangular desk, so the person sitting in the corner of the L intersected it. The annotations can now be edited (also in Japanese) and the description is part of the completion prompt, so the user can correct such guesses. Further ideas: contact and non-intersection between objects as constraints on the placement, or several completion candidates of which the one most consistent with the photo is chosen.
+- **Evaluation**: three AI-generated photos (the sample and two test photos, 23 objects, 13 of them partly visible) — the visible part was kept in place for all 23 objects, with no feature matching. **Stats** in the app exports these figures (attempts, placement scores, alignment) as CSV; more photos, including real ones, are needed.
 
 ## 4. Orientation
 
 ### Status
 
-Implemented as front alignment (`services/frontAlignment.ts`): each model is rendered around the vertical axis and compared with its completed image (silhouette IoU, aspect ratio, brightness correlation), turned to the best angle, and with perspective also by the view angle. On renderings with known rotations, a chair was recovered within 3° and a cup within about 12°. This replaced the first version based on Orient Anything.
+Implemented as front alignment (`services/frontAlignment.ts`): each model is rendered around the vertical axis and compared with its completed image (silhouette IoU, aspect ratio, brightness correlation), turned to the best angle, and with perspective also by the view angle. On renderings with known rotations, a chair was recovered within 3° and a cup within about 12°. Turning a model by more than 90° needs a score gain of at least 0.05 over the best forward-facing angle; in the test photos, a desk lamp, desks and a mug that the generator had built facing the other way were still turned around correctly, and a person seen from the side was turned by 74°. This replaced the first version based on Orient Anything.
 
 ### Remaining
 
-- **Front/back and mirror ambiguities** of nearly symmetric objects (cups, vases, possibly people seen from the side): the silhouettes of opposite angles are almost the same. A small preference for small turns keeps such objects as generated. Brightness or color features with more weight, a VLM check ("is the model facing the same way as the image?"), or **Orient Anything V2** ([Space](https://huggingface.co/spaces/Viglong/Orient-Anything-V2)), which also estimates an object's symmetry, could resolve them.
+- **Front/back and mirror ambiguities** of nearly symmetric objects (cups, vases, possibly people seen from the side): the silhouettes of opposite angles are almost the same. A small preference for small turns, and the gain required for turning around, keep such objects as generated; the price is that an object really turned by more than 90° with similar front and back silhouettes is estimated facing forward. Brightness or color features with more weight, a VLM check ("is the model facing the same way as the image?"), or **Orient Anything V2** ([Space](https://huggingface.co/spaces/Viglong/Orient-Anything-V2)), which also estimates an object's symmetry, could resolve them.
 - **Rotation about other axes** (tilted objects) is not handled.
 
 ## 5. Camera and depth calibration
