@@ -9,7 +9,7 @@ Planned extensions. Facts below were checked in November 2026.
 Items of earlier versions of this roadmap that are now in the app (see the README for how to use them):
 
 - **Perspective placement**: the **Perspective** checkbox back-projects the point cloud, PC Boxes and models through a pinhole camera, so near objects are no longer magnified. Remaining assumptions: item 5.
-- **Placing partially visible objects** (item 3): object masks in the photo (SAM 2.1 in the browser), editable annotations (English or Japanese) used in the completion prompt, layout-preserving completion that keeps the visible part at a known box in the completed image (no feature matching needed), and the paper's box placement with that box. The partly visible chairs at the image borders of the sample now stand behind the people.
+- **Placing partially visible objects** (item 3): object masks in the photo (SAM 2.1 in the browser, run automatically after detection), editable annotations (English or Japanese) used in the completion prompt, layout-preserving completion that keeps the visible part at a known box in the completed image (no feature matching needed), and the paper's box placement with that box. The partly visible chairs at the image borders of the sample now stand behind the people.
 - **Orientation** (item 4): front alignment turns each model so that its front view matches its completed image (render and compare), and by the view angle; the two people of the sample turn towards each other.
 - **Faces of people** (item 6, partly): the **Face** completion option (Calm by default) and a higher 3D resolution for people.
 
@@ -50,7 +50,7 @@ Add **ComfyUI (local)** as an option for 3D generation, next to the Hugging Face
 
 ### Why
 
-- **No ZeroGPU quota or Hugging Face token**: generation runs on the user's own GPU, with stable waiting times.
+- **No ZeroGPU quota or Hugging Face token**: generation runs on the user's own GPU, with stable waiting times. 3D generation is the slowest step: on the Spaces it took 46–96 s per object (70 s on average) for the sample, about 70% of the whole processing time (about 14 minutes for 8 objects).
 - **Reproducibility**: the model and workflow versions can be pinned, which suits experiments that reproduce the paper.
 - **Privacy**: images never leave the user's machine.
 - **More models through one interface**: switching models means switching workflow files.
@@ -103,8 +103,8 @@ Mostly solved (see "Implemented"). Objects of which only a small part is visible
 
 - **Small, featureless visible parts**: the table of the sample, visible only as the front of its top, is still placed only roughly. Its box gives little information about where the rest of the table is. For now it can be corrected by hand in the scene's edit mode (the README shows the sample scene edited this way); scaling now follows the model's own axes, also for turned models.
 - **Ideas**: ground contact (furniture stands on the floor, estimated from the people's feet), typical sizes relative to the people, or pixel-aligned generation (Pixal3D, item 1) with registration to the point cloud.
-- **Hidden shapes guessed wrong**: in a second test photo, an L-shaped desk was described by the VLM as rectangular and completed as a rectangular desk, so the person sitting in the corner of the L intersected it. The annotations can now be edited (also in Japanese) and the description is part of the completion prompt, so the user can correct such guesses. Further ideas: contact and non-intersection between objects as constraints on the placement, or several completion candidates of which the one most consistent with the photo is chosen.
-- **Evaluation**: three AI-generated photos (the sample and two test photos, 23 objects, 13 of them partly visible) — the visible part was kept in place for all 23 objects, with no feature matching. **Stats** in the app exports these figures (attempts, placement scores, alignment) as CSV; more photos, including real ones, are needed.
+- **Hidden shapes guessed wrong**: in a second test photo, an L-shaped desk was described by the VLM as rectangular and completed as a rectangular desk, so the person sitting in the corner of the L intersected it. In the first test photo, an open laptop seen from the back of its screen was described as "closed" and became a box in 3D. The annotations can now be edited (also in Japanese) and the description is part of the completion prompt, so the user can correct such guesses: after editing, an L-shaped desk and an open laptop were generated. Thin objects seen face-on remain hard, because the image-to-3D model sees only the completed image (not the description) and gets no cue for their thickness. Further ideas: contact and non-intersection between objects as constraints on the placement, or several completion candidates of which the one most consistent with the photo is chosen.
+- **Evaluation**: three AI-generated photos (the sample and two test photos, 23 objects, 13 of them partly visible) — the visible part was kept in place for all 23 objects, with no feature matching. In a rerun of the sample, all 8 objects kept their visible part at the first attempt (placement scores 0.66–0.97). **Stats** in the app exports these figures (attempts, placement scores, alignment) as CSV; more photos, including real ones, are needed.
 
 ## 4. Orientation
 
