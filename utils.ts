@@ -696,53 +696,90 @@ export const makeReferenceImage = async (photoUrl: string, box: [number, number,
 };
 
 /**
- * Check that the image model kept the visible part in place: normalized cross-
- * correlation (grayscale) between the canvas and the completed image inside the
- * part's box (on the object's pixels when known). Returns the correlation (-1..1);
- * the framing must also match (same aspect ratio).
+ * Locate the visible part in the completed image near where it was put on the
+ * canvas. Image models often keep the part but shift or resize it slightly; a
+ * thin, dark part (e.g. a chair post) then fails an exact comparison. The part is
+ * searched for around its box (shifts up to 12% of the box size, scales 0.9-1.1)
+ * by normalized cross-correlation of grayscale pixels (on the object's pixels
+ * when known). Returns the best correlation (-1..1) and the part's box there
+ * (normalized). The framing must also match (same aspect ratio).
  */
-export const verifyPartPlacement = async (generatedUrl: string, prepared: CompletionCanvas): Promise<number> => {
+export const verifyPartPlacement = async (
+  generatedUrl: string,
+  prepared: CompletionCanvas,
+): Promise<{ score: number; box: [number, number, number, number] }> => {
+  const failed = { score: -1, box: prepared.partBox };
   const [gen, canvasImg] = await Promise.all([loadImageElement(generatedUrl), loadImageElement(prepared.imageUrl)]);
-  if (Math.abs(Math.log((gen.naturalWidth / gen.naturalHeight) / (prepared.width / prepared.height))) > 0.02) return -1;
+  if (Math.abs(Math.log((gen.naturalWidth / gen.naturalHeight) / (prepared.width / prepared.height))) > 0.02) return failed;
   const [ymin, xmin, ymax, xmax] = prepared.partBox;
-  // Compare on a grid of at most 96 px along the longer side of the box
   const bw = (xmax - xmin) * prepared.width, bh = (ymax - ymin) * prepared.height;
+  // Working resolution: the box is at most 96 px along its longer side
   const k = Math.min(1, 96 / Math.max(bw, bh));
   const gw = Math.max(4, Math.round(bw * k)), gh = Math.max(4, Math.round(bh * k));
-  const sample = (img: HTMLImageElement) => {
+
+  const grayOf = (img: HTMLImageElement, w: number, h: number) => {
     const c = document.createElement('canvas');
-    c.width = gw; c.height = gh;
+    c.width = w; c.height = h;
     const cx = c.getContext('2d')!;
     cx.fillStyle = '#FFFFFF';
-    cx.fillRect(0, 0, gw, gh);
-    cx.drawImage(img, xmin * img.naturalWidth, ymin * img.naturalHeight, (xmax - xmin) * img.naturalWidth, (ymax - ymin) * img.naturalHeight, 0, 0, gw, gh);
-    const d = cx.getImageData(0, 0, gw, gh).data;
-    const g = new Float32Array(gw * gh);
+    cx.fillRect(0, 0, w, h);
+    cx.drawImage(img, 0, 0, w, h);
+    const d = cx.getImageData(0, 0, w, h).data;
+    const g = new Float32Array(w * h);
     for (let i = 0; i < g.length; i++) g[i] = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2];
     return g;
   };
-  const a = sample(canvasImg), b = sample(gen);
-  // Pixels to compare: the object's pixels if known, otherwise the whole box
-  const use = new Uint8Array(gw * gh).fill(prepared.lockMask ? 0 : 1);
-  if (prepared.lockMask) {
-    for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
-      const cx = Math.min(prepared.width - 1, Math.floor(xmin * prepared.width + (x + 0.5) / gw * bw));
-      const cy = Math.min(prepared.height - 1, Math.floor(ymin * prepared.height + (y + 0.5) / gh * bh));
-      use[y * gw + x] = prepared.lockMask[cy * prepared.width + cx];
+  // Both images at the working resolution (the canvas and the output have the same framing)
+  const W = Math.max(1, Math.round(prepared.width * k)), H = Math.max(1, Math.round(prepared.height * k));
+  const a = grayOf(canvasImg, W, H);
+  const b = grayOf(gen, W, H);
+
+  // Template: the part on the canvas, on the object's pixels if known
+  const bx0 = xmin * W, by0 = ymin * H;
+  const tx: number[] = [], ty: number[] = [], tv: number[] = [];
+  for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
+    const cx = Math.min(prepared.width - 1, Math.floor(xmin * prepared.width + (x + 0.5) / gw * bw));
+    const cy = Math.min(prepared.height - 1, Math.floor(ymin * prepared.height + (y + 0.5) / gh * bh));
+    if (prepared.lockMask && !prepared.lockMask[cy * prepared.width + cx]) continue;
+    const sx = Math.min(W - 1, Math.floor(bx0 + x + 0.5)), sy = Math.min(H - 1, Math.floor(by0 + y + 0.5));
+    tx.push(x + 0.5); ty.push(y + 0.5); tv.push(a[sy * W + sx]);
+  }
+  const n = tv.length;
+  if (n < 8) return failed;
+  const tMean = tv.reduce((p, v) => p + v, 0) / n;
+  let tVar = 0;
+  for (const v of tv) tVar += (v - tMean) * (v - tMean);
+
+  // Correlation of the template with the output at a shift (pixels) and scale about the box center
+  const cx0 = bx0 + gw / 2, cy0 = by0 + gh / 2;
+  const score = (dx: number, dy: number, sc: number): number => {
+    let sum = 0;
+    const vals = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const x = Math.floor(cx0 + dx + (tx[i] - gw / 2) * sc), y = Math.floor(cy0 + dy + (ty[i] - gh / 2) * sc);
+      const v = x >= 0 && y >= 0 && x < W && y < H ? b[y * W + x] : 255;
+      vals[i] = v; sum += v;
+    }
+    const m = sum / n;
+    let sab = 0, sbb = 0;
+    for (let i = 0; i < n; i++) { const db = vals[i] - m; sab += (tv[i] - tMean) * db; sbb += db * db; }
+    // A flat part (no texture) cannot be checked by correlation; compare brightness instead
+    if (tVar < n * 25 || sbb < n * 25) return Math.abs(tMean - m) < 20 ? 0.99 - Math.abs(tMean - m) / 200 : 0;
+    return sab / Math.sqrt(tVar * sbb);
+  };
+
+  let best = { s: score(0, 0, 1), dx: 0, dy: 0, sc: 1 };
+  const range = Math.max(2, Math.round(0.12 * Math.max(gw, gh)));
+  for (const sc of [0.9, 0.95, 1, 1.05, 1.1]) {
+    for (let dy = -range; dy <= range; dy++) for (let dx = -range; dx <= range; dx++) {
+      const sv = score(dx, dy, sc);
+      // Prefer the unmoved placement on ties
+      if (sv > best.s + 0.005) best = { s: sv, dx, dy, sc };
     }
   }
-  let n = 0, ma = 0, mb = 0;
-  for (let i = 0; i < use.length; i++) if (use[i]) { n++; ma += a[i]; mb += b[i]; }
-  if (n < 8) return -1;
-  ma /= n; mb /= n;
-  let sab = 0, saa = 0, sbb = 0;
-  for (let i = 0; i < use.length; i++) if (use[i]) {
-    const da = a[i] - ma, db = b[i] - mb;
-    sab += da * db; saa += da * da; sbb += db * db;
-  }
-  // A flat region (no texture) cannot be checked by correlation; compare brightness instead
-  if (saa < n * 25 || sbb < n * 25) return Math.abs(ma - mb) < 20 ? 1 : 0;
-  return sab / Math.sqrt(saa * sbb);
+  const cxN = (cx0 + best.dx) / W, cyN = (cy0 + best.dy) / H;
+  const hw = (xmax - xmin) / 2 * best.sc, hh = (ymax - ymin) / 2 * best.sc;
+  return { score: best.s, box: [cyN - hh, cxN - hw, cyN + hh, cxN + hw] };
 };
 
 export const calculateTightBoundingBox = async (imageUrl: string): Promise<[number, number, number, number]> => {

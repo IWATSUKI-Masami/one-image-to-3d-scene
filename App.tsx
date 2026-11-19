@@ -823,7 +823,9 @@ const App: React.FC = () => {
     setProcessingTimes(prev => new Map(prev).set(`Generation: ${item.label}`, (performance.now() - tGen) / 1000));
 
     // Did the visible part stay where it was put?
-    const placementScore = await verifyPartPlacement(generatedImageUrl, prepared).catch(() => -1);
+    // Where is the visible part now? (searched near where it was put)
+    const placement = await verifyPartPlacement(generatedImageUrl, prepared).catch(() => ({ score: -1, box: prepared.partBox }));
+    const placementScore = placement.score;
 
     let transparentUrl = generatedImageUrl;
     let extractedTransparentUrl: string | undefined;
@@ -846,7 +848,7 @@ const App: React.FC = () => {
       console.warn(`[${tag}] Tight box failed:`, e);
     }
     if (placementScore >= PART_PLACEMENT_MIN_SCORE) {
-      partBox2d = prepared.partBox;
+      partBox2d = placement.box;
       partSource = 'layout';
     } else {
       // The image model moved the visible part: find it by feature matching
