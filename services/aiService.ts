@@ -5,7 +5,6 @@
  * - estimateHiddenExtent    (Phase 3: canvas before completion)      Gemini / OpenAI
  * - generateCompletion      (Phase 3: image completion/outpainting)  Gemini / OpenAI
  * - verifyCompletion        (Phase 3: check the completed image)     Gemini / OpenAI
- * - estimateObjectHeights   (size prior for fitting)                 Gemini / OpenAI
  *
  * The prompts are the ones used in the paper (KBSE2025-61); only the JSON output
  * format is now enforced with each provider's structured-output feature.
@@ -312,66 +311,6 @@ Return ONLY valid JSON:
     console.warn('[Completion Verify] Failed, assuming complete:', error);
     return { isComplete: true, missingParts: [] };
   }
-};
-
-// ---------------------------------------------------------------------------
-// Typical real sizes (size prior for fitting partially visible objects)
-// ---------------------------------------------------------------------------
-
-const SIZE_SCHEMA: JsonSchema = {
-  type: "object",
-  properties: {
-    objects: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          index: { type: "integer", description: "Index of the object in the given list" },
-          height_m: { type: "number", description: "Typical real height of the WHOLE object in meters, in the pose shown" },
-        },
-        required: ["index", "height_m"],
-        additionalProperties: false,
-      },
-    },
-  },
-  required: ["objects"],
-  additionalProperties: false,
-};
-
-/**
- * Typical real-world height (meters) of each object, as a prior for its size in
- * the 3D scene. The whole object counts, including parts that are hidden or cut
- * off in the photo. Returns one value per object (undefined if not answered).
- */
-export const estimateObjectHeights = async (
-  imageUrl: string,
-  objects: DetectedObject[],
-  settings: AISettings,
-): Promise<(number | undefined)[]> => {
-  const image = await loadImageData(imageUrl);
-  const list = objects.map((o, i) =>
-    `${i}: "${o.label}" (box [ymin, xmin, ymax, xmax] = [${o.box_2d.map(v => v.toFixed(3)).join(', ')}])${o.description ? ` - ${o.description}` : ''}`
-  ).join('\n');
-  const prompt = `The following objects were detected in this photo:
-${list}
-
-For each object, estimate the typical real-world HEIGHT in meters of the WHOLE object in the pose shown
-(e.g. a dining chair about 0.9, a dining table about 0.75, a coffee cup with saucer about 0.08,
-a seated adult about 1.3 from floor to head, a standing adult about 1.7).
-Count the whole object, including any parts that are hidden or cut off by the image border.
-Use what is visible (type, style, proportions, relation to other objects) to refine the typical value.
-
-Return JSON in the form {"objects": [{"index": 0, "height_m": 0.9}, ...]} with one entry per object.`;
-  const result = await analyzeImageJson<{ objects: { index: number; height_m: number }[] }>(
-    settings, image, prompt, SIZE_SCHEMA, { schemaName: "object_heights", effort: "low" },
-  );
-  const heights: (number | undefined)[] = objects.map(() => undefined);
-  for (const o of result.objects || []) {
-    if (Number.isInteger(o.index) && o.index >= 0 && o.index < objects.length && o.height_m > 0.005 && o.height_m < 50) {
-      heights[o.index] = o.height_m;
-    }
-  }
-  return heights;
 };
 
 // ---------------------------------------------------------------------------

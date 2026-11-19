@@ -95,6 +95,26 @@ const loadImagePixels = async (url: string): Promise<{ data: Uint8ClampedArray; 
   return { data: ctx.getImageData(0, 0, c.width, c.height).data, width: c.width, height: c.height };
 };
 
+/**
+ * Assumed horizontal field of view of the photo (degrees). The camera is unknown;
+ * this only affects the small view-angle correction for objects away from the
+ * image center (and the perspective placement in the 3D scene).
+ */
+export const ASSUMED_HFOV_DEG = 60;
+
+/**
+ * Direction from an object towards the photo camera, as a rotation about the
+ * vertical axis (degrees, three.js rotation.y). The completed image shows the
+ * object as seen from the camera; an object right of the image center (+X) sees
+ * the camera to its left (negative angle).
+ */
+export const viewAngleDeg = (box2d: [number, number, number, number] | undefined): number => {
+  if (!box2d) return 0;
+  const u = (box2d[1] + box2d[3]) / 2; // horizontal center, 0..1
+  const halfWidth = Math.tan((ASSUMED_HFOV_DEG / 2) * Math.PI / 180);
+  return -Math.atan((u - 0.5) * 2 * halfWidth) * 180 / Math.PI;
+};
+
 /** Below this score the match is not trusted and the model is not turned */
 export const MIN_ALIGNMENT_SCORE = 0.5;
 

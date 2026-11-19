@@ -8,8 +8,11 @@ Planned extensions. Facts below were checked in November 2026.
 
 Items of earlier versions of this roadmap that are now in the app (see the README for how to use them):
 
-- **Orientation estimation** (first version): **Estimate Orientation** in the 3D Scene header rotates each model about the vertical axis using [Orient Anything](https://huggingface.co/spaces/Viglong/Orient-Anything) (`services/orientation.ts`). Improvements: item 4.
 - **Perspective placement**: the **Perspective** checkbox back-projects the point cloud, PC Boxes and models through a pinhole camera, so near objects are no longer magnified. Remaining assumptions: item 5.
+- **Placing partially visible objects** (item 3): object masks in the photo (SAM 2.1 in the browser), layout-preserving completion that keeps the visible part at a known box in the completed image (no feature matching needed), and the paper's box placement with that box. The partly visible chairs at the image borders of the sample now stand behind the people.
+- **Orientation** (item 4): front alignment turns each model so that its front view matches its completed image (render and compare), and by the view angle; the two people of the sample turn towards each other.
+
+Tried and removed during development: orientation estimation with Orient Anything (replaced by front alignment) and a render-and-fit search over position, size and rotation for partially visible objects (the box placement with the kept part box worked better).
 
 ## 1. Pixal3D as a 3D generator (Hugging Face Space)
 
@@ -30,7 +33,7 @@ This system scales and places each model so that the object region in the comple
 
 Pixal3D could also give position, orientation and size together, when combined with registration to the point cloud:
 
-1. **Initial pose from Pixal3D**: if the model is generated in the frame of the input image's camera, its orientation relative to the camera is already correct, and Orient Anything (item 4) would no longer be needed.
+1. **Initial pose from Pixal3D**: if the model is generated in the frame of the input image's camera, its orientation relative to the camera is already correct, without front alignment (item 4).
 2. **Visible surface**: take the part of the model visible from that camera.
 3. **Registration**: fit that surface to the object's masked point cloud (from the depth map) with a similarity transform (scale, rotation, translation; ICP / Umeyama). This gives position, size and fine orientation at once. ICP fails from a poor initial orientation; Pixal3D's alignment provides a good one. Since only the visible surfaces are matched, it may also help partially visible objects (item 3).
 
@@ -86,57 +89,31 @@ This app loads models as GLB meshes, scales and offsets them from their mesh bou
 
 ## 3. Placing partially visible objects
 
-### Problem
+### Status
 
-Objects of which only a small part is visible in the photo — the table (only the front edge of the top) and the chairs (thin strips at the image borders) in the sample — end up much too small in the 3D scene.
+Mostly solved (see "Implemented"). Objects of which only a small part is visible used to end up much too small: the image model redrew the whole object during completion, feature matching (AKAZE) could not find the visible part, and the whole model was squeezed into the small box of that part. Now the visible part keeps a known box through completion:
 
-### Cause
+1. **Object masks** (**Segment Objects**): SAM 2.1 runs in the browser, prompted with each detected box.
+2. **Canvas**: the VLM estimates from the whole photo how far the object extends beyond its box on each side; the crop is placed on a canvas of the image model's output size with that room. Only the object's pixels are drawn, and an OpenAI edit mask locks them. The whole photo with the object marked is given as a reference image.
+3. **Check**: the visible part is searched for near its box by correlation (small shifts and size changes are corrected); if it moved further, the completion is retried, and AKAZE remains the fallback.
+4. **Front alignment** (item 4) makes the model's front view match the completed image, so the visible part's box maps onto the right part of the model.
 
-1. The image model redraws the whole object during completion, so the visible part cannot be found in the completed image by feature matching (AKAZE finds almost no matching keypoints).
-2. The matching then falls back to the box of the whole object (tightBox2d).
-3. The whole 3D model is therefore scaled to fit the small box of the visible part in the photo.
+### Remaining
 
-People, the vase and the cups are mostly visible and are placed correctly.
+- **Small, featureless visible parts**: the table of the sample, visible only as the front of its top, is still placed only roughly. Its box gives little information about where the rest of the table is.
+- **Ideas**: ground contact (furniture stands on the floor, estimated from the people's feet), typical sizes relative to the people, or pixel-aligned generation (Pixal3D, item 1) with registration to the point cloud.
+- **Evaluation** on several photos with partially visible objects, with the same settings, so that the method is not tuned to the sample.
 
-### Ideas
+## 4. Orientation
 
-- **Ask the VLM where the visible part is**: when matching fails, give the crop and the completed image to the vision model (Gemini / OpenAI) and ask for the box of the crop's content in the completed image.
-- **Use the completion canvas**: before completion the crop is placed at a known position on a larger white canvas (`prepareImageForCompletion`). If the image model keeps that layout, the expected position can be derived from it; the result must be checked, because models often re-center the object.
-- **Size priors**: use typical real-world sizes per category (e.g. a dining chair seat at about 0.45 m) relative to the people in the scene to bound the scale.
-- **Silhouette fitting**: render the 3D model from the estimated camera and fit its scale and position so that its silhouette matches the visible mask in the photo.
-- **Pixel-aligned generation**: models such as Pixal3D (item 1) keep the front of the model aligned with the input image, which may make the visible part easier to locate.
+### Status
 
-### Approach (adopted): fit the model by rendering it
+Implemented as front alignment (`services/frontAlignment.ts`): each model is rendered around the vertical axis and compared with its completed image (silhouette IoU, aspect ratio, brightness correlation), turned to the best angle, and with perspective also by the view angle. On renderings with known rotations, a chair was recovered within 3° and a cup within about 12°. This replaced the first version based on Orient Anything.
 
-Render the 3D model from the photo's camera and search for the position, size and rotation (about the vertical axis) at which the rendering does not contradict the photo (analysis-by-synthesis). Which part of the model is visible then follows from the fit. Only physical conditions that hold in any scene are used — no rules per object category.
+### Remaining
 
-Cues from the photo: the mask of the object's visible pixels, the depth map, the masks and depths of the other objects (what is in front), and the image border (beyond it nothing is seen).
-
-Conditions:
-
-1. **Cover the visible part**: every pixel of the object's mask is covered by the rendered model.
-2. **No unexplained absence**: where the model would be drawn inside the image but the photo shows something farther away (e.g. the wall), the placement is wrong. Behind a nearer object and outside the image the model may extend freely.
-3. **Matching depth**: on the visible part, the model's surface depth agrees with the depth map (weighted lightly, because the depth is relative and the camera is assumed; see item 5).
-4. **Semantic correspondence** (later stage): match the same parts (e.g. "top of the backrest", "legs") between the photo and the rendering, with image features (e.g. DINOv2) or by asking a VLM for corresponding points. This works even when the generated model's colors differ from the photo.
-
-Initial values: orientation from Orient Anything, size from fully visible objects (people) and typical sizes, depth from the median of the visible part. Then a coarse search and a local refinement on small renderings (e.g. 128 px) in the browser.
-
-Stages:
-
-1. **Object masks** — **done**: SAM 2.1 in the browser (transformers.js), prompted with each detected box (**Segment Objects**). The masks are also used for each object's depth (Eq. (4)).
-2. **Fitting with conditions 1–3** — **done (first version, experimental, off by default)**. With layout-preserving completion, the paper's box placement already places the partly visible chairs of the sample well, and better than the fit; the fit may be removed unless the alignment of the model to the completed image (render and compare) makes it clearly better. Models whose mask touches the image border are fitted (**Fit Partial Objects**), with a size prior from the VLM's typical real heights scaled by the objects inside the image. On synthetic scenes with known poses, positions were within about 1–12% of the viewing distance. Part correspondence from layout-preserving completion (the visible part keeps a known box in the completed image) now fixes the rotation of barely visible objects. Open points: objects hidden only by other objects (not cut by the border) are not yet selected; gravity (standing on the floor) is not used; fitting runs on the main thread (a few seconds per object).
-3. **Semantic correspondence** (condition 4): compare DINOv2 in the browser with VLM-based correspondence.
-4. **Evaluation** on several photos with partially visible objects, with the same settings, so that the method is not tuned to the sample.
-
-## 4. More accurate orientation estimation
-
-A first version is implemented (see "Implemented" above): Orient Anything on the photo appearance and on a front render of each model, plus a viewing-direction correction. Ways to improve it:
-
-- **Use the depth map**: detect left/right point pairs in 2D, such as a person's shoulders (pose estimation, e.g. MediaPipe), and read their depth from the depth map. The depth difference gives the body's yaw, independently of Orient Anything.
-- **Ask the vision model (VLM)**: give the crop to OpenAI / Gemini and ask, with structured output (e.g. in 15° steps), which direction the subject faces. Useful as a cross-check.
-- **Render and compare** (now used for front alignment: each model is turned to match its completed image, see the README): render the generated model at several yaw angles (e.g. every 10°) and pick the angle whose silhouette or appearance best matches the masked crop. Works for any object but costs more computation.
-- **Orient Anything V2** ([Space](https://huggingface.co/spaces/Viglong/Orient-Anything-V2), ZeroGPU) also returns the relative azimuth of two images and the symmetry of the object (number of directions), which could replace the two separate estimates and the confidence threshold.
-- **Evaluation**: compare against hand-set angles on a set of photos.
+- **Front/back and mirror ambiguities** of nearly symmetric objects (cups, vases, possibly people seen from the side): the silhouettes of opposite angles are almost the same. A small preference for small turns keeps such objects as generated. Brightness or color features with more weight, a VLM check ("is the model facing the same way as the image?"), or **Orient Anything V2** ([Space](https://huggingface.co/spaces/Viglong/Orient-Anything-V2)), which also estimates an object's symmetry, could resolve them.
+- **Rotation about other axes** (tilted objects) is not handled.
 
 ## 5. Camera and depth calibration
 
@@ -145,7 +122,7 @@ Perspective placement (see "Implemented" above) still relies on two assumptions:
 - **Field of view**: 60° horizontal is assumed. It could be read from EXIF or estimated with a model such as MoGe, which estimates camera intrinsics.
 - **Far/near distance ratio**: Depth Anything V2's relative disparity is stretched over the full range for every image, so the ratio is unknown and set with the Depth slider (default 1.5, tuned on the sample photo). A metric depth model (e.g. Depth Anything V2 Metric, Depth Pro, MoGe) would give real distances, or the ratio could be estimated from typical object sizes (a cup, a person's head) in the scene.
 
-The orientation estimation's viewing-direction correction uses the same field of view, so it would benefit as well.
+The view-angle correction of the front alignment uses the same field of view, so it would benefit as well.
 
 ## 6. Better faces of people
 

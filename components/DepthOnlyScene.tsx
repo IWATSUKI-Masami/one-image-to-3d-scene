@@ -4,9 +4,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { removeStrayFragments } from './meshCleanup';
-import { viewAngleDeg } from '../services/orientation';
-import { alignmentYawDeg, MIN_ALIGNMENT_SCORE } from '../services/frontAlignment';
-import { FitRenderer, FitTarget, fitModel, fromWorld, partRegionFromBoxes, poseCost, toWorld, viewYawDeg } from './modelFitting';
+import { alignmentYawDeg, ASSUMED_HFOV_DEG, MIN_ALIGNMENT_SCORE, viewAngleDeg } from '../services/frontAlignment';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { Spinner } from './Spinner';
 import { DetectedObject, Model3D } from '../types';
@@ -53,47 +51,6 @@ const loadSceneMasks = async (models: Model3D[], objects: DetectedObject[]) => {
     return { byModel, byBox };
 };
 
-/** Grid width of the fitting target (the photo is sampled at this resolution) */
-const FIT_WIDTH = 128;
-/** Yaw angles tried when fitting (degrees); the visible part may be too small to tell the orientation */
-const FIT_YAWS = [0, 45, 90, 135, 180, 225, 270, 315];
-
-interface Placement {
-    model: Model3D;
-    mesh: THREE.Object3D;
-    meshContainer: THREE.Group;
-    wholeBoxContainer: THREE.Group;
-    wholeLine: THREE.Object3D;
-    /** Scale of the box-based placement */
-    scale: number;
-    /** Height of the model at scale 1 */
-    unitHeight: number;
-    /** Rotation of the mesh about Y without the estimated orientation (radians) */
-    baseYaw: number;
-}
-
-interface FitReportEntry {
-    label: string;
-    accepted: boolean;
-    costBefore: number;
-    costAfter: number;
-    scaleChange: number;
-    yawDeg: number;
-}
-
-interface FitCacheEntry {
-    accepted: boolean;
-    /** The fit used the visible part's correspondence; the mesh is then fitted without the estimated orientation */
-    usedPart: boolean;
-    pose: { u: number; v: number; depth: number; scale: number; yawDeg: number };
-    report: FitReportEntry;
-}
-
-const median = (values: number[]): number => {
-    const sorted = [...values].sort((a, b) => a - b);
-    return sorted[Math.floor(sorted.length / 2)];
-};
-
 interface DepthOnlySceneProps {
     imageUrl: string;
     depthMapUrl: string;
@@ -101,8 +58,6 @@ interface DepthOnlySceneProps {
     detectedObjects?: DetectedObject[];
     positionedModels?: Model3D[];
     showModels?: boolean;
-    /** Incremented by "Fit Partial Objects" to turn fitting on */
-    fitRequest?: number;
 }
 
 export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
@@ -112,7 +67,6 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     detectedObjects = [],
     positionedModels = [],
     showModels = true,
-    fitRequest = 0,
 }) => {
     const mountRef = useRef<HTMLDivElement>(null);
     const [loading, setLoading] = useState(true);
@@ -124,23 +78,12 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     const [showPointCloud, setShowPointCloud] = useState(false);
     const [showModelsToggle, setShowModelsToggle] = useState(showModels);
     const [showModelBoxes, setShowModelBoxes] = useState(false); // Model Boxes off by default
-    // Rotate models about the vertical axis by their estimated orientation (if estimated)
-    const [applyOrientation, setApplyOrientation] = useState(true);
     // Turn models so that their front view matches their completed image
     const [applyAlignment, setApplyAlignment] = useState(true);
     // Perspective back-projection (see toWorldXY); off = the paper's image-plane placement
     const [perspective, setPerspective] = useState(true);
-    // Fit models cut off by the image border to the photo (needs photo masks and real heights).
-    // Off by default: with layout-preserving completion the box placement is usually better.
-    const [fitPartial, setFitPartial] = useState(false);
-    // "Fit Partial Objects" in the header turns it on
-    useEffect(() => { if (fitRequest) setFitPartial(true); }, [fitRequest]);
-    const [fitStatus, setFitStatus] = useState<string | null>(null);
     // Info panel at the bottom left (can be hidden so that it does not cover the scene)
     const [showInfo, setShowInfo] = useState(true);
-    const [fitReport, setFitReport] = useState<FitReportEntry[]>([]);
-    // Fit results survive rebuilds with the same inputs (fitting takes seconds per model)
-    const fitCacheRef = useRef<Map<string, FitCacheEntry>>(new Map());
     const [showWholeModelBoxes, setShowWholeModelBoxes] = useState(false); // Whole Boxes off by default
     const [transformMode, setTransformMode] = useState<'translate' | 'rotate' | 'scale'>('translate');
     const [selectedModelIndex, setSelectedModelIndex] = useState<number>(-1);
@@ -403,7 +346,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         //   seen from the photo's camera looks like the photo.
         // - Off: the paper's placement, which keeps every object at its size in the
         //   image regardless of its distance (near objects end up magnified).
-        const HFOV_DEG = 60; // assumed, as in the orientation estimation
+        const HFOV_DEG = ASSUMED_HFOV_DEG; // assumed, as in the front alignment's view angle
         const tanHalf = Math.tan((HFOV_DEG / 2) * Math.PI / 180);
         // Vertical field of view (degrees) of the initial "photo camera" view for a canvas
         // of the given aspect: the whole photo frame fits, with a margin for the control
@@ -624,7 +567,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 createBoundingBoxes(depthData, depthRange, masks);
 
                 // Load 3D models and position them
-                loadModels(depthData, depthRange, masks.byModel, masks.byBox);
+                loadModels(depthData, depthRange, masks.byModel);
 
                 // Adjust camera to view the point cloud
                 const box = new THREE.Box3().setFromObject(points);
@@ -705,8 +648,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         const loadModels = (
             depthData: ImageData,
             depthRange: DepthRange,
-            masks: Map<string, ObjectMask>,
-            photoMasks: Map<string, ObjectMask>
+            masks: Map<string, ObjectMask>
         ) => {
             if (disposed || positionedModels.length === 0) return;
 
@@ -733,15 +675,6 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             meshContainersRef.current = [];
 
             const loader = new GLTFLoader();
-
-            // Box-based placements, collected for fitting once every model has loaded
-            const placements: Placement[] = [];
-            let pending = positionedModels.filter(m => m.glbUrl).length;
-            const loaded = () => {
-                if (--pending === 0 && !disposed && thisLoadVersion === loadVersionRef.current) {
-                    fitPartialObjects(placements, depthData, depthRange, photoMasks, thisLoadVersion);
-                }
-            };
 
             positionedModels.forEach((model) => {
                 if (!model.glbUrl) return;
@@ -791,16 +724,11 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     // Front alignment: turn the model so that its front view is the completed image
                     const aligned = applyAlignment && !!model.frontAlignment && model.frontAlignment.score >= MIN_ALIGNMENT_SCORE;
                     if (aligned) mesh.rotation.y += alignmentYawDeg(model.frontAlignment) * Math.PI / 180;
-                    // Rotation about the vertical axis, applied before the bounds are measured,
-                    // so the scale fit uses the box of the rotated model:
-                    // - aligned: the completed image shows the object as seen from the camera, so
-                    //   with perspective it is turned by the view angle (objects off the image center)
-                    // - otherwise: the estimated orientation (Orient Anything), if any
-                    const yawDeg = aligned
-                        ? (perspective ? viewAngleDeg(model.box_2d) : 0)
-                        : (applyOrientation && model.orientation ? model.orientation.yawDeg : 0);
-                    const baseYaw = mesh.rotation.y;
-                    mesh.rotation.y += yawDeg * Math.PI / 180;
+                    // The completed image shows the object as seen from the photo's camera, so an
+                    // aligned model is also turned by the view angle (objects away from the image
+                    // center are seen obliquely). Applied before the bounds are measured, so the
+                    // scale fit uses the box of the rotated model.
+                    if (aligned && perspective) mesh.rotation.y += viewAngleDeg(model.box_2d) * Math.PI / 180;
 
                     // Fix texture color space for proper color rendering
                     mesh.traverse((child) => {
@@ -935,178 +863,10 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     wholeBoxContainer.userData.originalColor = 0xf97316; // Store original orange color
                     wholeBoxContainersRef.current.push(wholeBoxContainer);
                     wholeBoxGroup.add(wholeBoxContainer);
-
-                    placements.push({ model, mesh, meshContainer, wholeBoxContainer, wholeLine, scale, unitHeight: cHeight, baseYaw });
-                    loaded();
                 }, undefined, (error) => {
                     console.error(`Failed to load ${model.label}:`, error);
-                    loaded();
                 });
             });
-        };
-
-        /**
-         * Fit models cut off by the image border to the photo (render-and-fit, see
-         * modelFitting.ts). Their box-based placement squeezes the whole model into
-         * the box of its visible part; the fit instead finds the pose at which the
-         * rendered model covers the visible pixels, hides behind nearer surfaces and
-         * has a plausible size.
-         *
-         * Size prior: the scene's scale (world units per meter) is the median, over
-         * the objects inside the image, of their placed model height divided by their
-         * typical real height (VLM estimate).
-         */
-        const fitPartialObjects = async (
-            placements: Placement[],
-            depthData: ImageData,
-            depthRange: DepthRange,
-            photoMasks: Map<string, ObjectMask>,
-            loadVersion: number,
-        ) => {
-            if (!fitPartial || !perspective) { setFitReport([]); return; }
-            const W = FIT_WIDTH;
-            const H = Math.max(8, Math.round(W / originalAspectRatio));
-            const fitCamera = { hfovDeg: HFOV_DEG, aspect: originalAspectRatio };
-
-            // Observed depth on the grid
-            const observed = new Float32Array(W * H);
-            for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-                const px = Math.min(depthData.width - 1, Math.floor((x + 0.5) / W * depthData.width));
-                const py = Math.min(depthData.height - 1, Math.floor((y + 0.5) / H * depthData.height));
-                observed[y * W + x] = depthFromBrightness(depthData.data[(py * depthData.width + px) * 4], depthRange);
-            }
-
-            interface Item { p: Placement; obj: DetectedObject; mask: Uint8Array; atBorder: boolean }
-            const items: Item[] = [];
-            for (const p of placements) {
-                const obj = detectedObjects.find(o => p.model.box_2d && sameBox(o.box_2d, p.model.box_2d));
-                const photoMask = obj ? photoMasks.get(boxKey(obj.box_2d)) : undefined;
-                if (!obj || !photoMask) continue;
-                // Photo masks cover the whole photo
-                const mask = new Uint8Array(W * H);
-                let atBorder = false;
-                for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-                    const mx = Math.min(photoMask.width - 1, Math.floor((x + 0.5) / W * photoMask.width));
-                    const my = Math.min(photoMask.height - 1, Math.floor((y + 0.5) / H * photoMask.height));
-                    if (photoMask.alpha[my * photoMask.width + mx] > 128) {
-                        mask[y * W + x] = 1;
-                        if (x === 0 || y === 0 || x === W - 1 || y === H - 1) atBorder = true;
-                    }
-                }
-                items.push({ p, obj, mask, atBorder });
-            }
-            const targets = items.filter(i => i.atBorder && i.obj.realHeightM);
-            if (targets.length === 0) { setFitReport([]); return; }
-
-            // World units per meter, from the objects inside the image
-            const ratios = items.filter(i => !i.atBorder && i.obj.realHeightM)
-                .map(i => (i.p.unitHeight * i.p.scale) / i.obj.realHeightM!);
-            if (ratios.length === 0) {
-                setFitStatus('Fit: no object inside the image to measure the scene scale');
-                setFitReport([]);
-                return;
-            }
-            const unitsPerMeter = median(ratios);
-
-            const report: FitReportEntry[] = [];
-            for (let n = 0; n < targets.length; n++) {
-                const { p, obj, mask } = targets[n];
-                if (disposed || loadVersion !== loadVersionRef.current) return;
-                const key = [p.model.id, depthScale, applyOrientation, obj.realHeightM, unitsPerMeter.toFixed(4), obj.mask?.url.length, p.model.originalPartBox2d?.join(',')].join('|');
-                let entry = fitCacheRef.current.get(key);
-                if (!entry) {
-                    setFitStatus(`Fitting ${n + 1} / ${targets.length}: ${obj.label}`);
-                    // Let the status render before the (blocking) search
-                    await new Promise(r => setTimeout(r, 30));
-                    if (disposed || loadVersion !== loadVersionRef.current) return;
-
-                    const target: FitTarget = { width: W, height: H, mask, depth: observed };
-                    let count = 0, su = 0, sv = 0;
-                    const depths: number[] = [];
-                    for (let i = 0; i < W * H; i++) if (mask[i]) {
-                        count++; su += (i % W + 0.5) / W; sv += (Math.floor(i / W) + 0.5) / H; depths.push(observed[i]);
-                    }
-                    const priorScale = unitsPerMeter * obj.realHeightM! / p.unitHeight;
-                    const scalePrior = { scale: priorScale, sigmaLog: Math.log(1.5) };
-                    const renderer = new FitRenderer(W, H, fitCamera);
-                    try {
-                        // Part correspondence: the visible part's box in the completed image (from
-                        // which the model was generated) tells which part of the model is visible.
-                        // The generator's front is the completed image's view, so the model is fitted
-                        // without the estimated orientation, with its yaw near the photo's view direction.
-                        const clone = p.mesh.clone();
-                        const part = p.model.originalPartBox2d && p.model.tightBox2d;
-                        if (part) clone.rotation.y = p.baseYaw;
-                        const region = part ? partRegionFromBoxes(clone, p.model.tightBox2d!, p.model.originalPartBox2d!) : null;
-                        if (!region) clone.rotation.y = p.mesh.rotation.y;
-                        renderer.setObject(clone);
-                        renderer.setPartRegion(region);
-                        const u0 = su / count;
-                        const view = viewYawDeg(u0, fitCamera);
-                        const yawPrior = region ? { yawDeg: view, sigmaDeg: 25 } : undefined;
-                        // Cost of the box-based placement, for comparison (its yaw relative to the fitted mesh)
-                        const currentYaw = region ? (p.mesh.rotation.y - p.baseYaw) * 180 / Math.PI : 0;
-                        const current = { ...fromWorld(p.meshContainer.position, fitCamera), scale: p.scale, yawDeg: currentYaw };
-                        const before = poseCost(renderer, target, current, scalePrior, yawPrior).cost;
-                        const result = fitModel(renderer, target, {
-                            initial: { u: u0, v: sv / count, depth: median(depths), scale: priorScale, yawDeg: region ? view : 0 },
-                            scalePrior,
-                            yawPrior,
-                            yawCandidates: region ? [-40, -20, 0, 20, 40].map(d => view + d) : FIT_YAWS,
-                        });
-                        const accepted = result.cost < before * 0.9;
-                        entry = {
-                            accepted,
-                            usedPart: !!region,
-                            pose: result.pose,
-                            report: {
-                                label: obj.label, accepted, costBefore: before, costAfter: result.cost,
-                                scaleChange: result.pose.scale / p.scale, yawDeg: result.pose.yawDeg,
-                            },
-                        };
-                        console.log(`[Fit] ${obj.label}: cost ${before.toFixed(3)} -> ${result.cost.toFixed(3)}${region ? ' (with part correspondence)' : ''}`, result.terms, accepted ? 'accepted' : 'kept box placement');
-                    } catch (e) {
-                        console.error(`[Fit] ${obj.label} failed:`, e);
-                    } finally {
-                        renderer.dispose();
-                    }
-                    if (entry) fitCacheRef.current.set(key, entry);
-                }
-                if (!entry) continue;
-                report.push(entry.report);
-                if (entry.accepted) applyFit(p, entry, fitCamera);
-            }
-            setFitStatus(null);
-            setFitReport(report);
-        };
-
-        /** Place a model at a fitted pose: container (position, scale) > yaw group > mesh */
-        const applyFit = (p: Placement, entry: FitCacheEntry, fitCamera: { hfovDeg: number; aspect: number }) => {
-            const { pose } = entry;
-            const position = toWorld(pose.u, pose.v, pose.depth, fitCamera);
-            if (entry.usedPart) {
-                // Fitted without the estimated orientation: reset it and redraw the whole-model box
-                p.mesh.rotation.y = p.baseYaw;
-                p.meshContainer.remove(p.mesh);
-                p.mesh.updateMatrixWorld(true);
-                const b = new THREE.Box3().setFromObject(p.mesh, true);
-                p.meshContainer.add(p.mesh);
-                const size = b.getSize(new THREE.Vector3());
-                const line = p.wholeLine as THREE.LineSegments;
-                line.geometry.dispose();
-                line.geometry = new THREE.EdgesGeometry(new THREE.BoxGeometry(size.x, size.y, size.z * 1.01));
-                b.getCenter(line.position);
-            }
-            for (const [container, child] of [[p.meshContainer, p.mesh], [p.wholeBoxContainer, p.wholeLine]] as [THREE.Object3D, THREE.Object3D][]) {
-                const yawGroup = new THREE.Group();
-                yawGroup.rotation.y = pose.yawDeg * Math.PI / 180;
-                yawGroup.userData = { ...child.userData };
-                container.remove(child);
-                yawGroup.add(child);
-                container.add(yawGroup);
-                container.position.copy(position);
-                container.scale.setScalar(pose.scale);
-            }
         };
 
         loadPointCloud();
@@ -1253,7 +1013,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             renderer.forceContextLoss();
             sceneRef.current = null;
         };
-    }, [imageUrl, depthMapUrl, originalAspectRatio, depthScale, detectedObjects, positionedModels, contextGeneration, applyOrientation, applyAlignment, perspective, fitPartial]);
+    }, [imageUrl, depthMapUrl, originalAspectRatio, depthScale, detectedObjects, positionedModels, contextGeneration, applyAlignment, perspective]);
 
     // Helper function to load image
     const loadImageAsync = (url: string): Promise<HTMLImageElement> => {
@@ -1352,36 +1112,6 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                             />
                             <label htmlFor="applyAlignment" className="text-xs text-slate-300">
                                 Align
-                            </label>
-                        </div>
-                    )}
-                    {/* Orientation (only when estimated) */}
-                    {positionedModels.some(m => m.orientation) && (
-                        <div className="flex items-center gap-1" title="Rotate models by their estimated orientation">
-                            <input
-                                type="checkbox"
-                                id="applyOrientation"
-                                checked={applyOrientation}
-                                onChange={(e) => setApplyOrientation(e.target.checked)}
-                                className="w-3 h-3 text-indigo-500 bg-slate-700 border-slate-600 rounded focus:ring-indigo-500"
-                            />
-                            <label htmlFor="applyOrientation" className="text-xs text-slate-300">
-                                Orientation
-                            </label>
-                        </div>
-                    )}
-                    {/* Fit partial objects (only when masks and real heights exist) */}
-                    {perspective && detectedObjects.some(o => o.mask && o.realHeightM) && (
-                        <div className="flex items-center gap-1" title="Fit models cut off by the image border to the photo: they cover their visible pixels, hide behind nearer objects and keep a plausible size">
-                            <input
-                                type="checkbox"
-                                id="fitPartial"
-                                checked={fitPartial}
-                                onChange={(e) => setFitPartial(e.target.checked)}
-                                className="w-3 h-3 text-emerald-500 bg-slate-700 border-slate-600 rounded focus:ring-emerald-500"
-                            />
-                            <label htmlFor="fitPartial" className="text-xs text-slate-300">
-                                Fit Partial
                             </label>
                         </div>
                     )}
@@ -1588,13 +1318,6 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 </div>
                 <p>• Resolution: 256 × {Math.round(256 / originalAspectRatio)} points</p>
                 <p>• Drag to rotate, scroll to zoom</p>
-                {fitStatus && <p className="text-emerald-300">• {fitStatus}</p>}
-                {fitPartial && perspective && fitReport.map(r => (
-                    <p key={r.label} className={r.accepted ? 'text-emerald-300' : 'text-slate-400'}
-                        title={`cost ${r.costBefore.toFixed(3)} → ${r.costAfter.toFixed(3)}`}>
-                        • {r.label}: {r.accepted ? `fitted (size ×${r.scaleChange.toFixed(1)}, yaw ${Math.round(r.yawDeg)}°)` : 'box placement kept'}
-                    </p>
-                ))}
                 {detectedObjects.length > 0 && (
                     <p>• {detectedObjects.length} bounding box{detectedObjects.length !== 1 ? 'es' : ''}</p>
                 )}

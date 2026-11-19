@@ -20,7 +20,6 @@ const SPACE_FIELDS: { key: keyof HFSpaces; label: string }[] = [
   { key: 'depth', label: 'Depth estimation' },
   { key: 'trellis', label: 'TRELLIS.2' },
   { key: 'hunyuan3d', label: 'Hunyuan3D-2.1' },
-  { key: 'orient', label: 'Orientation (Orient Anything)' },
 ];
 
 const MODEL_FIELDS: { key: keyof AIModels; label: string; provider: AIProvider; role: 'vision' | 'image' }[] = [

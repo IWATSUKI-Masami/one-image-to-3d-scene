@@ -34,7 +34,6 @@ The official Spaces run on ZeroGPU and need no setup, but each user has a daily 
 | BRIA RMBG 3.0 (`briaai/BRIA-RMBG-3.0`) | **L40S** (48 GB) or larger | Accept the terms of `briaai/RMBG-3.0` and `briaai/Fibo-2.0-edit-turbo`; secret `HF_TOKEN` |
 | BRIA RMBG 2.0 (`briaai/BRIA-RMBG-2.0`) | **T4** | Accept the terms of `briaai/RMBG-2.0`; secret `HF_TOKEN` |
 | Depth Anything V2 (`depth-anything/Depth-Anything-V2`) | **T4** | Nothing |
-| Orient Anything (`Viglong/Orient-Anything`) | CPU basic (free) | Nothing. The official Space runs on CPU and has no ZeroGPU quota; duplicate it only if it is stopped or busy |
 | TRELLIS.2 (`microsoft/TRELLIS.2`) | **A100** | Nothing |
 | Hunyuan3D-2.1 (`tencent/Hunyuan3D-2.1`) | **A100** | File changes (below) |
 

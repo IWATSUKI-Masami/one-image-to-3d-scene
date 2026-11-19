@@ -20,18 +20,17 @@ const loadImage = (src: string): Promise<HTMLImageElement> => new Promise((resol
   img.onerror = () => reject(new Error('Failed to load image'));
   img.src = src;
 });
-import { detectObjectsInImage, generateCompletion, verifyCompletion, estimateObjectHeights, estimateHiddenExtent, HiddenExtent } from './services/aiService';
+import { detectObjectsInImage, generateCompletion, verifyCompletion, estimateHiddenExtent, HiddenExtent } from './services/aiService';
 
 /** Face styles for the completion of people */
 const FACE_STYLE_OPTIONS = (Object.entries(FACE_STYLE_LABELS) as [FaceStyle, string][])
   .map(([value, label]) => ({ value, label }));
 const FACE_STYLE_HINT = 'Faces of people in completion. Calm: sharp face, relaxed expression with the mouth closed (open mouths and teeth look uncanny in 3D). Redraw: sharp face, same expression. Mannequin: smooth face without painted features. As in photo: copied as it is.';
-import { loadAISettings, saveAISettings, hasRequiredKeys, bgRemovalSpace, DEFAULT_SPACES, PROVIDER_LABELS, FACE_STYLE_LABELS } from './services/ai/models';
-import { estimateModelOrientation, MIN_ORIENTATION_CONFIDENCE } from './services/orientation';
+import { loadAISettings, saveAISettings, hasRequiredKeys, bgRemovalSpace, PROVIDER_LABELS, FACE_STYLE_LABELS } from './services/ai/models';
 import { AISettingsDialog } from './components/AISettingsDialog';
 import { cropObjectsFromImage, removeBackgroundWithRembg, findBestMatchPosition, hasTransparentBackground, generate3DModelWithHunyuan3D, generate3DModelWithTrellis, blobUrlToDataUrl, dataUrlToBlobUrl, generateDepthMap, prepareImageForCompletion, calculateTightBoundingBox, prepareCompletionCanvas, verifyPartPlacement, makeReferenceImage } from './utils';
-import { DetectedObject, CroppedObject, Model3D, ModelOrientation, ModelProvider, ProjectArchive, AISettings, FaceStyle, CompletionInfo, PartBoxSource } from './types';
-import { Scan, Sparkles, AlertCircle, Layers, Image as ImageIcon, User, Box, ArrowLeft, Upload, Plug, Wand2, RefreshCw, Star, Download, MonitorPlay, Cuboid, Save, FolderOpen, Trash2, Compass } from 'lucide-react';
+import { DetectedObject, CroppedObject, Model3D, ModelProvider, ProjectArchive, AISettings, FaceStyle, CompletionInfo, PartBoxSource } from './types';
+import { Scan, Sparkles, AlertCircle, Layers, Image as ImageIcon, User, Box, ArrowLeft, Upload, Plug, Wand2, RefreshCw, Star, Download, MonitorPlay, Cuboid, Save, FolderOpen, Trash2 } from 'lucide-react';
 
 type AppMode = 'landing' | 'analyze' | 'batch-remove' | 'complete-body' | 'generate-3d';
 
@@ -53,12 +52,8 @@ const App: React.FC = () => {
   const [detectedObjects, setDetectedObjects] = useState<DetectedObject[]>([]);
   const [croppedImages, setCroppedImages] = useState<CroppedObject[]>([]);
   const [error, setError] = useState<string | null>(null);
-  // Progress of the orientation estimation, e.g. "3 / 8" (null when idle)
-  const [orientationProgress, setOrientationProgress] = useState<string | null>(null);
   const [segmentationProgress, setSegmentationProgress] = useState<string | null>(null);
   const [showMasks, setShowMasks] = useState(true);
-  const [fitPrepProgress, setFitPrepProgress] = useState<string | null>(null);
-  const [fitRequest, setFitRequest] = useState(0);
 
   // Depth Map State
   const [depthMapUrl, setDepthMapUrl] = useState<string | null>(null);
@@ -411,11 +406,6 @@ const App: React.FC = () => {
 
 
 
-  /**
-   * Estimate the rotation about the vertical axis of the models in the scene
-   * (Orient Anything on the photo appearance and on a front render of the model).
-   * All results are applied at once, so the scene is rebuilt only once.
-   */
   /** Segment the visible part of each detected object in the photo (SAM 2.1 in the browser) */
   const handleSegmentObjects = async (): Promise<DetectedObject[] | null> => {
     if (!previewUrl || detectedObjects.length === 0 || segmentationProgress) return null;
@@ -439,73 +429,6 @@ const App: React.FC = () => {
       return null;
     } finally {
       setSegmentationProgress(null);
-    }
-  };
-
-  /**
-   * Prepare fitting of partially visible objects: photo masks (SAM 2.1) and the
-   * typical real height of each object (VLM). The 3D scene then fits the models
-   * cut off by the image border ("Fit Partial" in the scene).
-   */
-  const handleFitPartialObjects = async () => {
-    if (!previewUrl || detectedObjects.length === 0 || fitPrepProgress) return;
-    setError(null);
-    let objects = detectedObjects;
-    try {
-      if (!objects.every(o => o.mask)) {
-        setFitPrepProgress('segmenting');
-        const segmented = await handleSegmentObjects();
-        if (!segmented) return;
-        objects = segmented;
-      }
-      if (!objects.every(o => o.realHeightM)) {
-        setFitPrepProgress('estimating sizes');
-        const t0 = performance.now();
-        const heights = await estimateObjectHeights(previewUrl, objects, aiSettings);
-        setProcessingTimes(prev => new Map(prev).set('Object sizes', (performance.now() - t0) / 1000));
-        objects = objects.map((o, i) => (heights[i] ? { ...o, realHeightM: heights[i] } : o));
-        setDetectedObjects(objects);
-      }
-      // Turn on "Fit Partial" in the scene
-      setFitRequest(n => n + 1);
-    } catch (e: any) {
-      console.error('Preparing the fit failed:', e);
-      setError(`Fit Partial Objects failed: ${e?.message || e}`);
-    } finally {
-      setFitPrepProgress(null);
-    }
-  };
-
-  const handleEstimateOrientation = async () => {
-    const targets = positionedModels;
-    if (targets.length === 0 || orientationProgress) return;
-    const space = aiSettings.spaces.orient.trim() || DEFAULT_SPACES.orient;
-    const results = new Map<string, ModelOrientation>();
-    const failures: string[] = [];
-    let done = 0;
-    setOrientationProgress(`0 / ${targets.length}`);
-    const start = performance.now();
-    // Two at a time: the Space has a queue, and each model needs two requests
-    const queue = [...targets];
-    const worker = async () => {
-      for (let model = queue.shift(); model; model = queue.shift()) {
-        const t0 = performance.now();
-        try {
-          results.set(model.id, await estimateModelOrientation(model, space, hfToken));
-          setProcessingTimes(prev => new Map(prev).set(`Orientation: ${model.label}`, (performance.now() - t0) / 1000));
-        } catch (e) {
-          console.error(`Orientation estimation failed for ${model.label}:`, e);
-          failures.push(model.label);
-        }
-        setOrientationProgress(`${++done} / ${targets.length}`);
-      }
-    };
-    await Promise.all([worker(), worker()]);
-    setModels3D(prev => prev.map(m => (results.has(m.id) ? { ...m, orientation: results.get(m.id) } : m)));
-    setProcessingTimes(prev => new Map(prev).set('Orientation (all)', (performance.now() - start) / 1000));
-    setOrientationProgress(null);
-    if (failures.length > 0) {
-      setError(`Orientation estimation failed for: ${failures.join(', ')} (${space}). See the console for details.`);
     }
   };
 
@@ -2177,24 +2100,6 @@ const App: React.FC = () => {
                           </h3>
                           <div className="flex items-center gap-2">
                           <button
-                            onClick={handleFitPartialObjects}
-                            disabled={!!fitPrepProgress || !!segmentationProgress || !hasAIKeys}
-                            title={!hasAIKeys ? 'Set the API keys in AI Settings first' : 'Fit objects cut off by the image border to the photo: segments the objects (SAM 2.1) if needed and estimates their real sizes (VLM); the scene then fits the models'}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-emerald-700 border border-emerald-200 bg-white hover:bg-emerald-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                          >
-                            {fitPrepProgress || segmentationProgress ? <Spinner size={14} /> : <Layers size={14} />}
-                            {fitPrepProgress ? `Fit: ${segmentationProgress ?? fitPrepProgress}` : 'Fit Partial Objects'}
-                          </button>
-                          <button
-                            onClick={handleEstimateOrientation}
-                            disabled={!!orientationProgress || positionedModels.length === 0}
-                            title="Estimate which way each person or object faces (Orient Anything) and rotate the models about the vertical axis"
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-indigo-700 border border-indigo-200 bg-white hover:bg-indigo-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                          >
-                            <Compass size={14} className={orientationProgress ? 'animate-spin' : ''} />
-                            {orientationProgress ? `Estimating orientation ${orientationProgress}` : 'Estimate Orientation'}
-                          </button>
-                          <button
                             onClick={() => {
                               if (depthMapUrl) URL.revokeObjectURL(depthMapUrl);
                               setDepthMapUrl(null);
@@ -2210,23 +2115,6 @@ const App: React.FC = () => {
                         <p className="text-sm text-slate-600 mb-4">
                           Interactive 3D scene with models positioned using depth map information.
                         </p>
-                        {positionedModels.some(m => m.orientation) && (
-                          <div className="flex flex-wrap gap-1.5 mb-4 text-xs">
-                            {positionedModels.filter(m => m.orientation).map(m => {
-                              const o = m.orientation!;
-                              const meaningful = o.confidence >= MIN_ORIENTATION_CONFIDENCE;
-                              return (
-                                <span
-                                  key={m.id}
-                                  title={`Photo azimuth ${o.photoAzimuth}° (confidence ${o.confidence}), model front azimuth ${o.modelAzimuth}° (confidence ${o.modelConfidence}), view angle ${o.viewAngle.toFixed(1)}°`}
-                                  className={`px-2 py-0.5 rounded-full border ${meaningful ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-slate-50 border-slate-200 text-slate-400'}`}
-                                >
-                                  {m.label}: {meaningful ? `${o.yawDeg > 0 ? '+' : ''}${Math.round(o.yawDeg)}°` : 'no clear front'}
-                                </span>
-                              );
-                            })}
-                          </div>
-                        )}
                         <div className="min-h-[600px]">
                           <DepthOnlyScene
                             key={`${depthMapUrl}-${models3D.filter(m => selectedItemsPerTab['3d'].has(m.id)).map(m => m.id).join('-')}`}
@@ -2236,7 +2124,6 @@ const App: React.FC = () => {
                             detectedObjects={detectedObjects}
                             positionedModels={positionedModels}
                             showModels={true}
-                            fitRequest={fitRequest}
                           />
                         </div>
                       </div>

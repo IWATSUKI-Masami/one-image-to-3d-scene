@@ -28,15 +28,15 @@ The sample photo [`samples/two-people-at-table.webp`](samples/two-people-at-tabl
 | 1 | Object detection | Vision-Language Model (OpenAI or Gemini) returns bounding boxes, labels and detailed descriptions (pose, action, clothing) |
 | 2 | Cropping | HTML5 Canvas API |
 | 3 | Image completion | Generative AI outpainting (OpenAI or Gemini image generation) restores occluded / cut-off parts while preserving pose. OpenAI returns a transparent background; Gemini completions go through background removal (BRIA RMBG 2.0 or 3.0) |
-| 4 | Feature matching | AKAZE (OpenCV.js) + Lowe's ratio test + RANSAC fit of a scale + translation, searched at several image scales, to localize the original crop inside the completed image (unreliable matches fall back to the whole object) |
+| 4 | Locating the visible part | The crop keeps a known box through completion (layout-preserving canvas, OpenAI edit mask), checked and corrected by correlation near that box; AKAZE (OpenCV.js) + Lowe's ratio test + RANSAC fit of a scale + translation is the fallback when the image model moved it |
 | 5 | Depth estimation | Depth Anything V2; object depth is the median depth inside the object mask |
 | 6 | 3D generation | TRELLIS.2 or Hunyuan3D-2.1 (Hugging Face Spaces) → textured GLB |
 | 7 | Scene composition | Three.js; models are aligned to point-cloud bounding boxes (PC Box) built from the depth map. By default the boxes are back-projected with perspective (see Usage) |
-| 8 | Orientation (optional) | [Orient Anything](https://huggingface.co/spaces/Viglong/Orient-Anything) estimates which way each person or object faces; models are rotated about the vertical axis |
+| 8 | Front alignment | Each model is rendered around the vertical axis and compared with its completed image (silhouette, aspect ratio, brightness), then turned to match it and by the view angle, so it faces the camera as in the photo |
 
 ### Walkthrough (sample photo)
 
-Results with OpenAI (detection and completion; one chair completed with Gemini) and TRELLIS.2 (3D generation). People were completed with the **Redraw** face style. The scene uses perspective placement (far/near ratio 1.5) and orientation estimation, and shows the people, vase and cups (the partly visible chairs and table are hidden; see the roadmap).
+Results with OpenAI (detection and completion; the right chair in the completion image was completed with Gemini) and TRELLIS.2 (3D generation), on the current version. People were completed with the **Calm** face style. The scene uses perspective placement (far/near ratio 1.5), the paper's box placement with the visible-part boxes kept through completion, and front alignment of each model to its completed image.
 
 <table>
   <tr>
@@ -52,7 +52,7 @@ Results with OpenAI (detection and completion; one chair completed with Gemini) 
     <td width="50%"><img src="docs/images/step5-depth-map.webp" alt="Depth map"><br><sub><b>5. Depth estimation</b> — Depth Anything V2 (brighter = nearer)</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/scene-result.webp" alt="3D scene"><br><sub><b>7–8. Scene composition and orientation</b> — people, vase and cups placed with perspective at the depth of their PC Boxes and rotated by their estimated orientation (woman +34°, man −23°: the two turn towards each other)</sub></td>
+    <td width="50%"><img src="docs/images/scene-result.webp" alt="3D scene"><br><sub><b>7. Scene composition</b> — all 8 objects placed with perspective at the depth of their PC Boxes; the chairs, of which only strips of the backrests are visible, stand behind the people. The table, visible only as the front of its top, is still placed only roughly</sub></td>
     <td width="50%"></td>
   </tr>
 </table>
@@ -130,7 +130,6 @@ Background removal, depth estimation and 3D generation call these Spaces. They c
 | Background removal (RMBG 3.0 / 2.0) | `briaai/BRIA-RMBG-3.0`, `briaai/BRIA-RMBG-2.0` |
 | Depth estimation | `depth-anything/Depth-Anything-V2` |
 | 3D generation | `microsoft/TRELLIS.2`, `tencent/Hunyuan3D-2.1` |
-| Orientation estimation | `Viglong/Orient-Anything` (runs on CPU; no ZeroGPU quota) |
 
 The official Spaces run on ZeroGPU, which has a daily quota per user (larger with Hugging Face PRO). To process many objects, duplicate a Space to your account (**Duplicate this Space** on its page), give it a dedicated GPU, and enter its ID. Dedicated GPUs are billed per hour — pause the Space when you are done.
 
@@ -146,30 +145,21 @@ The official Spaces run on ZeroGPU, which has a daily quota per user (larger wit
 ## Usage
 
 1. **Detect & Crop** — upload an image and analyze the scene. Detected objects are cropped automatically.
-   - **Segment Objects** (optional, above the photo) — segments the visible pixels of each detected object with [SAM 2.1](https://huggingface.co/onnx-community/sam2.1-hiera-small-ONNX), prompted with its box. It runs in the browser (transformers.js; WebGPU if available, otherwise WebAssembly) and needs no key or token; the model (about 70–90 MB) is downloaded from Hugging Face on first use and cached by the browser. The masks are shown over the photo (**Masks** checkbox), saved with the project, and used for the depth of each object (Eq. (4)) instead of the completed image's alpha. They are the first step towards fitting partially visible objects (see the roadmap).
+   - **Segment Objects** (optional, above the photo) — segments the visible pixels of each detected object with [SAM 2.1](https://huggingface.co/onnx-community/sam2.1-hiera-small-ONNX), prompted with its box. It runs in the browser (transformers.js; WebGPU if available, otherwise WebAssembly) and needs no key or token; the model (about 70–90 MB) is downloaded from Hugging Face on first use and cached by the browser. The masks are shown over the photo (**Masks** checkbox), saved with the project, and used for the depth of each object (Eq. (4)) instead of the completed image's alpha. They also let the completion draw and lock only the object's pixels (step 2).
 2. **Image Completion** — complete the cropped objects (full body for people, missing parts for objects). The background is removed after completion. The VLM first estimates, from the whole photo, how far each object extends beyond its box on each side; the crop is then placed on a canvas of the image model's output size with room for the hidden parts. If the photo was segmented (**Segment Objects**), only the object's pixels are drawn and, with OpenAI, an edit mask keeps them unchanged. When the visible part stays in place (checked by correlation near its box, which also corrects small shifts and size changes by the image model), its box in the completed image is known without feature matching (card caption "Part: kept"); otherwise AKAZE matching is used ("Part: matched"). Each completion is checked for cut-off parts and unnatural proportions (e.g. shortened legs) and retried up to twice on a larger canvas; a completion whose visible part moved is retried on the same canvas (best of up to three attempts). The image model also receives the whole photo with the object marked by a red box, as a reference for its appearance and viewpoint. **Face** sets how faces of people are drawn: **Calm** (default; sharp face with a relaxed, closed-mouth expression, since open mouths and teeth look uncanny in 3D), **Redraw** (sharp face, same expression), **Mannequin** (smooth face without painted features) or **As in photo**. Each completed card shows the provider and face style used (e.g. "OpenAI · Face: Calm"). People are always generated in 3D at a higher resolution.
 3. **3D Generation** — convert the completed images into 3D models. The generator does not always keep the viewpoint of the completed image (e.g. a chair seen obliquely may come back facing another way), so each model is then rendered at angles around the vertical axis and compared with its completed image (silhouette overlap, aspect ratio, brightness); the best angle turns the model so that its front view matches the image (front alignment). The card viewer, the visible-part box and the scene use it; the **Align** checkbox in the scene turns it off.
 4. **3D Scene** — generate the depth map and view the assembled scene. Positions can be adjusted with the transform controls, and the scene can be exported as glTF/GLB.
    - **Perspective** (checkbox, on by default): the point cloud, the PC Boxes and the models are back-projected through a pinhole camera at the origin with an assumed 60° horizontal field of view, and the depth map is read as disparity (inverse depth), which is what Depth Anything V2 outputs. Depth Anything V2 stretches its output over the full range for every image, so the ratio between the farthest and the nearest point is unknown: with Perspective on, the **Depth** slider sets this far/near ratio (default 1.5, chosen so that in the sample photo a cup's size relative to a person's head is realistic; use larger values for scenes with more depth). Objects then keep their real relative size: a cup near the camera is no longer as large as a person further away, and the scene seen from its initial camera (the photo's camera) looks like the photo. **Uncheck it to reproduce the paper's placement**, which keeps every object at its size in the image and maps brightness linearly to depth, so objects near the camera end up magnified.
-5. **Estimate Orientation** (optional, in the 3D Scene header) — estimates which way each person or object faces and rotates the models about the vertical axis. The angle of each model is shown under the header; objects without a clear front (e.g. a vase) are not rotated. The **Orientation** checkbox in the scene turns the rotation on and off. It takes about 10–20 seconds per model.
-
-   How it works: [Orient Anything](https://huggingface.co/spaces/Viglong/Orient-Anything) estimates the viewer's azimuth around the object for the completed image (the object as seen in the photo) and for a front render of the 3D model, so each generator's idea of "front" cancels out. The rotation is `view angle + azimuth(model) − azimuth(photo)`, where the view angle corrects for objects away from the image center (assuming a 60° horizontal field of view).
-
-6. **Fit Partial Objects** (optional, experimental, in the 3D Scene header) — an alternative placement for objects that are cut off by the image border (e.g. chairs at the edges, a table whose front is outside the photo). It segments the objects first if needed (SAM 2.1) and asks the VLM for the typical real height of each object; the scene then fits every model whose mask touches the image border and shows the result in the info panel. The **Fit Partial** checkbox in the scene (off by default; the button turns it on) switches between the fit and the box placement. With layout-preserving completion (step 2) the box placement already places such objects well and is usually better, because the fit fails when the 3D generator turns the model away from the completed image's view. Fitting takes a few seconds per object.
-
-   How it works: the model is rendered from the photo's camera, and its position, size and rotation about the vertical axis are searched so that the rendering does not contradict the photo — it covers the object's visible pixels, does not appear where the photo shows something farther away (it may extend behind nearer objects and outside the image), agrees with the depth map on the visible part, and keeps a plausible size (the scene's scale is measured on the objects inside the image, using their real heights). When the visible part's box in the completed image is known, the fit also requires the mask to be covered by that part of the model and keeps the rotation near the photo's view direction (the generator's front is the completed image's view); this fixes the rotation of barely visible objects such as a chair seen only as a strip of its backrest. The fit is used only if it explains the photo better than the box placement.
-
 Projects (images, depth map, models and scene layout) can be saved and loaded.
 
 ## Project structure
 
 ```
 ├── App.tsx                 # Main application (UI and workflow)
-├── components/             # React components (3D viewers, cards, overlays), model fitting (modelFitting.ts)
+├── components/             # React components (3D viewers, cards, overlays)
 ├── services/
 │   ├── aiService.ts        # Prompts for detection, completion and checks
 │   ├── segmentation.ts     # Object masks in the photo (SAM 2.1 in the browser)
-│   ├── orientation.ts      # Orientation estimation (Orient Anything)
 │   ├── frontAlignment.ts   # Turning each model to match its completed image (render and compare)
 │   └── ai/                 # Provider layer (OpenAI / Gemini) and default models
 ├── utils.ts                # Cropping, AKAZE matching, depth, 3D generation APIs
@@ -180,7 +170,7 @@ Projects (images, depth map, models and scene layout) can be saved and loaded.
 
 ## Future work
 
-Planned: [Pixal3D](https://huggingface.co/TencentARC/Pixal3D) (pixel-aligned image-to-3D) as a 3D generator, local 3D generation with [ComfyUI](https://www.comfy.org/) on your own GPU, better placement of objects that are only partly visible (e.g. table edges and chairs at the image border), more accurate orientation estimation (a first version based on Orient Anything is implemented), calibration of the camera's field of view and the far/near depth ratio (perspective placement currently assumes a 60° field of view), and more natural faces of people. See [docs/roadmap.md](docs/roadmap.md).
+Planned: [Pixal3D](https://huggingface.co/TencentARC/Pixal3D) (pixel-aligned image-to-3D) as a 3D generator, local 3D generation with [ComfyUI](https://www.comfy.org/) on your own GPU, better placement of objects of which only a small, featureless part is visible (e.g. the front edge of a table top), handling front/back ambiguities of nearly symmetric objects in the front alignment, calibration of the camera's field of view and the far/near depth ratio (perspective placement currently assumes a 60° field of view), and more natural faces of people. See [docs/roadmap.md](docs/roadmap.md).
 
 ## Citation
 
@@ -203,7 +193,7 @@ If you use this software in your research, please cite:
 
 [MIT](LICENSE)
 
-This repository contains only the application code. The external models and APIs it calls (Gemini, OpenAI, TRELLIS.2, Hunyuan3D-2.1, Depth Anything V2, BRIA RMBG 3.0 / 2.0, Orient Anything, SAM 2.1, etc.) are governed by their own licenses and terms of use; check them before use, especially for commercial purposes.
+This repository contains only the application code. The external models and APIs it calls (Gemini, OpenAI, TRELLIS.2, Hunyuan3D-2.1, Depth Anything V2, BRIA RMBG 3.0 / 2.0, SAM 2.1, etc.) are governed by their own licenses and terms of use; check them before use, especially for commercial purposes.
 
 In particular, the [Tencent Hunyuan 3D 2.1 Community License](https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1/blob/main/LICENSE) does not apply in the European Union, the United Kingdom and South Korea; use TRELLIS.2 (MIT) there.
 

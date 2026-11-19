@@ -34,7 +34,6 @@
 | BRIA RMBG 3.0（`briaai/BRIA-RMBG-3.0`） | **L40S**（48GB）以上 | `briaai/RMBG-3.0` と `briaai/Fibo-2.0-edit-turbo` の利用規約に同意。シークレット `HF_TOKEN` |
 | BRIA RMBG 2.0（`briaai/BRIA-RMBG-2.0`） | **T4** | `briaai/RMBG-2.0` の利用規約に同意。シークレット `HF_TOKEN` |
 | Depth Anything V2（`depth-anything/Depth-Anything-V2`） | **T4** | なし |
-| Orient Anything（`Viglong/Orient-Anything`） | CPU basic（無料） | なし。公式の Space は CPU で動いており、ZeroGPU の利用枠もない。停止中や混雑時だけ複製する |
 | TRELLIS.2（`microsoft/TRELLIS.2`） | **A100** | なし |
 | Hunyuan3D-2.1（`tencent/Hunyuan3D-2.1`） | **A100** | ファイルの修正が必要（下記） |
 
