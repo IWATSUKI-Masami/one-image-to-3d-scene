@@ -99,11 +99,12 @@ const parseJson = <T>(text: string | undefined | null, provider: string): T => {
 
 export const analyzeImageJson = async <T>(
   settings: AISettings,
-  image: ImageData,
+  image: ImageData | null,
   prompt: string,
   schema: JsonSchema,
   options: AnalyzeOptions,
 ): Promise<T> => {
+  // `image` may be null for text-only tasks (e.g. translating annotations)
   const provider = settings.visionProvider;
   const apiKey = requireKey(settings, provider);
 
@@ -113,7 +114,7 @@ export const analyzeImageJson = async <T>(
       model: settings.models.geminiVision,
       contents: {
         parts: [
-          { inlineData: { mimeType: image.mimeType, data: image.base64 } },
+          ...(image ? [{ inlineData: { mimeType: image.mimeType, data: image.base64 } }] : []),
           { text: prompt },
         ],
       },
@@ -134,8 +135,8 @@ export const analyzeImageJson = async <T>(
     input: [{
       role: 'user',
       content: [
-        { type: 'input_image', image_url: `data:${image.mimeType};base64,${image.base64}`, detail: 'high' },
-        { type: 'input_text', text: prompt },
+        ...(image ? [{ type: 'input_image' as const, image_url: `data:${image.mimeType};base64,${image.base64}`, detail: 'high' as const }] : []),
+        { type: 'input_text' as const, text: prompt },
       ],
     }],
     text: {

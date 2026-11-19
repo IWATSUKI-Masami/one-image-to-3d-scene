@@ -226,7 +226,8 @@ export const generateCompletion = async (
     
     Output: A COMPLETE FULL-BODY image with ALL body parts (head, arms, hands, legs, feet) FULLY visible with NO cut-offs at ANY edge.`;
     } else {
-      prompt = `Input image: ${label || 'an object'}.
+      prompt = `Input image: ${label || 'an object'}.${description ? `
+      Description of the WHOLE object (including parts hidden in the photo; follow it for the shape of the missing parts): "${description}"` : ''}
 
       Goal: Create a clean, full - view image of ONLY the "${label}".
       
@@ -348,6 +349,7 @@ export const estimateHiddenExtent = async (
   label: string,
   type: 'person' | 'object',
   settings: AISettings,
+  description?: string,
 ): Promise<HiddenExtent> => {
   const image = await loadImageData(photoUrl);
   const [ymin, xmin, ymax, xmax] = box;
@@ -355,7 +357,7 @@ export const estimateHiddenExtent = async (
     xmin <= 0.01 && 'LEFT', xmax >= 0.99 && 'RIGHT', ymin <= 0.01 && 'TOP', ymax >= 0.99 && 'BOTTOM',
   ].filter(Boolean);
   const prompt = `In this photo, the ${type === 'person' ? 'person' : 'object'} "${label}" is visible inside the box
-[ymin, xmin, ymax, xmax] = [${box.map(v => v.toFixed(3)).join(', ')}] (normalized 0-1).
+[ymin, xmin, ymax, xmax] = [${box.map(v => v.toFixed(3)).join(', ')}] (normalized 0-1).${description ? `\nDescription of the whole object: "${description}"` : ''}
 ${touches.length ? `The box touches the image border on the ${touches.join(', ')} side(s), so the object may continue outside the photo there.` : 'The box does not touch the image border.'}
 
 Parts of the object may be hidden behind other objects or cut off by the image border.
@@ -377,5 +379,54 @@ Return JSON: {"left": <number>, "right": <number>, "top": <number>, "bottom": <n
       ? { left: 0.15, right: 0.15, top: 0.05, bottom: 1.2 }
       : { left: 0.3, right: 0.3, top: 0.3, bottom: 0.3 };
   }
+};
+
+// ---------------------------------------------------------------------------
+// Annotation translation (labels and descriptions, English <-> Japanese)
+// ---------------------------------------------------------------------------
+
+const TRANSLATION_SCHEMA: JsonSchema = {
+  type: "object",
+  properties: {
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          index: { type: "integer" },
+          label: { type: "string" },
+          description: { type: "string" },
+        },
+        required: ["index", "label", "description"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["items"],
+  additionalProperties: false,
+};
+
+/**
+ * Translate object annotations (label and description) between English and
+ * Japanese. The English annotations are what the prompts use; Japanese ones are
+ * for reading and editing. Returns one entry per item, in order.
+ */
+export const translateAnnotations = async (
+  items: { label: string; description: string }[],
+  to: 'ja' | 'en',
+  settings: AISettings,
+): Promise<{ label: string; description: string }[]> => {
+  if (items.length === 0) return [];
+  const list = items.map((it, i) => `${i}: label: ${JSON.stringify(it.label)} / description: ${JSON.stringify(it.description)}`).join('\n');
+  const prompt = to === 'ja'
+    ? `Translate these annotations of objects in a photo into natural Japanese. Keep the meaning exactly (shape, pose, colors, which parts are visible or hidden). Labels should be short noun phrases.\n\n${list}\n\nReturn JSON: {"items": [{"index": 0, "label": "...", "description": "..."}, ...]}`
+    : `Translate these annotations of objects in a photo into natural English, as used in prompts for image generation. Keep the meaning exactly (shape, pose, colors, which parts are visible or hidden). Labels should be short noun phrases in lowercase.\n\n${list}\n\nReturn JSON: {"items": [{"index": 0, "label": "...", "description": "..."}, ...]}`;
+  const result = await analyzeImageJson<{ items: { index: number; label: string; description: string }[] }>(
+    settings, null, prompt, TRANSLATION_SCHEMA, { schemaName: "annotation_translation", effort: "low" },
+  );
+  return items.map((it, i) => {
+    const t = result.items?.find(x => x.index === i);
+    return t ? { label: t.label.trim() || it.label, description: t.description.trim() || it.description } : it;
+  });
 };
 

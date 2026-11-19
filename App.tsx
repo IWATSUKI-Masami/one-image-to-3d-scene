@@ -29,7 +29,7 @@ const loadImage = (src: string): Promise<HTMLImageElement> => new Promise((resol
   img.onerror = () => reject(new Error('Failed to load image'));
   img.src = src;
 });
-import { detectObjectsInImage, generateCompletion, verifyCompletion, estimateHiddenExtent, HiddenExtent } from './services/aiService';
+import { detectObjectsInImage, generateCompletion, verifyCompletion, estimateHiddenExtent, HiddenExtent, translateAnnotations } from './services/aiService';
 
 /** Face styles for the completion of people */
 const FACE_STYLE_OPTIONS = (Object.entries(FACE_STYLE_LABELS) as [FaceStyle, string][])
@@ -89,6 +89,9 @@ const App: React.FC = () => {
   const [faceStyle, setFaceStyle] = useState<FaceStyle>('calm'); // People: how faces are rendered during completion
   // Completion attempts per object: 3 = check and retry (accurate placement), 1 = one image generation, no check (fewest credits)
   const [maxAttempts, setMaxAttempts] = useState<1 | 3>(3);
+  // Language of the object annotations shown on the cards (prompts always use English)
+  const [annotationLang, setAnnotationLang] = useState<'en' | 'ja'>('en');
+  const [translating, setTranslating] = useState(false);
 
   // 3D Generation states
   const [models3D, setModels3D] = useState<Model3D[]>([]);
@@ -813,6 +816,7 @@ const App: React.FC = () => {
     ...item,
     id: `generated-${item.id}-${Date.now()}`,
     label: `${item.label} (Completed)`,
+    ...(item.labelJa ? { labelJa: `${item.labelJa}（補完）` } : {}),
     imageUrl: r.transparentUrl,
     bgRemovalFailed: r.bgRemovalFailed,
     completionExpansionRatio: r.expansionRatio,
@@ -838,7 +842,7 @@ const App: React.FC = () => {
    */
   const hiddenExtentOf = async (item: CroppedObject): Promise<{ raw: HiddenExtent; enlarged: HiddenExtent }> => {
     const e = previewUrl
-      ? await estimateHiddenExtent(previewUrl, item.box_2d, item.label, item.type, aiSettings)
+      ? await estimateHiddenExtent(previewUrl, item.box_2d, item.label, item.type, aiSettings, item.description)
       : item.type === 'person'
         ? { left: 0.15, right: 0.15, top: 0.05, bottom: 1.2 }
         : { left: 0.3, right: 0.3, top: 0.3, bottom: 0.3 };
@@ -973,6 +977,57 @@ const App: React.FC = () => {
 
   const handleDeleteCompletedImage = (id: string) => {
     setCompletedImages(prev => prev.filter(img => img.id !== id));
+  };
+
+  /** Show the annotations in Japanese or English; missing Japanese ones are translated once */
+  const switchAnnotationLang = async (lang: 'en' | 'ja') => {
+    setAnnotationLang(lang);
+    if (lang !== 'ja' || translating) return;
+    const needs = (items: CroppedObject[]) => items.filter(i => !i.labelJa);
+    const cropped = needs(croppedImages), completed = needs(completedImages);
+    if (cropped.length + completed.length === 0) return;
+    if (!hasAIKeys) { setError('Translating the annotations needs an API key (AI Settings).'); return; }
+    setTranslating(true);
+    try {
+      const all = [...cropped, ...completed];
+      const ja = await translateAnnotations(all.map(i => ({ label: i.label.replace(/ \(Completed\)$/, ''), description: i.description || '' })), 'ja', aiSettings);
+      const byId = new Map(all.map((i, k) => [i.id, ja[k]]));
+      const apply = (items: CroppedObject[]) => items.map(i => {
+        const t = byId.get(i.id);
+        if (!t) return i;
+        const completedSuffix = / \(Completed\)$/.test(i.label) ? '（補完）' : '';
+        return { ...i, labelJa: t.label + completedSuffix, descriptionJa: t.description };
+      });
+      setCroppedImages(apply);
+      setCompletedImages(apply);
+    } catch (e: any) {
+      console.error('Translating the annotations failed:', e);
+      setError(`Translating the annotations failed: ${e?.message || e}`);
+    } finally {
+      setTranslating(false);
+    }
+  };
+
+  /**
+   * Edit the label and description of an extracted object, in the shown language.
+   * The English annotation is what the prompts use: an edit in Japanese is
+   * translated into English; an edit in English drops the Japanese translation
+   * (translated again when shown).
+   */
+  const handleEditAnnotation = async (item: CroppedObject, label: string, description: string) => {
+    let update: Partial<CroppedObject>;
+    if (annotationLang === 'ja') {
+      if (!hasAIKeys) { setError('Editing in Japanese needs an API key (AI Settings) for the translation into English.'); return; }
+      const [en] = await translateAnnotations([{ label, description }], 'en', aiSettings);
+      update = { labelJa: label, descriptionJa: description, label: en.label, description: en.description, annotationEdited: true };
+    } else {
+      update = { label, description, labelJa: undefined, descriptionJa: undefined, annotationEdited: true };
+    }
+    setCroppedImages(prev => prev.map(i => (i.id === item.id ? { ...i, ...update } : i)));
+    // The detected object (same box) gets the new English annotation too
+    setDetectedObjects(prev => prev.map(o => (sameBox(o.box_2d, item.box_2d)
+      ? { ...o, label: update.label ?? o.label, description: update.description ?? o.description }
+      : o)));
   };
 
   const handleDeleteCroppedImage = (id: string) => {
@@ -1917,6 +1972,17 @@ const App: React.FC = () => {
                         </div>
                       )}
 
+                      {(activeTab === 'original' || activeTab === 'completed') && (croppedImages.length > 0 || completedImages.length > 0) && (
+                        <div className="flex items-center rounded-full border border-slate-200 bg-white text-xs overflow-hidden"
+                          title="Language of the labels and descriptions on the cards (the prompts always use English). Japanese is translated by the VLM once.">
+                          {(['en', 'ja'] as const).map(l => (
+                            <button key={l} onClick={() => switchAnnotationLang(l)} disabled={translating}
+                              className={`px-2.5 py-1 ${annotationLang === l ? 'bg-slate-800 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>
+                              {translating && l === 'ja' ? '…' : l === 'en' ? 'EN' : '日本語'}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       {activeTab === 'original' && croppedImages.length > 0 && (
                         <>
                           <label className="flex items-center gap-2 text-xs font-medium text-slate-600 border border-slate-200 px-3 py-1 rounded-full bg-white"
@@ -2026,6 +2092,8 @@ const App: React.FC = () => {
                                 onSelect={(selected) => handleSelect(item.id, selected)}
                                 onDelete={() => handleDeleteCroppedImage(item.id)}
                                 isProcessing={processingIds.has(item.id)}
+                                annotationLang={annotationLang}
+                                onEditAnnotation={(label, description) => handleEditAnnotation(item, label, description)}
                               />
                             ))}
                           </div>
@@ -2066,6 +2134,7 @@ const App: React.FC = () => {
                                     onUpdate={handleUpdateCompletedItem}
                                     showBoundingBox={showBoundingBoxes}
                                     isProcessing={processingIds.has(item.id)}
+                                    annotationLang={annotationLang}
                                   />
                                 </div>
                               </div>

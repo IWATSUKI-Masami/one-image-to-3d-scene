@@ -3,6 +3,11 @@ export interface DetectedObject {
   box_2d: [number, number, number, number]; // [ymin, xmin, ymax, xmax]
   type: 'person' | 'object';
   description?: string; // Detailed description including pose, clothing, etc.
+  /** Japanese label and description (translation of, or edited instead of, the English ones) */
+  labelJa?: string;
+  descriptionJa?: string;
+  /** The annotation was edited by the user */
+  annotationEdited?: boolean;
   /** Mask of the visible part of the object in the photo (SAM 2.1), if segmented */
   mask?: ObjectPhotoMask;
 }

@@ -5,7 +5,7 @@ import { describeAttempts } from '../services/stats';
 
 /** How the visible part was located in the completed image (green box) */
 const PART_SOURCE_LABELS = { layout: 'kept', matching: 'matched', whole: 'not found' } as const;
-import { Download, AlertTriangle, Wand2, Trash2, Box } from 'lucide-react';
+import { Download, AlertTriangle, Wand2, Trash2, Box, Pencil } from 'lucide-react';
 import { BoundingBoxOverlay, OverlayBox } from './BoundingBoxOverlay';
 import { findBestMatchPosition, calculateTightBoundingBox } from '../utils';
 
@@ -26,9 +26,35 @@ interface ResultCardProps {
   onUpdate?: (item: CroppedObject) => void;
   showBoundingBox?: boolean;
   isProcessing?: boolean; // External processing state (persists across tab switches)
+  /** Language of the label and description shown (Japanese falls back to English) */
+  annotationLang?: 'en' | 'ja';
+  /** Edit the label and description (in the shown language); enables the edit button */
+  onEditAnnotation?: (label: string, description: string) => Promise<void> | void;
 }
 
-export const ResultCard: React.FC<ResultCardProps> = ({ item, onCompleteBody, onDelete, onGenerate3D, selected, onSelect, onUpdate, showBoundingBox, isProcessing }) => {
+export const ResultCard: React.FC<ResultCardProps> = ({ item, onCompleteBody, onDelete, onGenerate3D, selected, onSelect, onUpdate, showBoundingBox, isProcessing, annotationLang = 'en', onEditAnnotation }) => {
+  const shownLabel = (annotationLang === 'ja' && item.labelJa) || item.label;
+  const shownDescription = (annotationLang === 'ja' && item.descriptionJa) || item.description || '';
+  const [editing, setEditing] = useState(false);
+  const [savingAnnotation, setSavingAnnotation] = useState(false);
+  const [draftLabel, setDraftLabel] = useState('');
+  const [draftDescription, setDraftDescription] = useState('');
+  const startEditing = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDraftLabel(shownLabel);
+    setDraftDescription(shownDescription);
+    setEditing(true);
+  };
+  const saveAnnotation = async () => {
+    if (!onEditAnnotation) return;
+    setSavingAnnotation(true);
+    try {
+      await onEditAnnotation(draftLabel.trim() || shownLabel, draftDescription.trim());
+      setEditing(false);
+    } finally {
+      setSavingAnnotation(false);
+    }
+  };
   const [isGenerating, setIsGenerating] = useState(false);
   const [isGenerating3D, setIsGenerating3D] = useState(false);
   const [detectedBox, setDetectedBox] = useState<[number, number, number, number] | null>(null);
@@ -287,9 +313,49 @@ export const ResultCard: React.FC<ResultCardProps> = ({ item, onCompleteBody, on
 
       </div>
       <div className="p-3 border-t border-slate-100">
-        <p className="font-medium text-slate-800 capitalize text-center truncate" title={item.label}>
-          {item.label}
-        </p>
+        {editing ? (
+          <div className="space-y-1.5" onClick={(e) => e.stopPropagation()}>
+            <input
+              value={draftLabel}
+              onChange={(e) => setDraftLabel(e.target.value)}
+              className="w-full text-sm border border-slate-300 rounded px-2 py-1"
+              aria-label="Label"
+            />
+            <textarea
+              value={draftDescription}
+              onChange={(e) => setDraftDescription(e.target.value)}
+              rows={4}
+              className="w-full text-xs border border-slate-300 rounded px-2 py-1"
+              aria-label="Description"
+              placeholder={annotationLang === 'ja' ? '物体の説明（隠れた部分の形も書けます）' : 'Description (you can describe the shape of hidden parts)'}
+            />
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setEditing(false)} disabled={savingAnnotation}
+                className="text-xs px-2 py-1 rounded border border-slate-300 text-slate-600 hover:bg-slate-50">
+                {annotationLang === 'ja' ? 'キャンセル' : 'Cancel'}
+              </button>
+              <button onClick={saveAnnotation} disabled={savingAnnotation}
+                className="text-xs px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60 flex items-center gap-1">
+                {savingAnnotation && <span className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" />}
+                {annotationLang === 'ja' ? '保存' : 'Save'}
+              </button>
+            </div>
+          </div>
+        ) : (
+        <>
+        <div className="flex items-center justify-center gap-1">
+          <p className="font-medium text-slate-800 capitalize text-center truncate" title={shownLabel}>
+            {shownLabel}
+          </p>
+          {onEditAnnotation && (
+            <button onClick={startEditing} className="text-slate-400 hover:text-indigo-600 shrink-0"
+              title={annotationLang === 'ja' ? '注釈（ラベルと説明）を編集。説明は補完の指示に使われます' : 'Edit the annotation (label and description). The description is used in the completion prompt'}
+              aria-label="Edit annotation">
+              <Pencil size={13} />
+            </button>
+          )}
+          {item.annotationEdited && <span className="text-[10px] text-amber-600 shrink-0" title="Edited by the user">✎</span>}
+        </div>
         {item.completion && (
           <p className="text-[11px] text-indigo-600 mt-1 text-center truncate"
             title={item.completion.attempts?.length ? `Attempts: ${describeAttempts(item)}` : "Settings used for the completion: image provider, face style (people), and how the visible part was located (kept in place / matched / not found)"}>
@@ -299,10 +365,12 @@ export const ResultCard: React.FC<ResultCardProps> = ({ item, onCompleteBody, on
             {item.completion.attempts && item.completion.attempts.length > 1 && ` · ${item.completion.attempts.length} attempts`}
           </p>
         )}
-        {item.description && (
-          <p className="text-xs text-slate-500 mt-1 text-center line-clamp-2" title={item.description}>
-            {item.description}
+        {shownDescription && (
+          <p className="text-xs text-slate-500 mt-1 text-center line-clamp-2" title={shownDescription}>
+            {shownDescription}
           </p>
+        )}
+        </>
         )}
       </div>
     </div>
