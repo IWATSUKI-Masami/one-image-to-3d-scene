@@ -95,7 +95,7 @@ export interface Model3D {
    * match the completed image it was generated from (render and compare); the
    * generator does not always keep the input image's viewpoint.
    */
-  frontAlignment?: { yawDeg: number; score: number; iou: number };
+  frontAlignment?: { yawDeg: number; score: number; iou: number; version?: number };
   provider?: ModelProvider | 'triposr-local'; // Service that generated the model ('triposr-local': projects saved by earlier versions)
 }
 

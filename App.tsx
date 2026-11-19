@@ -8,7 +8,7 @@ import { DepthOnlyScene } from './components/DepthOnlyScene';
 import { BoundingBoxOverlay } from './components/BoundingBoxOverlay';
 import { MaskOverlay } from './components/MaskOverlay';
 import { segmentObjects } from './services/segmentation';
-import { estimateFrontAlignment } from './services/frontAlignment';
+import { estimateFrontAlignment, ALIGNMENT_VERSION } from './services/frontAlignment';
 import { buildStatsCsv } from './services/stats';
 import { sameBox } from './components/depthSampling';
 
@@ -192,9 +192,10 @@ const App: React.FC = () => {
   const [aligningModel, setAligningModel] = useState(false);
   useEffect(() => {
     if (aligningModel) return;
-    const next = models3D.find(m => !m.frontAlignment && m.glbUrl && m.posterUrl && !alignmentTriedRef.current.has(m.id));
+    // Models without an alignment, or aligned by an older version of the method
+    const next = models3D.find(m => (m.frontAlignment?.version ?? 1) < ALIGNMENT_VERSION && m.glbUrl && m.posterUrl && !alignmentTriedRef.current.has(`${m.id}:${ALIGNMENT_VERSION}`));
     if (!next) return;
-    alignmentTriedRef.current.add(next.id);
+    alignmentTriedRef.current.add(`${next.id}:${ALIGNMENT_VERSION}`);
     setAligningModel(true);
     const t0 = performance.now();
     // TRELLIS.2 and Hunyuan3D-2.1 models face +Z; older TripoSR models are turned by 180°

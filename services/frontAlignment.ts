@@ -22,7 +22,14 @@ export interface FrontAlignment {
   score: number;
   /** Silhouette overlap (IoU) at the best angle */
   iou: number;
+  /** Version of the method; models aligned by an older version are aligned again */
+  version?: number;
 }
+
+/** Bumped when the alignment method changes, so stored alignments are recomputed */
+export const ALIGNMENT_VERSION = 2;
+/** Score gain needed to turn a model by more than 90° rather than keep it facing forward */
+const MIN_TURN_AROUND_GAIN = 0.05;
 
 /** Comparison grid (pixels per side) */
 const N = 64;
@@ -186,20 +193,28 @@ export const estimateFrontAlignment = async (glbUrl: string, completedImageUrl: 
       return sig ? compare(target, sig) : { score: -Infinity, iou: 0 };
     };
 
-    // Coarse search every 10°, then refine around the best angle in 2° steps.
+    // Coarse search every 10°, then refine in 2° steps around the best angle overall
+    // and around the best angle within ±90° (the model kept facing forward).
     // A small preference for small turns keeps nearly symmetric objects (cups, vases)
     // as generated when other angles match about as well.
     const preference = (yaw: number) => 0.02 * Math.abs(normalizeDeg(yaw)) / 180;
-    let best = { yawDeg: 0, score: -Infinity, iou: 0, ranked: -Infinity };
+    type Best = { yawDeg: number; score: number; iou: number; ranked: number };
+    let best: Best = { yawDeg: 0, score: -Infinity, iou: 0, ranked: -Infinity };
+    let front: Best = { ...best };
     const consider = (yaw: number) => {
       const r = evaluate(yaw);
       const ranked = r.score - preference(yaw);
       if (ranked > best.ranked) best = { yawDeg: yaw, ...r, ranked };
+      if (Math.abs(normalizeDeg(yaw)) <= 90 && ranked > front.ranked) front = { yawDeg: yaw, ...r, ranked };
     };
     for (let yaw = -180; yaw < 180; yaw += 10) consider(yaw);
-    const coarse = best.yawDeg;
-    for (let yaw = coarse - 8; yaw <= coarse + 8; yaw += 2) consider(yaw);
-    return { yawDeg: normalizeDeg(best.yawDeg), score: best.score, iou: best.iou };
+    for (const center of new Set([best.yawDeg, front.yawDeg])) {
+      for (let yaw = center - 8; yaw <= center + 8; yaw += 2) consider(yaw);
+    }
+    // Front and back of many objects (desks, laptops, mugs) have almost the same
+    // silhouette, so turning the model around (more than 90°) needs a clearly better match.
+    const chosen = Math.abs(normalizeDeg(best.yawDeg)) > 90 && best.score - front.score < MIN_TURN_AROUND_GAIN ? front : best;
+    return { yawDeg: normalizeDeg(chosen.yawDeg), score: chosen.score, iou: chosen.iou, version: ALIGNMENT_VERSION };
   } finally {
     target3.dispose();
     renderer.dispose();
