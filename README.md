@@ -151,13 +151,17 @@ The official Spaces run on ZeroGPU, which has a daily quota per user (larger wit
 
    How it works: [Orient Anything](https://huggingface.co/spaces/Viglong/Orient-Anything) estimates the viewer's azimuth around the object for the completed image (the object as seen in the photo) and for a front render of the 3D model, so each generator's idea of "front" cancels out. The rotation is `view angle + azimuth(model) − azimuth(photo)`, where the view angle corrects for objects away from the image center (assuming a 60° horizontal field of view).
 
+6. **Fit Partial Objects** (optional, in the 3D Scene header) — places objects that are cut off by the image border (e.g. chairs at the edges, a table whose front is outside the photo). It segments the objects first if needed (SAM 2.1) and asks the VLM for the typical real height of each object; the scene then fits every model whose mask touches the image border and shows the result in the info panel. The **Fit Partial** checkbox in the scene turns it on and off. Fitting takes a few seconds per object.
+
+   How it works: the model is rendered from the photo's camera, and its position, size and rotation about the vertical axis are searched so that the rendering does not contradict the photo — it covers the object's visible pixels, does not appear where the photo shows something farther away (it may extend behind nearer objects and outside the image), agrees with the depth map on the visible part, and keeps a plausible size (the scene's scale is measured on the objects inside the image, using their real heights). The fit is used only if it explains the photo better than the box placement. With only a small part visible, the rotation is often not determined.
+
 Projects (images, depth map, models and scene layout) can be saved and loaded.
 
 ## Project structure
 
 ```
 ├── App.tsx                 # Main application (UI and workflow)
-├── components/             # React components (3D viewers, cards, overlays)
+├── components/             # React components (3D viewers, cards, overlays), model fitting (modelFitting.ts)
 ├── services/
 │   ├── aiService.ts        # Prompts for detection, completion and checks
 │   ├── segmentation.ts     # Object masks in the photo (SAM 2.1 in the browser)

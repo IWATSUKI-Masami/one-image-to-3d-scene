@@ -8,7 +8,7 @@ import { DepthOnlyScene } from './components/DepthOnlyScene';
 import { BoundingBoxOverlay } from './components/BoundingBoxOverlay';
 import { MaskOverlay } from './components/MaskOverlay';
 import { segmentObjects } from './services/segmentation';
-import { detectObjectsInImage, generateCompletion, estimateCanvasExpansion, verifyCompletion } from './services/aiService';
+import { detectObjectsInImage, generateCompletion, estimateCanvasExpansion, verifyCompletion, estimateObjectHeights } from './services/aiService';
 
 /** Face styles for the completion of people */
 const FACE_STYLE_OPTIONS = (Object.entries(FACE_STYLE_LABELS) as [FaceStyle, string][])
@@ -45,6 +45,7 @@ const App: React.FC = () => {
   const [orientationProgress, setOrientationProgress] = useState<string | null>(null);
   const [segmentationProgress, setSegmentationProgress] = useState<string | null>(null);
   const [showMasks, setShowMasks] = useState(true);
+  const [fitPrepProgress, setFitPrepProgress] = useState<string | null>(null);
 
   // Depth Map State
   const [depthMapUrl, setDepthMapUrl] = useState<string | null>(null);
@@ -380,25 +381,60 @@ const App: React.FC = () => {
    * All results are applied at once, so the scene is rebuilt only once.
    */
   /** Segment the visible part of each detected object in the photo (SAM 2.1 in the browser) */
-  const handleSegmentObjects = async () => {
-    if (!previewUrl || detectedObjects.length === 0 || segmentationProgress) return;
+  const handleSegmentObjects = async (): Promise<DetectedObject[] | null> => {
+    if (!previewUrl || detectedObjects.length === 0 || segmentationProgress) return null;
     setError(null);
     const start = performance.now();
     try {
       const results = await segmentObjects(previewUrl, detectedObjects.map(o => o.box_2d), undefined, setSegmentationProgress);
-      setDetectedObjects(prev => prev.map((obj, i) => {
+      const updated = detectedObjects.map((obj, i) => {
         const r = results[i];
         return r ? { ...obj, mask: { url: r.maskUrl, score: r.score, coverage: r.coverage } } : obj;
-      }));
+      });
+      setDetectedObjects(updated);
       setShowMasks(true);
       setProcessingTimes(prev => new Map(prev).set('Segmentation (all)', (performance.now() - start) / 1000));
       const failed = detectedObjects.filter((_, i) => !results[i]).map(o => o.label);
       if (failed.length > 0) setError(`Segmentation failed for: ${failed.join(', ')}. See the console for details.`);
+      return updated;
     } catch (e: any) {
       console.error('Segmentation failed:', e);
       setError(`Segmentation failed: ${e?.message || e}`);
+      return null;
     } finally {
       setSegmentationProgress(null);
+    }
+  };
+
+  /**
+   * Prepare fitting of partially visible objects: photo masks (SAM 2.1) and the
+   * typical real height of each object (VLM). The 3D scene then fits the models
+   * cut off by the image border ("Fit Partial" in the scene).
+   */
+  const handleFitPartialObjects = async () => {
+    if (!previewUrl || detectedObjects.length === 0 || fitPrepProgress) return;
+    setError(null);
+    let objects = detectedObjects;
+    try {
+      if (!objects.every(o => o.mask)) {
+        setFitPrepProgress('segmenting');
+        const segmented = await handleSegmentObjects();
+        if (!segmented) return;
+        objects = segmented;
+      }
+      if (!objects.every(o => o.realHeightM)) {
+        setFitPrepProgress('estimating sizes');
+        const t0 = performance.now();
+        const heights = await estimateObjectHeights(previewUrl, objects, aiSettings);
+        setProcessingTimes(prev => new Map(prev).set('Object sizes', (performance.now() - t0) / 1000));
+        objects = objects.map((o, i) => (heights[i] ? { ...o, realHeightM: heights[i] } : o));
+        setDetectedObjects(objects);
+      }
+    } catch (e: any) {
+      console.error('Preparing the fit failed:', e);
+      setError(`Fit Partial Objects failed: ${e?.message || e}`);
+    } finally {
+      setFitPrepProgress(null);
     }
   };
 
@@ -2171,6 +2207,15 @@ const App: React.FC = () => {
                             <Cuboid size={20} /> 3D Scene
                           </h3>
                           <div className="flex items-center gap-2">
+                          <button
+                            onClick={handleFitPartialObjects}
+                            disabled={!!fitPrepProgress || !!segmentationProgress || !hasAIKeys}
+                            title={!hasAIKeys ? 'Set the API keys in AI Settings first' : 'Fit objects cut off by the image border to the photo: segments the objects (SAM 2.1) if needed and estimates their real sizes (VLM); the scene then fits the models'}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-emerald-700 border border-emerald-200 bg-white hover:bg-emerald-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                          >
+                            {fitPrepProgress || segmentationProgress ? <Spinner size={14} /> : <Layers size={14} />}
+                            {fitPrepProgress ? `Fit: ${segmentationProgress ?? fitPrepProgress}` : 'Fit Partial Objects'}
+                          </button>
                           <button
                             onClick={handleEstimateOrientation}
                             disabled={!!orientationProgress || positionedModels.length === 0}

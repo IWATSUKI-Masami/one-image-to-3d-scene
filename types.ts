@@ -5,6 +5,8 @@ export interface DetectedObject {
   description?: string; // Detailed description including pose, clothing, etc.
   /** Mask of the visible part of the object in the photo (SAM 2.1), if segmented */
   mask?: ObjectPhotoMask;
+  /** Typical real height of the whole object in meters (VLM estimate), used as a size prior */
+  realHeightM?: number;
 }
 
 export interface ObjectPhotoMask {
