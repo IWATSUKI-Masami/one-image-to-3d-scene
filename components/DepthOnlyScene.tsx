@@ -4,6 +4,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { removeStrayFragments } from './meshCleanup';
+import { viewAngleDeg } from '../services/orientation';
+import { alignmentYawDeg, MIN_ALIGNMENT_SCORE } from '../services/frontAlignment';
 import { FitRenderer, FitTarget, fitModel, fromWorld, partRegionFromBoxes, poseCost, toWorld, viewYawDeg } from './modelFitting';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { Spinner } from './Spinner';
@@ -99,6 +101,8 @@ interface DepthOnlySceneProps {
     detectedObjects?: DetectedObject[];
     positionedModels?: Model3D[];
     showModels?: boolean;
+    /** Incremented by "Fit Partial Objects" to turn fitting on */
+    fitRequest?: number;
 }
 
 export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
@@ -107,7 +111,8 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     originalAspectRatio = 1,
     detectedObjects = [],
     positionedModels = [],
-    showModels = true
+    showModels = true,
+    fitRequest = 0,
 }) => {
     const mountRef = useRef<HTMLDivElement>(null);
     const [loading, setLoading] = useState(true);
@@ -121,11 +126,18 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     const [showModelBoxes, setShowModelBoxes] = useState(false); // Model Boxes off by default
     // Rotate models about the vertical axis by their estimated orientation (if estimated)
     const [applyOrientation, setApplyOrientation] = useState(true);
+    // Turn models so that their front view matches their completed image
+    const [applyAlignment, setApplyAlignment] = useState(true);
     // Perspective back-projection (see toWorldXY); off = the paper's image-plane placement
     const [perspective, setPerspective] = useState(true);
-    // Fit models cut off by the image border to the photo (needs photo masks and real heights)
-    const [fitPartial, setFitPartial] = useState(true);
+    // Fit models cut off by the image border to the photo (needs photo masks and real heights).
+    // Off by default: with layout-preserving completion the box placement is usually better.
+    const [fitPartial, setFitPartial] = useState(false);
+    // "Fit Partial Objects" in the header turns it on
+    useEffect(() => { if (fitRequest) setFitPartial(true); }, [fitRequest]);
     const [fitStatus, setFitStatus] = useState<string | null>(null);
+    // Info panel at the bottom left (can be hidden so that it does not cover the scene)
+    const [showInfo, setShowInfo] = useState(true);
     const [fitReport, setFitReport] = useState<FitReportEntry[]>([]);
     // Fit results survive rebuilds with the same inputs (fitting takes seconds per model)
     const fitCacheRef = useRef<Map<string, FitCacheEntry>>(new Map());
@@ -776,9 +788,17 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     if (model.provider !== 'trellis' && model.provider !== 'hunyuan3d') {
                         mesh.rotation.y = Math.PI; // Face camera for other providers
                     }
-                    // Estimated orientation (rotation about the vertical axis). Applied before the
-                    // bounds are measured, so the scale fit uses the box of the rotated model.
-                    const yawDeg = applyOrientation && model.orientation ? model.orientation.yawDeg : 0;
+                    // Front alignment: turn the model so that its front view is the completed image
+                    const aligned = applyAlignment && !!model.frontAlignment && model.frontAlignment.score >= MIN_ALIGNMENT_SCORE;
+                    if (aligned) mesh.rotation.y += alignmentYawDeg(model.frontAlignment) * Math.PI / 180;
+                    // Rotation about the vertical axis, applied before the bounds are measured,
+                    // so the scale fit uses the box of the rotated model:
+                    // - aligned: the completed image shows the object as seen from the camera, so
+                    //   with perspective it is turned by the view angle (objects off the image center)
+                    // - otherwise: the estimated orientation (Orient Anything), if any
+                    const yawDeg = aligned
+                        ? (perspective ? viewAngleDeg(model.box_2d) : 0)
+                        : (applyOrientation && model.orientation ? model.orientation.yawDeg : 0);
                     const baseYaw = mesh.rotation.y;
                     mesh.rotation.y += yawDeg * Math.PI / 180;
 
@@ -816,7 +836,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
 
                     // Step 2: Calculate green box on centered mesh (BEFORE any scaling)
                     // (precise bounds when rotated: the default box of a rotated mesh is too large)
-                    const centeredBox = new THREE.Box3().setFromObject(mesh, yawDeg !== 0);
+                    const centeredBox = new THREE.Box3().setFromObject(mesh, mesh.rotation.y !== 0);
                     const centeredSize = new THREE.Vector3();
                     centeredBox.getSize(centeredSize);
                     const cWidth = centeredSize.x;
@@ -1233,7 +1253,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             renderer.forceContextLoss();
             sceneRef.current = null;
         };
-    }, [imageUrl, depthMapUrl, originalAspectRatio, depthScale, detectedObjects, positionedModels, contextGeneration, applyOrientation, perspective, fitPartial]);
+    }, [imageUrl, depthMapUrl, originalAspectRatio, depthScale, detectedObjects, positionedModels, contextGeneration, applyOrientation, applyAlignment, perspective, fitPartial]);
 
     // Helper function to load image
     const loadImageAsync = (url: string): Promise<HTMLImageElement> => {
@@ -1320,6 +1340,21 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                             Perspective
                         </label>
                     </div>
+                    {/* Front alignment (only when computed) */}
+                    {positionedModels.some(m => m.frontAlignment) && (
+                        <div className="flex items-center gap-1" title="Turn each model so that its front view matches the completed image it was generated from (the 3D generator may change the viewpoint)">
+                            <input
+                                type="checkbox"
+                                id="applyAlignment"
+                                checked={applyAlignment}
+                                onChange={(e) => setApplyAlignment(e.target.checked)}
+                                className="w-3 h-3 text-indigo-500 bg-slate-700 border-slate-600 rounded focus:ring-indigo-500"
+                            />
+                            <label htmlFor="applyAlignment" className="text-xs text-slate-300">
+                                Align
+                            </label>
+                        </div>
+                    )}
                     {/* Orientation (only when estimated) */}
                     {positionedModels.some(m => m.orientation) && (
                         <div className="flex items-center gap-1" title="Rotate models by their estimated orientation">
@@ -1538,8 +1573,19 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 </div>
             )}
 
-            <div className="absolute bottom-4 left-4 bg-slate-900/90 backdrop-blur px-3 py-2 rounded-lg text-xs text-slate-400 shadow-sm pointer-events-none border border-slate-700">
-                <p className="font-bold mb-1 text-slate-300">Depth-Only 3D Scene</p>
+            {showInfo ? (
+            <div className="absolute bottom-4 left-4 bg-slate-900/90 backdrop-blur px-3 py-2 rounded-lg text-xs text-slate-400 shadow-sm border border-slate-700">
+                <div className="flex items-start justify-between gap-3 mb-1">
+                    <p className="font-bold text-slate-300">Depth-Only 3D Scene</p>
+                    <button
+                        onClick={() => setShowInfo(false)}
+                        className="text-slate-400 hover:text-white leading-none -mt-0.5"
+                        title="Hide this panel"
+                        aria-label="Hide the info panel"
+                    >
+                        ×
+                    </button>
+                </div>
                 <p>• Resolution: 256 × {Math.round(256 / originalAspectRatio)} points</p>
                 <p>• Drag to rotate, scroll to zoom</p>
                 {fitStatus && <p className="text-emerald-300">• {fitStatus}</p>}
@@ -1553,6 +1599,16 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     <p>• {detectedObjects.length} bounding box{detectedObjects.length !== 1 ? 'es' : ''}</p>
                 )}
             </div>
+            ) : (
+                <button
+                    onClick={() => setShowInfo(true)}
+                    className="absolute bottom-4 left-4 w-7 h-7 rounded-full bg-slate-900/80 text-slate-300 hover:text-white text-xs font-bold border border-slate-700 shadow-sm"
+                    title="Show the info panel"
+                    aria-label="Show the info panel"
+                >
+                    i
+                </button>
+            )}
         </div>
     );
 };

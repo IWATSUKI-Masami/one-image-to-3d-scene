@@ -8,6 +8,7 @@ import { DepthOnlyScene } from './components/DepthOnlyScene';
 import { BoundingBoxOverlay } from './components/BoundingBoxOverlay';
 import { MaskOverlay } from './components/MaskOverlay';
 import { segmentObjects } from './services/segmentation';
+import { estimateFrontAlignment } from './services/frontAlignment';
 import { sameBox } from './components/depthSampling';
 
 /** Correlation above which the visible part is taken to have stayed in place during completion */
@@ -57,6 +58,7 @@ const App: React.FC = () => {
   const [segmentationProgress, setSegmentationProgress] = useState<string | null>(null);
   const [showMasks, setShowMasks] = useState(true);
   const [fitPrepProgress, setFitPrepProgress] = useState<string | null>(null);
+  const [fitRequest, setFitRequest] = useState(0);
 
   // Depth Map State
   const [depthMapUrl, setDepthMapUrl] = useState<string | null>(null);
@@ -177,6 +179,29 @@ const App: React.FC = () => {
   ), [completedImages, filter]);
 
   const positionedModels = useMemo(() => models3D.filter(m => m.box_2d && selectedItemsPerTab['3d'].has(m.id)), [models3D, selectedItemsPerTab]);
+
+  // Front alignment of each 3D model to its completed image (render and compare),
+  // one model at a time, for new models and for models of older projects
+  const alignmentTriedRef = useRef<Set<string>>(new Set());
+  const [aligningModel, setAligningModel] = useState(false);
+  useEffect(() => {
+    if (aligningModel) return;
+    const next = models3D.find(m => !m.frontAlignment && m.glbUrl && m.posterUrl && !alignmentTriedRef.current.has(m.id));
+    if (!next) return;
+    alignmentTriedRef.current.add(next.id);
+    setAligningModel(true);
+    const t0 = performance.now();
+    // TRELLIS.2 and Hunyuan3D-2.1 models face +Z; older TripoSR models are turned by 180°
+    const base = next.provider !== 'trellis' && next.provider !== 'hunyuan3d' ? 180 : 0;
+    estimateFrontAlignment(next.glbUrl, next.posterUrl, base)
+      .then(a => {
+        console.log(`[Align] ${next.label}: ${a.yawDeg}° (score ${a.score.toFixed(2)}, IoU ${a.iou.toFixed(2)})`);
+        setProcessingTimes(prev => new Map(prev).set(`Align: ${next.label}`, (performance.now() - t0) / 1000));
+        setModels3D(prev => prev.map(m => (m.id === next.id ? { ...m, frontAlignment: a } : m)));
+      })
+      .catch(e => console.warn(`[Align] ${next.label} failed:`, e))
+      .finally(() => setAligningModel(false));
+  }, [models3D, aligningModel]);
 
   // Initialize selection for each tab only when data changes (not on every tab switch)
   // This preserves selection when switching between tabs
@@ -441,6 +466,8 @@ const App: React.FC = () => {
         objects = objects.map((o, i) => (heights[i] ? { ...o, realHeightM: heights[i] } : o));
         setDetectedObjects(objects);
       }
+      // Turn on "Fit Partial" in the scene
+      setFitRequest(n => n + 1);
     } catch (e: any) {
       console.error('Preparing the fit failed:', e);
       setError(`Fit Partial Objects failed: ${e?.message || e}`);
@@ -2207,6 +2234,7 @@ const App: React.FC = () => {
                             detectedObjects={detectedObjects}
                             positionedModels={positionedModels}
                             showModels={true}
+                            fitRequest={fitRequest}
                           />
                         </div>
                       </div>

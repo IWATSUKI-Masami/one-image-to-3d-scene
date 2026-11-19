@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { alignmentYawDeg } from '../services/frontAlignment';
 import { removeStrayFragments } from './meshCleanup';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Model3D } from '../types';
@@ -156,6 +157,8 @@ export const SingleModelViewer: React.FC<SingleModelViewerProps> = ({ model, sho
                 if (model.provider !== 'trellis' && model.provider !== 'hunyuan3d') {
                     mesh.rotation.y = Math.PI; // Face the camera for other providers
                 }
+                // Front alignment: the model's front view matches the completed image
+                mesh.rotation.y += alignmentYawDeg(model.frontAlignment) * Math.PI / 180;
 
                 mesh.traverse((node) => {
                     if ((node as THREE.Mesh).isMesh) {
@@ -203,7 +206,7 @@ export const SingleModelViewer: React.FC<SingleModelViewerProps> = ({ model, sho
 
                 modelGroup.add(mesh);
 
-                const finalBox = new THREE.Box3().setFromObject(mesh);
+                const finalBox = new THREE.Box3().setFromObject(mesh, mesh.rotation.y !== 0);
                 const finalSize = new THREE.Vector3();
                 finalBox.getSize(finalSize);
                 const finalWidth = finalSize.x;
@@ -327,7 +330,7 @@ export const SingleModelViewer: React.FC<SingleModelViewerProps> = ({ model, sho
             }
             helpersGroupRef.current = null;
         };
-    }, [model.glbUrl, isVisible, model.originalPartBox2d, model.tightBox2d]);
+    }, [model.glbUrl, isVisible, model.originalPartBox2d, model.tightBox2d, model.frontAlignment?.yawDeg]);
 
     return (
         <div className="w-full h-full relative" ref={mountRef}>

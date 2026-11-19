@@ -89,6 +89,12 @@ export interface Model3D {
   originalPartBox2d?: [number, number, number, number];
   tightBox2d?: [number, number, number, number]; // Bounds of the non-transparent object in the image
   orientation?: ModelOrientation; // Estimated orientation, if estimated
+  /**
+   * Rotation about the vertical axis (degrees) that makes the model's front view
+   * match the completed image it was generated from (render and compare); the
+   * generator does not always keep the input image's viewpoint.
+   */
+  frontAlignment?: { yawDeg: number; score: number; iou: number };
   provider?: ModelProvider | 'triposr-local'; // Service that generated the model ('triposr-local': projects saved by earlier versions)
 }
 
