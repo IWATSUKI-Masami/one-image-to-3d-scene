@@ -36,7 +36,20 @@ export interface AnalyzeOptions {
 }
 
 /** Target aspect ratio of a completed image */
-export type CompletionAspect = '9:16' | '3:4';
+/**
+ * Output layout of an image completion.
+ * - size: OpenAI output size (the input image should have the same size so that
+ *   pixels map one to one)
+ * - aspect: Gemini aspect ratio
+ * - maskUrl: OpenAI edit mask (PNG data URL of the same size): transparent pixels
+ *   may be edited, opaque pixels are kept. Gemini has no mask.
+ */
+export interface ImageLayout {
+  size: OpenAIImageSize;
+  aspect: string;
+  maskUrl?: string;
+}
+export type OpenAIImageSize = '1024x1024' | '1536x1024' | '1024x1536';
 
 const SUPPORTED_MIME = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 
@@ -139,7 +152,7 @@ export const generateImage = async (
   settings: AISettings,
   image: ImageData,
   prompt: string,
-  aspect: CompletionAspect,
+  layout: ImageLayout,
 ): Promise<string> => {
   const provider = settings.imageProvider;
   const apiKey = requireKey(settings, provider);
@@ -155,7 +168,7 @@ export const generateImage = async (
         ],
       },
       config: {
-        imageConfig: { aspectRatio: aspect },
+        imageConfig: { aspectRatio: layout.aspect },
       },
     });
     for (const part of response.candidates?.[0]?.content?.parts || []) {
@@ -166,16 +179,20 @@ export const generateImage = async (
     throw new Error('Gemini generated no image.');
   }
 
-  // OpenAI: image edit with the prepared image as input.
-  // 1024x1536 (2:3 portrait) is a standard size supported by all GPT image models.
+  // OpenAI: image edit with the prepared image as input, in one of the standard
+  // sizes supported by all GPT image models.
   const client = new OpenAI({ apiKey, dangerouslyAllowBrowser: true });
   const bytes = Uint8Array.from(atob(image.base64), c => c.charCodeAt(0));
   const ext = image.mimeType.split('/')[1] || 'png';
+  const maskBytes = layout.maskUrl
+    ? Uint8Array.from(atob(layout.maskUrl.split(',')[1]), c => c.charCodeAt(0))
+    : null;
   const edit = async (background?: 'transparent') => client.images.edit({
     model: settings.models.openaiImage,
     image: await toFile(bytes, `input.${ext}`, { type: image.mimeType }),
+    ...(maskBytes ? { mask: await toFile(maskBytes, 'mask.png', { type: 'image/png' }) } : {}),
     prompt,
-    size: '1024x1536',
+    size: layout.size,
     output_format: 'png',
     ...(background ? { background } : {}),
   });

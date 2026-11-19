@@ -8,7 +8,18 @@ import { DepthOnlyScene } from './components/DepthOnlyScene';
 import { BoundingBoxOverlay } from './components/BoundingBoxOverlay';
 import { MaskOverlay } from './components/MaskOverlay';
 import { segmentObjects } from './services/segmentation';
-import { detectObjectsInImage, generateCompletion, estimateCanvasExpansion, verifyCompletion, estimateObjectHeights } from './services/aiService';
+import { sameBox } from './components/depthSampling';
+
+/** Correlation above which the visible part is taken to have stayed in place during completion */
+const PART_PLACEMENT_MIN_SCORE = 0.6;
+
+const loadImage = (src: string): Promise<HTMLImageElement> => new Promise((resolve, reject) => {
+  const img = new Image();
+  img.onload = () => resolve(img);
+  img.onerror = () => reject(new Error('Failed to load image'));
+  img.src = src;
+});
+import { detectObjectsInImage, generateCompletion, verifyCompletion, estimateObjectHeights, estimateHiddenExtent, HiddenExtent } from './services/aiService';
 
 /** Face styles for the completion of people */
 const FACE_STYLE_OPTIONS = (Object.entries(FACE_STYLE_LABELS) as [FaceStyle, string][])
@@ -17,8 +28,8 @@ const FACE_STYLE_HINT = 'Faces of people in completion. Calm: sharp face, relaxe
 import { loadAISettings, saveAISettings, hasRequiredKeys, bgRemovalSpace, DEFAULT_SPACES, PROVIDER_LABELS, FACE_STYLE_LABELS } from './services/ai/models';
 import { estimateModelOrientation, MIN_ORIENTATION_CONFIDENCE } from './services/orientation';
 import { AISettingsDialog } from './components/AISettingsDialog';
-import { cropObjectsFromImage, removeBackgroundWithRembg, findBestMatchPosition, hasTransparentBackground, generate3DModelWithHunyuan3D, generate3DModelWithTrellis, blobUrlToDataUrl, dataUrlToBlobUrl, generateDepthMap, prepareImageForCompletion, calculateTightBoundingBox } from './utils';
-import { DetectedObject, CroppedObject, Model3D, ModelOrientation, ModelProvider, ProjectArchive, AISettings, FaceStyle, CompletionInfo } from './types';
+import { cropObjectsFromImage, removeBackgroundWithRembg, findBestMatchPosition, hasTransparentBackground, generate3DModelWithHunyuan3D, generate3DModelWithTrellis, blobUrlToDataUrl, dataUrlToBlobUrl, generateDepthMap, prepareImageForCompletion, calculateTightBoundingBox, prepareCompletionCanvas, verifyPartPlacement } from './utils';
+import { DetectedObject, CroppedObject, Model3D, ModelOrientation, ModelProvider, ProjectArchive, AISettings, FaceStyle, CompletionInfo, PartBoxSource } from './types';
 import { Scan, Sparkles, AlertCircle, Layers, Image as ImageIcon, User, Box, ArrowLeft, Upload, Plug, Wand2, RefreshCw, Star, Download, MonitorPlay, Cuboid, Save, FolderOpen, Trash2, Compass } from 'lucide-react';
 
 type AppMode = 'landing' | 'analyze' | 'batch-remove' | 'complete-body' | 'generate-3d';
@@ -751,6 +762,104 @@ const App: React.FC = () => {
     return { transparentUrl, extractedTransparentUrl, failed: false };
   };
 
+  /** The object's photo mask (SAM) cut to its crop, if the photo was segmented */
+  const loadCropObjectMask = async (item: CroppedObject): Promise<ImageData | undefined> => {
+    const obj = detectedObjects.find(o => o.mask && sameBox(o.box_2d, item.box_2d));
+    if (!obj?.mask) return undefined;
+    const [img, crop] = await Promise.all([loadImage(obj.mask.url), loadImage(item.imageUrl)]);
+    const [ymin, xmin, ymax, xmax] = item.box_2d;
+    const c = document.createElement('canvas');
+    c.width = crop.naturalWidth; c.height = crop.naturalHeight;
+    const ctx = c.getContext('2d')!;
+    ctx.drawImage(img, xmin * img.naturalWidth, ymin * img.naturalHeight, (xmax - xmin) * img.naturalWidth, (ymax - ymin) * img.naturalHeight, 0, 0, c.width, c.height);
+    return ctx.getImageData(0, 0, c.width, c.height);
+  };
+
+  /**
+   * Complete one cropped object with a layout-preserving canvas.
+   * The visible part is placed at a known box on a canvas of the image model's
+   * output size (with room for its hidden extent), locked with an edit mask
+   * (OpenAI, when the photo was segmented), and checked afterwards. If it stayed
+   * in place, that box is the visible part in the completed image; otherwise
+   * AKAZE matching is used as before.
+   */
+  const completeWithLayout = async (item: CroppedObject, extent: HiddenExtent, tag: string) => {
+    const objectMask = await loadCropObjectMask(item).catch(() => undefined);
+    const prepared = await prepareCompletionCanvas(item.imageUrl, extent, aiSettings.imageProvider, objectMask);
+
+    const tGen = performance.now();
+    const generatedImageUrl = await generateCompletion(
+      prepared.imageUrl, item.label, item.type, aiSettings, item.description, { faceStyle, layout: prepared.layout });
+    setProcessingTimes(prev => new Map(prev).set(`Generation: ${item.label}`, (performance.now() - tGen) / 1000));
+
+    // Did the visible part stay where it was put?
+    const placementScore = await verifyPartPlacement(generatedImageUrl, prepared).catch(() => -1);
+
+    let transparentUrl = generatedImageUrl;
+    let extractedTransparentUrl: string | undefined;
+    let bgRemovalFailed = false;
+    if (bgRemovalAfterCompletion) {
+      const tBg = performance.now();
+      const bg = await removeCompletionBackground(generatedImageUrl, item.imageUrl, tag);
+      transparentUrl = bg.transparentUrl;
+      extractedTransparentUrl = bg.extractedTransparentUrl;
+      bgRemovalFailed = bg.failed;
+      setProcessingTimes(prev => new Map(prev).set(`Compl BG: ${item.label}`, (performance.now() - tBg) / 1000));
+    }
+
+    let tightBox2d: [number, number, number, number] | undefined;
+    let partBox2d: [number, number, number, number] | undefined;
+    let partSource: PartBoxSource = 'whole';
+    try {
+      tightBox2d = await calculateTightBoundingBox(transparentUrl);
+    } catch (e) {
+      console.warn(`[${tag}] Tight box failed:`, e);
+    }
+    if (placementScore >= PART_PLACEMENT_MIN_SCORE) {
+      partBox2d = prepared.partBox;
+      partSource = 'layout';
+    } else {
+      // The image model moved the visible part: find it by feature matching
+      const tMatch = performance.now();
+      try {
+        const matched = await findBestMatchPosition(transparentUrl, extractedTransparentUrl || item.imageUrl);
+        if (matched) { partBox2d = matched; partSource = 'matching'; }
+      } catch (e) {
+        console.warn(`[${tag}] Matching failed:`, e);
+      }
+      setProcessingTimes(prev => new Map(prev).set(`AKAZE: ${item.label}`, (performance.now() - tMatch) / 1000));
+      if (!partBox2d) partBox2d = tightBox2d;
+    }
+    console.log(`[${tag}] ${item.label}: visible part ${partSource} (placement score ${placementScore.toFixed(2)}${prepared.layout.maskUrl ? ', edit mask' : ''})`);
+
+    return {
+      transparentUrl, bgRemovalFailed, tightBox2d, partBox2d, partSource, placementScore,
+      expansionRatio: 1 + extent.top + extent.bottom,
+    };
+  };
+
+  /** Completed item from the result of completeWithLayout */
+  const makeCompletedItem = (item: CroppedObject, r: Awaited<ReturnType<typeof completeWithLayout>>): CroppedObject => ({
+    ...item,
+    id: `generated-${item.id}-${Date.now()}`,
+    label: `${item.label} (Completed)`,
+    imageUrl: r.transparentUrl,
+    bgRemovalFailed: r.bgRemovalFailed,
+    completionExpansionRatio: r.expansionRatio,
+    completion: { ...completionInfo(item.type), partSource: r.partSource },
+    originalCroppedImageUrl: item.imageUrl,
+    originalPartBox2d: r.partBox2d,
+    tightBox2d: r.tightBox2d,
+    isRefined: !!r.partBox2d,
+  });
+
+  /** How far the object extends beyond its crop, from the whole photo */
+  const hiddenExtentOf = (item: CroppedObject) => previewUrl
+    ? estimateHiddenExtent(previewUrl, item.box_2d, item.label, item.type, aiSettings)
+    : Promise.resolve(item.type === 'person'
+      ? { left: 0.15, right: 0.15, top: 0.05, bottom: 1.2 }
+      : { left: 0.3, right: 0.3, top: 0.3, bottom: 0.3 });
+
   const handleCompleteBody = async (item: CroppedObject) => {
     if (!hasAIKeys) {
       openAISettings();
@@ -760,144 +869,33 @@ const App: React.FC = () => {
     // Add to processing IDs for persistent indicator
     setProcessingIds(prev => new Set(prev).add(item.id));
     const t0 = performance.now();
-
     const MAX_RETRIES = 2;
-    let attempt = 0;
-    let finalImageUrl = '';
-    let expansionRatio = 1;
-    let detectedOriginalPartBox2d: [number, number, number, number] | undefined;
-    let detectedTightBox2d: [number, number, number, number] | undefined;
-    let bgRemovalFailed = false;
 
     try {
-      // Step 1: Estimate canvas expansion needed using the vision provider
-      const { verticalRatio, horizontalRatio } = await estimateCanvasExpansion(
-        item.imageUrl,
-        item.label,
-        item.type,
-        aiSettings
-      );
+      // Step 1: how far the object extends beyond its crop on each side
+      const extent = await hiddenExtentOf(item);
 
-      while (attempt <= MAX_RETRIES) {
-        attempt++;
+      let result: Awaited<ReturnType<typeof completeWithLayout>> | undefined;
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        // Steps 2-3: complete on a larger canvas with each retry
+        const grow = 1 + attempt * 0.3;
+        result = await completeWithLayout(item, {
+          left: extent.left * grow, right: extent.right * grow, top: extent.top * grow, bottom: extent.bottom * grow,
+        }, 'Complete Body');
 
-        // Step 2: Prepare image with estimated (or increased) expansion
-        const adjustedVerticalRatio = verticalRatio * (1 + (attempt - 1) * 0.3); // Increase by 30% each retry
-        const adjustedHorizontalRatio = horizontalRatio * (1 + (attempt - 1) * 0.15);
-
-        const { imageUrl: preparedUrl, expansionRatio: expRatio } = await prepareImageForCompletion(
-          item.imageUrl,
-          adjustedVerticalRatio,
-          adjustedHorizontalRatio
-        );
-        expansionRatio = expRatio;
-
-        // Step 3: Generate completion
-        const tGen = performance.now();
-        const generatedImageUrl = await generateCompletion(
-          preparedUrl,
-          item.label,
-          item.type,
-          aiSettings,
-          item.description,
-          { faceStyle }
-        );
-        const genElapsed = (performance.now() - tGen) / 1000;
-        setProcessingTimes(prev => new Map(prev).set(`Generation: ${item.label}`, genElapsed));
-
-        // Step 3.5: Run background removal FIRST, then AKAZE matching on transparent images
-        let transparentUrl = generatedImageUrl;
-        let extractedTransparentUrl: string | undefined;
-
-        if (bgRemovalAfterCompletion) {
-          const tBg = performance.now();
-          const bg = await removeCompletionBackground(generatedImageUrl, item.imageUrl, 'Complete Body');
-          transparentUrl = bg.transparentUrl;
-          extractedTransparentUrl = bg.extractedTransparentUrl;
-          bgRemovalFailed = bg.failed;
-          const bgElapsed = (performance.now() - tBg) / 1000;
-          setProcessingTimes(prev => new Map(prev).set(`Compl BG: ${item.label}`, bgElapsed));
+        // Step 4: verify that nothing is cut off
+        const { isComplete, missingParts } = await verifyCompletion(result.transparentUrl, item.label, item.type, aiSettings);
+        if (isComplete) break;
+        if (attempt === MAX_RETRIES) {
+          console.warn(`[Complete Body] Still incomplete after ${MAX_RETRIES + 1} attempts, using best result`);
+        } else {
+          console.warn(`[Complete Body] Incomplete (missing: ${missingParts.join(', ')}), retrying with larger canvas...`);
         }
-
-        // Step 3.6: Calculate tightBox2d for the completed image first
-        const tMatch = performance.now();
-        try {
-
-          // Always calculate tightBox2d for the completed image
-          const tightBox = await calculateTightBoundingBox(transparentUrl);
-          if (tightBox) {
-            detectedTightBox2d = tightBox;
-          }
-
-          // Then try AKAZE matching for originalPartBox2d
-          const targetImage = transparentUrl;
-          const templateImage = extractedTransparentUrl || item.imageUrl;
-          const matchedBox = await findBestMatchPosition(targetImage, templateImage);
-          if (matchedBox) {
-            detectedOriginalPartBox2d = matchedBox;
-          } else {
-            // Fallback: use tightBox2d as originalPartBox2d
-            if (tightBox) {
-              detectedOriginalPartBox2d = tightBox;
-            }
-          }
-        } catch (matchError) {
-          console.warn('[Complete Body] Matching failed:', matchError);
-          // Fallback: try to use tightBox2d
-          try {
-            const tightBox = await calculateTightBoundingBox(transparentUrl);
-            if (tightBox) {
-              detectedOriginalPartBox2d = tightBox;
-              detectedTightBox2d = tightBox; // Also save as tightBox2d
-            }
-          } catch (tightBoxError) {
-            console.warn('[Complete Body] tightBox2d fallback also failed:', tightBoxError);
-          }
-        }
-        const matchElapsed = (performance.now() - tMatch) / 1000;
-        setProcessingTimes(prev => new Map(prev).set(`AKAZE: ${item.label}`, matchElapsed));
-
-
-        // Step 4: Verify completion
-        const { isComplete, missingParts } = await verifyCompletion(
-          transparentUrl,
-          item.label,
-          item.type,
-          aiSettings
-        );
-
-        if (isComplete || attempt > MAX_RETRIES) {
-          finalImageUrl = transparentUrl;
-          if (!isComplete) {
-            console.warn(`[Complete Body] Still incomplete after ${MAX_RETRIES + 1} attempts, using best result`);
-          }
-          break;
-        }
-
-        // Not complete yet - retry with ORIGINAL image but larger canvas
-        console.warn(`[Complete Body] Incomplete (missing: ${missingParts.join(', ')}), retrying with larger canvas...`);
-        // Loop continues with same item.imageUrl but increased adjustedVerticalRatio/adjustedHorizontalRatio
       }
 
-      const newId = `generated-${item.id}-${Date.now()}`;
-      const newLabel = `${item.label} (Completed)`;
-
-      const generatedObject: CroppedObject = {
-        ...item,
-        id: newId,
-        label: newLabel,
-        imageUrl: finalImageUrl,
-        bgRemovalFailed,
-        completionExpansionRatio: expansionRatio,
-        completion: completionInfo(item.type),
-        originalCroppedImageUrl: item.imageUrl,
-        originalPartBox2d: detectedOriginalPartBox2d,
-        tightBox2d: detectedTightBox2d,
-        isRefined: !!detectedOriginalPartBox2d
-      };
-
+      const generatedObject = makeCompletedItem(item, result!);
       setCompletedImages(prev => [generatedObject, ...prev]);
-      addToSelection('completed', [newId]);
+      addToSelection('completed', [generatedObject.id]);
       setActiveTab('completed');
 
     } catch (e) {
@@ -933,89 +931,11 @@ const App: React.FC = () => {
       for (const item of itemsToProcess) {
         const tItem = performance.now();
         try {
-          // Prepare image (pad if needed to track expansion)
-          const { imageUrl: preparedUrl, expansionRatio } = await prepareImageForCompletion(item.imageUrl);
-
-          const tGen2 = performance.now();
-          const generatedImageUrl = await generateCompletion(preparedUrl, item.label, item.type, aiSettings, item.description, { faceStyle });
-          const genElapsed2 = (performance.now() - tGen2) / 1000;
-          setProcessingTimes(prev => new Map(prev).set(`Generation: ${item.label}`, genElapsed2));
-
-          // Run RMBG first, then AKAZE matching on transparent images
-          let batchOriginalPartBox2d: [number, number, number, number] | undefined;
-          let transparentUrl = generatedImageUrl;
-          let extractedTransparentUrl: string | undefined;
-
-          let batchBgRemovalFailed = false;
-          if (bgRemovalAfterCompletion) {
-            const tBg2 = performance.now();
-            const bg = await removeCompletionBackground(generatedImageUrl, item.imageUrl, 'Batch Complete');
-            transparentUrl = bg.transparentUrl;
-            extractedTransparentUrl = bg.extractedTransparentUrl;
-            batchBgRemovalFailed = bg.failed;
-            const bgElapsed2 = (performance.now() - tBg2) / 1000;
-            setProcessingTimes(prev => new Map(prev).set(`Compl BG: ${item.label}`, bgElapsed2));
-          }
-
-          // Calculate tightBox2d for the completed image first, then try AKAZE matching
-          let batchTightBox2d: [number, number, number, number] | undefined;
-          const tMatch2 = performance.now();
-          try {
-
-            // Always calculate tightBox2d first
-            const tightBox = await calculateTightBoundingBox(transparentUrl);
-            if (tightBox) {
-              batchTightBox2d = tightBox;
-            }
-
-            // Then try AKAZE matching for originalPartBox2d
-            const targetImage = transparentUrl;
-            const templateImage = extractedTransparentUrl || item.imageUrl;
-            const matchedBox = await findBestMatchPosition(targetImage, templateImage);
-            if (matchedBox) {
-              batchOriginalPartBox2d = matchedBox;
-            } else {
-              // Fallback: use tightBox2d as originalPartBox2d
-              if (tightBox) {
-                batchOriginalPartBox2d = tightBox;
-              }
-            }
-          } catch (matchError) {
-            console.warn('[Batch Complete] Matching failed:', matchError);
-            // Fallback: try tightBox2d
-            try {
-              const tightBox = await calculateTightBoundingBox(transparentUrl);
-              if (tightBox) {
-                batchOriginalPartBox2d = tightBox;
-                batchTightBox2d = tightBox;
-              }
-            } catch (e) {
-              console.warn('[Batch Complete] tightBox2d fallback failed:', e);
-            }
-          }
-          const matchElapsed2 = (performance.now() - tMatch2) / 1000;
-          setProcessingTimes(prev => new Map(prev).set(`AKAZE: ${item.label}`, matchElapsed2));
-
-
-          const newId = `generated-${item.id}-${Date.now()}`;
-          const newLabel = `${item.label} (Completed)`;
-
-          const generatedObject: CroppedObject = {
-            ...item,
-            id: newId,
-            label: newLabel,
-            imageUrl: transparentUrl,
-            bgRemovalFailed: batchBgRemovalFailed,
-            completionExpansionRatio: expansionRatio,
-            completion: completionInfo(item.type),
-            originalCroppedImageUrl: item.imageUrl,
-            originalPartBox2d: batchOriginalPartBox2d,
-            tightBox2d: batchTightBox2d,
-            isRefined: !!batchOriginalPartBox2d
-          };
-
+          const extent = await hiddenExtentOf(item);
+          const result = await completeWithLayout(item, extent, 'Batch Complete');
+          const generatedObject = makeCompletedItem(item, result);
           setCompletedImages(prev => [generatedObject, ...prev]);
-          addToSelection('completed', [newId]);
+          addToSelection('completed', [generatedObject.id]);
         } catch (e) {
           console.error(`Failed to complete ${item.label}`, e);
         } finally {

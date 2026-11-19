@@ -4,7 +4,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { removeStrayFragments } from './meshCleanup';
-import { FitRenderer, FitTarget, fitModel, fromWorld, poseCost, toWorld } from './modelFitting';
+import { FitRenderer, FitTarget, fitModel, fromWorld, partRegionFromBoxes, poseCost, toWorld, viewYawDeg } from './modelFitting';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { Spinner } from './Spinner';
 import { DetectedObject, Model3D } from '../types';
@@ -66,6 +66,8 @@ interface Placement {
     scale: number;
     /** Height of the model at scale 1 */
     unitHeight: number;
+    /** Rotation of the mesh about Y without the estimated orientation (radians) */
+    baseYaw: number;
 }
 
 interface FitReportEntry {
@@ -79,6 +81,8 @@ interface FitReportEntry {
 
 interface FitCacheEntry {
     accepted: boolean;
+    /** The fit used the visible part's correspondence; the mesh is then fitted without the estimated orientation */
+    usedPart: boolean;
     pose: { u: number; v: number; depth: number; scale: number; yawDeg: number };
     report: FitReportEntry;
 }
@@ -775,6 +779,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     // Estimated orientation (rotation about the vertical axis). Applied before the
                     // bounds are measured, so the scale fit uses the box of the rotated model.
                     const yawDeg = applyOrientation && model.orientation ? model.orientation.yawDeg : 0;
+                    const baseYaw = mesh.rotation.y;
                     mesh.rotation.y += yawDeg * Math.PI / 180;
 
                     // Fix texture color space for proper color rendering
@@ -911,7 +916,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     wholeBoxContainersRef.current.push(wholeBoxContainer);
                     wholeBoxGroup.add(wholeBoxContainer);
 
-                    placements.push({ model, mesh, meshContainer, wholeBoxContainer, wholeLine, scale, unitHeight: cHeight });
+                    placements.push({ model, mesh, meshContainer, wholeBoxContainer, wholeLine, scale, unitHeight: cHeight, baseYaw });
                     loaded();
                 }, undefined, (error) => {
                     console.error(`Failed to load ${model.label}:`, error);
@@ -987,7 +992,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             for (let n = 0; n < targets.length; n++) {
                 const { p, obj, mask } = targets[n];
                 if (disposed || loadVersion !== loadVersionRef.current) return;
-                const key = [p.model.id, depthScale, applyOrientation, obj.realHeightM, unitsPerMeter.toFixed(4), obj.mask?.url.length].join('|');
+                const key = [p.model.id, depthScale, applyOrientation, obj.realHeightM, unitsPerMeter.toFixed(4), obj.mask?.url.length, p.model.originalPartBox2d?.join(',')].join('|');
                 let entry = fitCacheRef.current.get(key);
                 if (!entry) {
                     setFitStatus(`Fitting ${n + 1} / ${targets.length}: ${obj.label}`);
@@ -1005,25 +1010,41 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     const scalePrior = { scale: priorScale, sigmaLog: Math.log(1.5) };
                     const renderer = new FitRenderer(W, H, fitCamera);
                     try {
-                        renderer.setObject(p.mesh.clone());
-                        // Cost of the box-based placement, for comparison
-                        const current = { ...fromWorld(p.meshContainer.position, fitCamera), scale: p.scale, yawDeg: 0 };
-                        const before = poseCost(renderer, target, current, scalePrior).cost;
+                        // Part correspondence: the visible part's box in the completed image (from
+                        // which the model was generated) tells which part of the model is visible.
+                        // The generator's front is the completed image's view, so the model is fitted
+                        // without the estimated orientation, with its yaw near the photo's view direction.
+                        const clone = p.mesh.clone();
+                        const part = p.model.originalPartBox2d && p.model.tightBox2d;
+                        if (part) clone.rotation.y = p.baseYaw;
+                        const region = part ? partRegionFromBoxes(clone, p.model.tightBox2d!, p.model.originalPartBox2d!) : null;
+                        if (!region) clone.rotation.y = p.mesh.rotation.y;
+                        renderer.setObject(clone);
+                        renderer.setPartRegion(region);
+                        const u0 = su / count;
+                        const view = viewYawDeg(u0, fitCamera);
+                        const yawPrior = region ? { yawDeg: view, sigmaDeg: 25 } : undefined;
+                        // Cost of the box-based placement, for comparison (its yaw relative to the fitted mesh)
+                        const currentYaw = region ? (p.mesh.rotation.y - p.baseYaw) * 180 / Math.PI : 0;
+                        const current = { ...fromWorld(p.meshContainer.position, fitCamera), scale: p.scale, yawDeg: currentYaw };
+                        const before = poseCost(renderer, target, current, scalePrior, yawPrior).cost;
                         const result = fitModel(renderer, target, {
-                            initial: { u: su / count, v: sv / count, depth: median(depths), scale: priorScale, yawDeg: 0 },
+                            initial: { u: u0, v: sv / count, depth: median(depths), scale: priorScale, yawDeg: region ? view : 0 },
                             scalePrior,
-                            yawCandidates: FIT_YAWS,
+                            yawPrior,
+                            yawCandidates: region ? [-40, -20, 0, 20, 40].map(d => view + d) : FIT_YAWS,
                         });
                         const accepted = result.cost < before * 0.9;
                         entry = {
                             accepted,
+                            usedPart: !!region,
                             pose: result.pose,
                             report: {
                                 label: obj.label, accepted, costBefore: before, costAfter: result.cost,
                                 scaleChange: result.pose.scale / p.scale, yawDeg: result.pose.yawDeg,
                             },
                         };
-                        console.log(`[Fit] ${obj.label}: cost ${before.toFixed(3)} -> ${result.cost.toFixed(3)}`, result.terms, accepted ? 'accepted' : 'kept box placement');
+                        console.log(`[Fit] ${obj.label}: cost ${before.toFixed(3)} -> ${result.cost.toFixed(3)}${region ? ' (with part correspondence)' : ''}`, result.terms, accepted ? 'accepted' : 'kept box placement');
                     } catch (e) {
                         console.error(`[Fit] ${obj.label} failed:`, e);
                     } finally {
@@ -1033,15 +1054,29 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 }
                 if (!entry) continue;
                 report.push(entry.report);
-                if (entry.accepted) applyFit(p, entry.pose, fitCamera);
+                if (entry.accepted) applyFit(p, entry, fitCamera);
             }
             setFitStatus(null);
             setFitReport(report);
         };
 
         /** Place a model at a fitted pose: container (position, scale) > yaw group > mesh */
-        const applyFit = (p: Placement, pose: FitCacheEntry['pose'], fitCamera: { hfovDeg: number; aspect: number }) => {
+        const applyFit = (p: Placement, entry: FitCacheEntry, fitCamera: { hfovDeg: number; aspect: number }) => {
+            const { pose } = entry;
             const position = toWorld(pose.u, pose.v, pose.depth, fitCamera);
+            if (entry.usedPart) {
+                // Fitted without the estimated orientation: reset it and redraw the whole-model box
+                p.mesh.rotation.y = p.baseYaw;
+                p.meshContainer.remove(p.mesh);
+                p.mesh.updateMatrixWorld(true);
+                const b = new THREE.Box3().setFromObject(p.mesh, true);
+                p.meshContainer.add(p.mesh);
+                const size = b.getSize(new THREE.Vector3());
+                const line = p.wholeLine as THREE.LineSegments;
+                line.geometry.dispose();
+                line.geometry = new THREE.EdgesGeometry(new THREE.BoxGeometry(size.x, size.y, size.z * 1.01));
+                b.getCenter(line.position);
+            }
             for (const [container, child] of [[p.meshContainer, p.mesh], [p.wholeBoxContainer, p.wholeLine]] as [THREE.Object3D, THREE.Object3D][]) {
                 const yawGroup = new THREE.Group();
                 yawGroup.rotation.y = pose.yawDeg * Math.PI / 180;

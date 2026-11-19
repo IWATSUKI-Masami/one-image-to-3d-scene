@@ -19,6 +19,12 @@
  *
  * Which part of the model is visible follows from the fit; nothing is specific
  * to an object category.
+ *
+ * Part correspondence (optional): when it is known which part of the model is
+ * visible in the photo (the visible part's box in the completed image, from which
+ * the model was generated), condition 1 asks that the mask be covered by THAT part
+ * of the model, and the yaw is kept near the view direction of the photo (the
+ * generator's front is the completed image's view).
  */
 import * as THREE from 'three';
 
@@ -81,7 +87,24 @@ export interface FitOptions {
   scalePrior?: ScalePrior;
   /** Yaw angles (degrees) tried in the coarse search; default: around the initial yaw */
   yawCandidates?: number[];
+  /** Yaw prior (degrees), e.g. from part correspondence */
+  yawPrior?: { yawDeg: number; sigmaDeg: number };
 }
+
+/**
+ * Region of the model visible in the photo, in the model's own frame (the frame
+ * of the object given to FitRenderer.setObject): x and y ranges of its front view.
+ */
+export interface PartRegion {
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+}
+
+/** Mask pixels covered by model pixels outside the visible part count this much */
+const NON_PART_COVERAGE = 0.3;
+const W_YAW = 0.2;
 
 // Weights of the terms. Miss and violation are fractions of the mask area.
 const W_MISS = 1;
@@ -112,12 +135,15 @@ export const fromWorld = (p: THREE.Vector3, camera: FitCamera): { u: number; v: 
   };
 };
 
-/** Pixels covered by a rendering: indices and their depths */
+/** Pixels covered by a rendering: indices, their depths, and whether they belong to the visible part */
 interface Rendering {
   xs: Int16Array;
   ys: Int16Array;
   depths: Float32Array;
+  part: Uint8Array;
   count: number;
+  /** A part region was set */
+  hasPart: boolean;
 }
 
 /**
@@ -150,26 +176,38 @@ export class FitRenderer {
     this.scene.overrideMaterial = new THREE.ShaderMaterial({
       side: THREE.DoubleSide,
       vertexShader: `
+        uniform mat4 uFrameInverse;
         varying float vDepth;
+        varying vec3 vFrame;
         void main() {
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
           vDepth = -mv.z;
+          vFrame = (uFrameInverse * modelMatrix * vec4(position, 1.0)).xyz;
           gl_Position = projectionMatrix * mv;
         }`,
       fragmentShader: `
         precision highp float;
+        uniform vec4 uPart; // x0, x1, y0, y1 in the model's frame; x0 > x1 = none
         varying float vDepth;
+        varying vec3 vFrame;
         void main() {
           float d = clamp(vDepth / ${DEPTH_MAX.toFixed(1)}, 0.0, 1.0) * 65535.0;
           float hi = floor(d / 256.0);
           float lo = d - hi * 256.0;
-          gl_FragColor = vec4(hi / 255.0, lo / 255.0, 0.0, 1.0);
+          float part = (vFrame.x >= uPart.x && vFrame.x <= uPart.y && vFrame.y >= uPart.z && vFrame.y <= uPart.w) ? 1.0 : 0.0;
+          gl_FragColor = vec4(hi / 255.0, lo / 255.0, part, 1.0);
         }`,
+      uniforms: {
+        uFrameInverse: { value: new THREE.Matrix4() },
+        uPart: { value: new THREE.Vector4(1, 0, 1, 0) },
+      },
     });
     this.root.add(this.yawGroup);
     this.scene.add(this.root);
     this.pixels = new Uint8Array(width * height * 4);
   }
+
+  private hasPart = false;
 
   /** Set the object to render (it is re-parented into the renderer's scene) */
   setObject(object: THREE.Object3D) {
@@ -177,11 +215,21 @@ export class FitRenderer {
     this.yawGroup.add(object);
   }
 
+  /** Mark the visible part of the model (in the frame of the object's parent, i.e. the object as given) */
+  setPartRegion(region: PartRegion | null) {
+    const u = (this.scene.overrideMaterial as THREE.ShaderMaterial).uniforms.uPart.value as THREE.Vector4;
+    if (region) u.set(region.x0, region.x1, region.y0, region.y1);
+    else u.set(1, 0, 1, 0);
+    this.hasPart = !!region;
+  }
+
   render(pose: FitPose): Rendering {
     this.root.position.copy(toWorld(pose.u, pose.v, pose.depth, this.fitCamera));
     this.root.scale.setScalar(pose.scale);
     this.yawGroup.rotation.y = pose.yawDeg * Math.PI / 180;
     this.root.updateMatrixWorld(true);
+    ((this.scene.overrideMaterial as THREE.ShaderMaterial).uniforms.uFrameInverse.value as THREE.Matrix4)
+      .copy(this.yawGroup.matrixWorld).invert();
     this.renderer.setRenderTarget(this.target);
     this.renderer.setClearColor(0x000000, 0);
     this.renderer.clear();
@@ -193,6 +241,7 @@ export class FitRenderer {
     const xs = new Int16Array(width * height);
     const ys = new Int16Array(width * height);
     const depths = new Float32Array(width * height);
+    const part = new Uint8Array(width * height);
     let count = 0;
     for (let row = 0; row < height; row++) {
       // readPixels starts at the bottom row
@@ -203,10 +252,11 @@ export class FitRenderer {
         xs[count] = x;
         ys[count] = y;
         depths[count] = ((pixels[o] * 256 + pixels[o + 1]) / 65535) * DEPTH_MAX;
+        part[count] = pixels[o + 2] > 127 ? 1 : 0;
         count++;
       }
     }
-    return { xs, ys, depths, count };
+    return { xs, ys, depths, part, count, hasPart: this.hasPart };
   }
 
   dispose() {
@@ -218,10 +268,21 @@ export class FitRenderer {
   }
 }
 
-const priorTerm = (scale: number, prior?: ScalePrior): number => {
-  if (!prior) return 0;
-  const z = Math.log(scale / prior.scale) / prior.sigmaLog;
-  return z * z;
+/** Angle difference in degrees, -180..180 */
+const angleDiff = (a: number, b: number): number => ((a - b) % 360 + 540) % 360 - 180;
+
+/** Prior terms (condition 4): size, and yaw when a yaw prior is given */
+const priorTerm = (pose: FitPose, prior?: ScalePrior, yawPrior?: FitOptions['yawPrior']): number => {
+  let t = 0;
+  if (prior) {
+    const z = Math.log(pose.scale / prior.scale) / prior.sigmaLog;
+    t += z * z;
+  }
+  if (yawPrior) {
+    const z = angleDiff(pose.yawDeg, yawPrior.yawDeg) / yawPrior.sigmaDeg;
+    t += (W_YAW / W_PRIOR) * z * z;
+  }
+  return t;
 };
 
 /**
@@ -231,6 +292,7 @@ const priorTerm = (scale: number, prior?: ScalePrior): number => {
 const evaluate = (r: Rendering, target: FitTarget, maskCount: number, dx: number, dy: number): Omit<FitTerms, 'prior'> => {
   const { width, height, mask, depth } = target;
   let covered = 0;
+  let coveredPixels = 0;
   let violation = 0;
   let depthError = 0;
   for (let i = 0; i < r.count; i++) {
@@ -240,16 +302,18 @@ const evaluate = (r: Rendering, target: FitTarget, maskCount: number, dx: number
     const t = y * width + x;
     const observed = depth[t];
     if (mask[t]) {
-      covered++;
+      // With a known visible part, the mask should be covered by that part of the model
+      covered += !r.hasPart || r.part[i] ? 1 : NON_PART_COVERAGE;
+      coveredPixels++;
       depthError += Math.abs(Math.log(r.depths[i] / observed));
     } else if (r.depths[i] < observed * (1 - VIOLATION_TOLERANCE)) {
       violation++;
     }
   }
   return {
-    miss: 1 - covered / maskCount,
+    miss: Math.max(0, 1 - covered / maskCount),
     violation: violation / maskCount,
-    depthError: covered > 0 ? depthError / covered : 1,
+    depthError: coveredPixels > 0 ? depthError / coveredPixels : 1,
   };
 };
 
@@ -257,9 +321,9 @@ const total = (t: FitTerms): number =>
   W_MISS * t.miss + W_VIOLATION * t.violation + W_DEPTH * t.depthError + W_PRIOR * t.prior;
 
 /** Cost of a pose, rendered exactly */
-export const poseCost = (renderer: FitRenderer, target: FitTarget, pose: FitPose, prior?: ScalePrior): { cost: number; terms: FitTerms } => {
+export const poseCost = (renderer: FitRenderer, target: FitTarget, pose: FitPose, prior?: ScalePrior, yawPrior?: FitOptions['yawPrior']): { cost: number; terms: FitTerms } => {
   const maskCount = target.mask.reduce((a, b) => a + b, 0);
-  const terms = { ...evaluate(renderer.render(pose), target, Math.max(1, maskCount), 0, 0), prior: priorTerm(pose.scale, prior) };
+  const terms = { ...evaluate(renderer.render(pose), target, Math.max(1, maskCount), 0, 0), prior: priorTerm(pose, prior, yawPrior) };
   return { cost: total(terms), terms };
 };
 
@@ -308,7 +372,7 @@ export const fitModel = (renderer: FitRenderer, target: FitTarget, options: FitO
   const { initial, scalePrior } = options;
   const { width, height } = target;
   const maskCount = Math.max(1, target.mask.reduce((a, b) => a + b, 0));
-  const initialEval = poseCost(renderer, target, initial, scalePrior);
+  const initialEval = poseCost(renderer, target, initial, scalePrior, options.yawPrior);
 
   const yaws = options.yawCandidates ?? [-30, -15, 0, 15, 30].map(d => initial.yawDeg + d);
   const baseScale = scalePrior?.scale ?? initial.scale;
@@ -335,7 +399,7 @@ export const fitModel = (renderer: FitRenderer, target: FitTarget, options: FitO
       rx0 = Math.min(rx0, r.xs[i]); rx1 = Math.max(rx1, r.xs[i]);
       ry0 = Math.min(ry0, r.ys[i]); ry1 = Math.max(ry1, r.ys[i]);
     }
-    const prior = priorTerm(scale, scalePrior);
+    const prior = priorTerm(pose, scalePrior, options.yawPrior);
     let best = { cost: Infinity, dx: 0, dy: 0 };
     for (let dy = my0 - ry1; dy <= my1 - ry0; dy += step) {
       for (let dx = mx0 - rx1; dx <= mx1 - rx0; dx += step) {
@@ -353,13 +417,13 @@ export const fitModel = (renderer: FitRenderer, target: FitTarget, options: FitO
   // Re-score the most promising candidates with exact renders
   candidates.sort((a, b) => a.cost - b.cost);
   const rescored = candidates.slice(0, 12)
-    .map(c => ({ pose: c.pose, cost: poseCost(renderer, target, c.pose, scalePrior).cost }))
+    .map(c => ({ pose: c.pose, cost: poseCost(renderer, target, c.pose, scalePrior, options.yawPrior).cost }))
     .sort((a, b) => a.cost - b.cost);
 
   // Refinement with exact renders: parameters [u, v, log depth, log scale, yaw / 30]
   const toPose = (x: number[]): FitPose => ({ u: x[0], v: x[1], depth: Math.exp(x[2]), scale: Math.exp(x[3]), yawDeg: x[4] * 30 });
   const fromPose = (p: FitPose) => [p.u, p.v, Math.log(p.depth), Math.log(p.scale), p.yawDeg / 30];
-  const f = (x: number[]) => poseCost(renderer, target, toPose(x), scalePrior).cost;
+  const f = (x: number[]) => poseCost(renderer, target, toPose(x), scalePrior, options.yawPrior).cost;
   const steps = [0.02, 0.02, 0.05, 0.08, 0.25];
   let best = { pose: initial, cost: initialEval.cost };
   for (const c of rescored.slice(0, 4)) {
@@ -368,6 +432,46 @@ export const fitModel = (renderer: FitRenderer, target: FitTarget, options: FitO
     result = nelderMead(f, result.x, steps.map(v => v / 2), 40);
     if (result.fx < best.cost) best = { pose: toPose(result.x), cost: result.fx };
   }
-  const finalEval = poseCost(renderer, target, best.pose, scalePrior);
+  const finalEval = poseCost(renderer, target, best.pose, scalePrior, options.yawPrior);
   return { pose: best.pose, cost: finalEval.cost, terms: finalEval.terms, initialCost: initialEval.cost };
 };
+
+/**
+ * Visible part of a model from boxes in the image it was generated from:
+ * `tightBox` is the whole object and `partBox` the part visible in the photo
+ * (both [ymin, xmin, ymax, xmax] in the completed image). The model's front view
+ * is taken to match that image, so the part's relative position in the tight box
+ * maps onto the model's x/y extent (in the frame of the object as given).
+ */
+export const partRegionFromBoxes = (
+  object: THREE.Object3D,
+  tightBox: [number, number, number, number],
+  partBox: [number, number, number, number],
+): PartRegion | null => {
+  const [tymin, txmin, tymax, txmax] = tightBox;
+  const [pymin, pxmin, pymax, pxmax] = partBox;
+  const tw = txmax - txmin, th = tymax - tymin;
+  if (tw <= 1e-6 || th <= 1e-6) return null;
+  const rx0 = (pxmin - txmin) / tw, rx1 = (pxmax - txmin) / tw;
+  const ry0 = (pymin - tymin) / th, ry1 = (pymax - tymin) / th;
+  // The part box is the whole object: no information
+  if (rx0 <= 0.02 && ry0 <= 0.02 && rx1 >= 0.98 && ry1 >= 0.98) return null;
+  const parent = object.parent;
+  if (parent) parent.remove(object);
+  object.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(object, true);
+  if (parent) parent.add(object);
+  const w = box.max.x - box.min.x, h = box.max.y - box.min.y;
+  // A little slack: the generator's front view is not exactly the completed image
+  const slack = 0.05;
+  return {
+    x0: box.min.x + (rx0 - slack) * w,
+    x1: box.min.x + (rx1 + slack) * w,
+    y0: box.max.y - (ry1 + slack) * h,
+    y1: box.max.y - (ry0 - slack) * h,
+  };
+};
+
+/** Direction from an object at image position u towards the camera, as a yaw (degrees) */
+export const viewYawDeg = (u: number, camera: FitCamera): number =>
+  -Math.atan((u - 0.5) * 2 * Math.tan((camera.hfovDeg / 2) * Math.PI / 180)) * 180 / Math.PI;

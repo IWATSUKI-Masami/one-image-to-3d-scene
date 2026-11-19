@@ -1,5 +1,6 @@
 import { CroppedObject, DetectedObject } from './types';
 import { DEFAULT_SPACES } from './services/ai/models';
+import type { ImageLayout, OpenAIImageSize } from './services/ai/providers';
 import openCVUrl from '@techstark/opencv-js/dist/opencv.js?url';
 
 export const blobUrlToDataUrl = async (blobUrl: string): Promise<string> => {
@@ -523,6 +524,201 @@ export const prepareImageForCompletion = async (
     img.onerror = reject;
     img.src = url;
   });
+};
+
+// ---------------------------------------------------------------------------
+// Layout-preserving completion: the visible part keeps a known box
+// ---------------------------------------------------------------------------
+
+const OPENAI_SIZES: { size: OpenAIImageSize; w: number; h: number }[] = [
+  { size: '1024x1024', w: 1024, h: 1024 },
+  { size: '1536x1024', w: 1536, h: 1024 },
+  { size: '1024x1536', w: 1024, h: 1536 },
+];
+const GEMINI_ASPECTS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
+/** Longest side of a Gemini canvas (Gemini keeps the aspect ratio, not the pixel size) */
+const GEMINI_CANVAS_SIDE = 1024;
+
+export interface CompletionCanvas {
+  /** The canvas sent to the image model (PNG data URL) */
+  imageUrl: string;
+  /** Output layout for the image model (size, aspect ratio, OpenAI edit mask) */
+  layout: ImageLayout;
+  /** Box of the visible part on the canvas, normalized [ymin, xmin, ymax, xmax] */
+  partBox: [number, number, number, number];
+  /** Object pixels of the visible part (1) on the canvas, if a photo mask was given; for verification */
+  lockMask?: Uint8Array;
+  width: number;
+  height: number;
+}
+
+/**
+ * Canvas for layout-preserving completion.
+ *
+ * The crop is placed so that the canvas has room for the hidden extent of the
+ * object on each side, and the canvas has the output size of the image model
+ * (OpenAI) or its aspect ratio (Gemini). If the model keeps the visible part in
+ * place, its box on the canvas is also its box in the completed image, and no
+ * feature matching is needed.
+ *
+ * With the object's mask in the crop (`objectMask`: alpha > 128 on the object's
+ * visible pixels), only those pixels are drawn (other objects and the background
+ * in the crop are left white), and for OpenAI an edit mask locks them.
+ */
+export const prepareCompletionCanvas = async (
+  cropUrl: string,
+  extent: { left: number; right: number; top: number; bottom: number },
+  provider: 'openai' | 'gemini',
+  objectMask?: ImageData,
+): Promise<CompletionCanvas> => {
+  const crop = await loadImageElement(cropUrl);
+  const cw = crop.naturalWidth, ch = crop.naturalHeight;
+  // A small white margin around the whole object
+  const margin = 0.06;
+  const wantW = cw * (1 + extent.left + extent.right) * (1 + 2 * margin);
+  const wantH = ch * (1 + extent.top + extent.bottom) * (1 + 2 * margin);
+  const wantAspect = wantW / wantH;
+
+  let width: number, height: number, layout: ImageLayout;
+  const closest = <T,>(items: T[], aspect: (t: T) => number) =>
+    items.reduce((best, t) => Math.abs(Math.log(aspect(t) / wantAspect)) < Math.abs(Math.log(aspect(best) / wantAspect)) ? t : best);
+  if (provider === 'openai') {
+    const o = closest(OPENAI_SIZES, t => t.w / t.h);
+    width = o.w; height = o.h;
+    layout = { size: o.size, aspect: '1:1' };
+  } else {
+    const a = closest(GEMINI_ASPECTS, t => { const [x, y] = t.split(':').map(Number); return x / y; });
+    const [x, y] = a.split(':').map(Number);
+    width = x >= y ? GEMINI_CANVAS_SIDE : Math.round(GEMINI_CANVAS_SIDE * x / y);
+    height = x >= y ? Math.round(GEMINI_CANVAS_SIDE * y / x) : GEMINI_CANVAS_SIDE;
+    layout = { size: '1024x1536', aspect: a };
+  }
+
+  // Scale the wanted area into the canvas and center it
+  const scale = Math.min(width / wantW, height / wantH);
+  const areaX = (width - wantW * scale) / 2;
+  const areaY = (height - wantH * scale) / 2;
+  const px = areaX + (cw * (extent.left + margin * (1 + extent.left + extent.right))) * scale;
+  const py = areaY + (ch * (extent.top + margin * (1 + extent.top + extent.bottom))) * scale;
+  const pw = cw * scale, ph = ch * scale;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, width, height);
+  ctx.imageSmoothingQuality = 'high';
+
+  let lockMask: Uint8Array | undefined;
+  let maskUrl: string | undefined;
+  if (objectMask) {
+    // Draw only the object's pixels of the crop
+    const cropCanvas = document.createElement('canvas');
+    cropCanvas.width = cw; cropCanvas.height = ch;
+    const cctx = cropCanvas.getContext('2d')!;
+    cctx.drawImage(crop, 0, 0);
+    const data = cctx.getImageData(0, 0, cw, ch);
+    for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) {
+      const mx = Math.min(objectMask.width - 1, Math.floor((x + 0.5) / cw * objectMask.width));
+      const my = Math.min(objectMask.height - 1, Math.floor((y + 0.5) / ch * objectMask.height));
+      if (objectMask.data[(my * objectMask.width + mx) * 4 + 3] <= 128) {
+        const o = (y * cw + x) * 4;
+        data.data[o] = data.data[o + 1] = data.data[o + 2] = 255;
+      }
+    }
+    cctx.putImageData(data, 0, 0);
+    ctx.drawImage(cropCanvas, px, py, pw, ph);
+
+    // Lock mask on the canvas: object pixels, shrunk by a pixel so that edges can blend
+    lockMask = new Uint8Array(width * height);
+    const x0 = Math.max(0, Math.floor(px)), x1 = Math.min(width, Math.ceil(px + pw));
+    const y0 = Math.max(0, Math.floor(py)), y1 = Math.min(height, Math.ceil(py + ph));
+    const inside = (x: number, y: number) => {
+      const mx = Math.floor((x + 0.5 - px) / pw * objectMask.width);
+      const my = Math.floor((y + 0.5 - py) / ph * objectMask.height);
+      return mx >= 0 && my >= 0 && mx < objectMask.width && my < objectMask.height &&
+        objectMask.data[(my * objectMask.width + mx) * 4 + 3] > 128;
+    };
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+      if (inside(x, y) && inside(x - 1, y) && inside(x + 1, y) && inside(x, y - 1) && inside(x, y + 1)) lockMask[y * width + x] = 1;
+    }
+    if (provider === 'openai') {
+      // OpenAI edit mask: opaque = keep, transparent = may be edited
+      const m = document.createElement('canvas');
+      m.width = width; m.height = height;
+      const mctx = m.getContext('2d')!;
+      const img = mctx.createImageData(width, height);
+      for (let i = 0; i < lockMask.length; i++) {
+        img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = 255;
+        img.data[i * 4 + 3] = lockMask[i] ? 255 : 0;
+      }
+      mctx.putImageData(img, 0, 0);
+      maskUrl = m.toDataURL('image/png');
+    }
+  } else {
+    ctx.drawImage(crop, px, py, pw, ph);
+  }
+  layout.maskUrl = maskUrl;
+
+  return {
+    imageUrl: canvas.toDataURL('image/png'),
+    layout,
+    partBox: [py / height, px / width, (py + ph) / height, (px + pw) / width],
+    lockMask,
+    width,
+    height,
+  };
+};
+
+/**
+ * Check that the image model kept the visible part in place: normalized cross-
+ * correlation (grayscale) between the canvas and the completed image inside the
+ * part's box (on the object's pixels when known). Returns the correlation (-1..1);
+ * the framing must also match (same aspect ratio).
+ */
+export const verifyPartPlacement = async (generatedUrl: string, prepared: CompletionCanvas): Promise<number> => {
+  const [gen, canvasImg] = await Promise.all([loadImageElement(generatedUrl), loadImageElement(prepared.imageUrl)]);
+  if (Math.abs(Math.log((gen.naturalWidth / gen.naturalHeight) / (prepared.width / prepared.height))) > 0.02) return -1;
+  const [ymin, xmin, ymax, xmax] = prepared.partBox;
+  // Compare on a grid of at most 96 px along the longer side of the box
+  const bw = (xmax - xmin) * prepared.width, bh = (ymax - ymin) * prepared.height;
+  const k = Math.min(1, 96 / Math.max(bw, bh));
+  const gw = Math.max(4, Math.round(bw * k)), gh = Math.max(4, Math.round(bh * k));
+  const sample = (img: HTMLImageElement) => {
+    const c = document.createElement('canvas');
+    c.width = gw; c.height = gh;
+    const cx = c.getContext('2d')!;
+    cx.fillStyle = '#FFFFFF';
+    cx.fillRect(0, 0, gw, gh);
+    cx.drawImage(img, xmin * img.naturalWidth, ymin * img.naturalHeight, (xmax - xmin) * img.naturalWidth, (ymax - ymin) * img.naturalHeight, 0, 0, gw, gh);
+    const d = cx.getImageData(0, 0, gw, gh).data;
+    const g = new Float32Array(gw * gh);
+    for (let i = 0; i < g.length; i++) g[i] = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2];
+    return g;
+  };
+  const a = sample(canvasImg), b = sample(gen);
+  // Pixels to compare: the object's pixels if known, otherwise the whole box
+  const use = new Uint8Array(gw * gh).fill(prepared.lockMask ? 0 : 1);
+  if (prepared.lockMask) {
+    for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
+      const cx = Math.min(prepared.width - 1, Math.floor(xmin * prepared.width + (x + 0.5) / gw * bw));
+      const cy = Math.min(prepared.height - 1, Math.floor(ymin * prepared.height + (y + 0.5) / gh * bh));
+      use[y * gw + x] = prepared.lockMask[cy * prepared.width + cx];
+    }
+  }
+  let n = 0, ma = 0, mb = 0;
+  for (let i = 0; i < use.length; i++) if (use[i]) { n++; ma += a[i]; mb += b[i]; }
+  if (n < 8) return -1;
+  ma /= n; mb /= n;
+  let sab = 0, saa = 0, sbb = 0;
+  for (let i = 0; i < use.length; i++) if (use[i]) {
+    const da = a[i] - ma, db = b[i] - mb;
+    sab += da * db; saa += da * da; sbb += db * db;
+  }
+  // A flat region (no texture) cannot be checked by correlation; compare brightness instead
+  if (saa < n * 25 || sbb < n * 25) return Math.abs(ma - mb) < 20 ? 1 : 0;
+  return sab / Math.sqrt(saa * sbb);
 };
 
 export const calculateTightBoundingBox = async (imageUrl: string): Promise<[number, number, number, number]> => {

@@ -45,7 +45,17 @@ export interface CompletionInfo {
   provider: string;
   /** Face style (people only) */
   faceStyle?: FaceStyle;
+  /** How the visible part was located in the completed image */
+  partSource?: PartBoxSource;
 }
+
+/**
+ * How the visible part (originalPartBox2d) was located in the completed image:
+ * - layout: it stayed at the box where it was put on the completion canvas (checked)
+ * - matching: found by AKAZE feature matching
+ * - whole: neither worked; the whole object's box is used
+ */
+export type PartBoxSource = 'layout' | 'matching' | 'whole';
 
 /** 3D generation service (Hugging Face Spaces) */
 export type ModelProvider = 'trellis' | 'hunyuan3d';

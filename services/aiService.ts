@@ -2,15 +2,16 @@
  * AI tasks of the pipeline, independent of the provider:
  *
  * - detectObjectsInImage   (Phase 1: VLM object detection)        Gemini / OpenAI
- * - estimateCanvasExpansion (Phase 3: canvas size before completion) Gemini / OpenAI
+ * - estimateHiddenExtent    (Phase 3: canvas before completion)      Gemini / OpenAI
  * - generateCompletion      (Phase 3: image completion/outpainting)  Gemini / OpenAI
  * - verifyCompletion        (Phase 3: check the completed image)     Gemini / OpenAI
+ * - estimateObjectHeights   (size prior for fitting)                 Gemini / OpenAI
  *
  * The prompts are the ones used in the paper (KBSE2025-61); only the JSON output
  * format is now enforced with each provider's structured-output feature.
  */
 import { AISettings, DetectedObject, FaceStyle } from "../types";
-import { analyzeImageJson, generateImage, loadImageData, JsonSchema } from "./ai/providers";
+import { analyzeImageJson, generateImage, loadImageData, JsonSchema, ImageLayout } from "./ai/providers";
 
 // ---------------------------------------------------------------------------
 // JSON schemas (compatible with Gemini and OpenAI strict mode)
@@ -39,17 +40,6 @@ const DETECTION_SCHEMA: JsonSchema = {
     },
   },
   required: ["objects"],
-  additionalProperties: false,
-};
-
-const EXPANSION_SCHEMA: JsonSchema = {
-  type: "object",
-  properties: {
-    bottomCutoffPercent: { type: "number" },
-    topCutoffPercent: { type: "number" },
-    sideCutoffPercent: { type: "number" },
-  },
-  required: ["bottomCutoffPercent", "topCutoffPercent", "sideCutoffPercent"],
   additionalProperties: false,
 };
 
@@ -135,7 +125,21 @@ const FACE_RULES: Record<Exclude<FaceStyle, 'keep'>, string> = {
 export interface CompletionOptions {
   /** People: how to render the face (default 'calm') */
   faceStyle?: FaceStyle;
+  /**
+   * Output layout. When given (see prepareCompletionCanvas), the visible part is
+   * already at its final position and size on the canvas and must stay there, so
+   * that its box carries over to the completed image without matching.
+   */
+  layout?: ImageLayout;
 }
+
+/** Added to the prompt when the visible part must keep its place on the canvas */
+const LOCKED_LAYOUT_RULE = `
+    ***LAYOUT IS FIXED - CRITICAL***:
+    The visible part of the subject is already drawn at its FINAL position and size on this canvas.
+    - Do NOT move, rescale, re-center, crop or re-frame it; keep every visible pixel exactly where it is.
+    - Draw the missing parts in the surrounding white area so that they connect seamlessly to the visible part.
+    - The output must have exactly the same framing as the input canvas.`;
 
 export const generateCompletion = async (
   imageUrl: string,
@@ -193,8 +197,8 @@ export const generateCompletion = async (
        - If FEET are cut off: Complete entire feet/shoes
        - NO BODY PART should touch or be cut by ANY image edge
     
-    4. **EXTEND CANVAS GENEROUSLY IN ALL DIRECTIONS**: 
-       - Extend the image to fit the COMPLETE body with MARGIN on ALL sides
+    4. **${options.layout ? 'USE THE WHITE AREA OF THE CANVAS' : 'EXTEND CANVAS GENEROUSLY IN ALL DIRECTIONS'}**: 
+       - ${options.layout ? 'The canvas already has room for the COMPLETE body; draw the missing parts in the white area' : 'Extend the image to fit the COMPLETE body with MARGIN on ALL sides'}
        - Do NOT resize, move, or repose the person
        - Leave WHITE SPACE around the entire body - top, bottom, left, AND right
     
@@ -215,7 +219,7 @@ export const generateCompletion = async (
       Goal: Create a clean, full - view image of ONLY the "${label}".
       
       STRICT CONSTRAINTS(MUST FOLLOW):
-      1. ** DO NOT RESIZE OR MOVE **: The object in the input image is already centered and sized correctly.DO NOT SCALE, RESIZE, OR MOVE IT.
+      1. ** DO NOT RESIZE OR MOVE **: The object in the input image is already ${options.layout ? 'placed' : 'centered'} and sized correctly.DO NOT SCALE, RESIZE, OR MOVE IT.${options.layout ? ' The white area around it is room for its missing parts.' : ''}
       2. ** PRESERVE ORIGINAL PIXELS **: The visible parts of the object in the input image MUST remain EXACTLY the same in the output.Do not change the color, texture, lighting, or shape of the existing parts.
       3. ** REMOVE HANDS AND PEOPLE **: If the object is being held, touched, or interacting with a person / hand, YOU MUST REMOVE THE HAND / PERSON ENTIRELY.The object should appear as if floating or standing alone.
       4. ** ISOLATE THE SUBJECT **: Remove any background, tables, surfaces, or other surrounding items.ONLY the "${label}" should be visible.
@@ -226,74 +230,14 @@ export const generateCompletion = async (
     }
 
     // Use 9:16 for persons (more vertical space for sitting figures), 3:4 for objects
-    return await generateImage(settings, image, prompt, type === 'person' ? '9:16' : '3:4');
+    if (options.layout) prompt += LOCKED_LAYOUT_RULE;
+    // Without a layout: 9:16 for persons (more vertical space for sitting figures), 3:4 for objects
+    const layout: ImageLayout = options.layout
+      ?? { size: '1024x1536', aspect: type === 'person' ? '9:16' : '3:4' };
+    return await generateImage(settings, image, prompt, layout);
   } catch (error) {
     console.error("Error generating completion:", error);
     throw error;
-  }
-};
-
-/**
- * Estimate the canvas expansion needed to complete a cropped image.
- * Analyzes what percentage of the object is visible and what's cut off.
- */
-export const estimateCanvasExpansion = async (
-  imageUrl: string,
-  label: string,
-  type: 'person' | 'object',
-  settings: AISettings,
-): Promise<{ verticalRatio: number, horizontalRatio: number }> => {
-  try {
-    const image = await loadImageData(imageUrl);
-
-    const prompt = type === 'person'
-      ? `Analyze this cropped image of "${label}" (a person).
-
-TASK: Estimate how much of the person's body is CUT OFF (not visible) in this image.
-
-Look at:
-1. Is the head fully visible? (top cutoff)
-2. Are the legs/feet cut off? If sitting, are knees visible? (bottom cutoff)
-3. Are arms/hands cut off on the sides? (left/right cutoff)
-
-Return ONLY valid JSON (no markdown, no code blocks):
-{
-  "bottomCutoffPercent": <0-200, how much height to add at bottom as percentage of current height>,
-  "topCutoffPercent": <0-50, how much height to add at top>,
-  "sideCutoffPercent": <0-50, how much width to add on each side>
-}
-
-Examples:
-- If only head and shoulders visible (sitting person, legs hidden): {"bottomCutoffPercent": 150, "topCutoffPercent": 0, "sideCutoffPercent": 20}
-- If full standing person with feet slightly cut: {"bottomCutoffPercent": 20, "topCutoffPercent": 0, "sideCutoffPercent": 10}
-- If upper body visible, lower body hidden: {"bottomCutoffPercent": 100, "topCutoffPercent": 0, "sideCutoffPercent": 15}`
-      : `Analyze this cropped image of "${label}" (an object).
-
-TASK: Estimate how much of the object is CUT OFF in this image.
-
-Return ONLY valid JSON:
-{
-  "bottomCutoffPercent": <0-100>,
-  "topCutoffPercent": <0-50>,
-  "sideCutoffPercent": <0-50>
-}`;
-
-    const parsed = await analyzeImageJson<{ bottomCutoffPercent: number, topCutoffPercent: number, sideCutoffPercent: number }>(
-      settings, image, prompt, EXPANSION_SCHEMA, { schemaName: "canvas_expansion", effort: "low" },
-    );
-
-    const verticalRatio = 1 + (parsed.bottomCutoffPercent + parsed.topCutoffPercent) / 100;
-    const horizontalRatio = 1 + (parsed.sideCutoffPercent * 2) / 100;
-
-
-    return {
-      verticalRatio: Math.min(Math.max(verticalRatio, 1.2), 3.5), // Clamp between 120% and 350%
-      horizontalRatio: Math.min(Math.max(horizontalRatio, 1.1), 2.0) // Clamp between 110% and 200%
-    };
-  } catch (error) {
-    console.warn('[Canvas Estimate] Failed, using default:', error);
-    // Fallback to generous defaults
-    return { verticalRatio: 2.2, horizontalRatio: 1.3 };
   }
 };
 
@@ -408,5 +352,71 @@ Return JSON in the form {"objects": [{"index": 0, "height_m": 0.9}, ...]} with o
     }
   }
   return heights;
+};
+
+// ---------------------------------------------------------------------------
+// Hidden extent of an object (canvas for layout-preserving completion)
+// ---------------------------------------------------------------------------
+
+/** How far the whole object extends beyond its box, as fractions of the box size */
+export interface HiddenExtent {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
+const EXTENT_SCHEMA: JsonSchema = {
+  type: "object",
+  properties: {
+    left: { type: "number", description: "Hidden extent beyond the LEFT edge of the box, as a fraction of the box WIDTH" },
+    right: { type: "number", description: "Hidden extent beyond the RIGHT edge of the box, as a fraction of the box WIDTH" },
+    top: { type: "number", description: "Hidden extent beyond the TOP edge of the box, as a fraction of the box HEIGHT" },
+    bottom: { type: "number", description: "Hidden extent beyond the BOTTOM edge of the box, as a fraction of the box HEIGHT" },
+  },
+  required: ["left", "right", "top", "bottom"],
+  additionalProperties: false,
+};
+
+/**
+ * Estimate how far the whole object extends beyond its visible box on each side
+ * (hidden behind other objects or cut off by the image border), looking at the
+ * whole photo. Used to size and place the completion canvas.
+ */
+export const estimateHiddenExtent = async (
+  photoUrl: string,
+  box: [number, number, number, number],
+  label: string,
+  type: 'person' | 'object',
+  settings: AISettings,
+): Promise<HiddenExtent> => {
+  const image = await loadImageData(photoUrl);
+  const [ymin, xmin, ymax, xmax] = box;
+  const touches = [
+    xmin <= 0.01 && 'LEFT', xmax >= 0.99 && 'RIGHT', ymin <= 0.01 && 'TOP', ymax >= 0.99 && 'BOTTOM',
+  ].filter(Boolean);
+  const prompt = `In this photo, the ${type === 'person' ? 'person' : 'object'} "${label}" is visible inside the box
+[ymin, xmin, ymax, xmax] = [${box.map(v => v.toFixed(3)).join(', ')}] (normalized 0-1).
+${touches.length ? `The box touches the image border on the ${touches.join(', ')} side(s), so the object may continue outside the photo there.` : 'The box does not touch the image border.'}
+
+Parts of the object may be hidden behind other objects or cut off by the image border.
+Estimate how far the WHOLE object extends beyond each edge of the box:
+- left / right: as a fraction of the box WIDTH
+- top / bottom: as a fraction of the box HEIGHT
+0 means the object ends at that edge. Use typical proportions of such an object and the surrounding scene
+(e.g. a chair seen only as a thin strip of its backrest at the image border extends far beyond the box;
+a seated person whose legs are hidden by a table extends below the box by about the visible height).
+
+Return JSON: {"left": <number>, "right": <number>, "top": <number>, "bottom": <number>}`;
+  try {
+    const r = await analyzeImageJson<HiddenExtent>(settings, image, prompt, EXTENT_SCHEMA, { schemaName: "hidden_extent", effort: "medium" });
+    const clamp = (v: number) => Math.min(Math.max(Number.isFinite(v) ? v : 0, 0), 8);
+    return { left: clamp(r.left), right: clamp(r.right), top: clamp(r.top), bottom: clamp(r.bottom) };
+  } catch (error) {
+    console.warn('[Hidden extent] Failed, using defaults:', error);
+    return type === 'person'
+      ? { left: 0.15, right: 0.15, top: 0.05, bottom: 1.2 }
+      : { left: 0.3, right: 0.3, top: 0.3, bottom: 0.3 };
+  }
 };
 
