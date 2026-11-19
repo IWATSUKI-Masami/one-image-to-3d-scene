@@ -1880,14 +1880,14 @@ const App: React.FC = () => {
                     </div>
 
                     {/* Filters & Action */}
-                    <div className="flex items-center justify-end gap-3">
+                    <div className="flex flex-wrap items-center justify-end gap-2">
                       {/* Selection Controls */}
                       {activeTab !== '3d' && activeTab !== 'scene' && (
-                        <div className="flex items-center gap-2 mr-2 border-r border-slate-200 pr-4">
+                        <div className="flex items-center gap-1.5 whitespace-nowrap border-r border-slate-200 pr-3">
                           <button onClick={handleSelectAll} className="text-xs font-medium text-blue-600 hover:text-blue-800">All</button>
                           <span className="text-slate-300">|</span>
                           <button onClick={handleDeselectAll} className="text-xs font-medium text-slate-500 hover:text-slate-700">None</button>
-                          <span className="text-xs text-slate-400 ml-1">({selectedItems.size})</span>
+                          <span className="text-xs text-slate-400">({selectedItems.size})</span>
                         </div>
                       )}
 
