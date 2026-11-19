@@ -13,7 +13,7 @@ AI providers and services:
 
 - **OpenAI as an AI provider** next to Gemini. Object detection/checks and image completion can each use either provider; OpenAI is the default. Providers, API keys, model IDs and Hugging Face Space IDs are set in the new **AI Settings** dialog (an empty Space field means the official Space). Only values that differ from the defaults are stored in the browser, so new defaults take effect.
 - **Transparent OpenAI completions**: OpenAI is asked for a transparent background (retried without it if a model rejects it), so OpenAI completion needs no background-removal Space. Completions that are already transparent skip BRIA RMBG.
-- **Background-removal choice**: BRIA RMBG 2.0 (`briaai/BRIA-RMBG-2.0`) or 3.0 (`briaai/BRIA-RMBG-3.0`, default), each with its own Space ID field. Only used after Gemini completion; the choice is disabled while OpenAI does the completion. A failed removal is shown on the completed card, and completed images are shown on a light checkerboard so that transparency is visible.
+- **Background-removal choice**: BRIA RMBG 2.0 (`briaai/BRIA-RMBG-2.0`, default; much lighter, a duplicate runs on a T4) or 3.0 (`briaai/BRIA-RMBG-3.0`), each with its own Space ID field. Only used after Gemini completion; the choice is disabled while OpenAI does the completion. A failed removal is shown on the completed card, and completed images are shown on a light checkerboard so that transparency is visible.
 - **Hunyuan3D-2.1** (Tencent, Hugging Face Space) as a 3D generator next to TRELLIS.2. Its license does not apply in the EU, the UK and South Korea.
 
 Pipeline (in processing order):

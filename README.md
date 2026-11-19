@@ -102,7 +102,7 @@ In AI Settings you can set:
 |---|---|
 | Object detection & checks | Provider for detection and checks (OpenAI / Gemini; default OpenAI) |
 | Image completion | Provider for completion (OpenAI / Gemini; default OpenAI) |
-| Background removal | Background-removal model (RMBG 2.0 / RMBG 3.0). Only used with Gemini completion; disabled when OpenAI is selected |
+| Background removal | Background-removal model (RMBG 2.0 / RMBG 3.0; default RMBG 2.0). Only used with Gemini completion; disabled when OpenAI is selected |
 | API keys | OpenAI and Gemini API keys |
 | Models | Model IDs |
 | Hugging Face Spaces | Space IDs for background removal, depth estimation and 3D generation (e.g. your duplicated Spaces) |
@@ -116,7 +116,7 @@ Default models:
 
 - OpenAI returns completions with a transparent background. Gemini cannot, so its completions go through background removal; a failed removal is marked on the completed card.
 - OpenAI is the default for both detection and completion.
-- Background removal uses **BRIA RMBG 2.0** or **BRIA RMBG 3.0** (default), selected under **Background removal** in AI Settings. The choice is disabled while OpenAI does the completion, since it is not used then. Both Spaces have the same API; RMBG 2.0 is much lighter, so a duplicate of it runs on a T4.
+- Background removal uses **BRIA RMBG 2.0** (default) or **BRIA RMBG 3.0**, selected under **Background removal** in AI Settings. The choice is disabled while OpenAI does the completion, since it is not used then. Both Spaces have the same API; RMBG 2.0 is much lighter, so a duplicate of it runs on a T4.
 - Model IDs change often. If a model is retired, type a new ID in AI Settings; no code change is needed.
 - The results in the paper were obtained with `gemini-3-pro-preview` and `gemini-3-pro-image-preview` (both since shut down). Other providers and models use the same prompts, but detection accuracy and pose preservation may differ.
 - API keys are kept in memory only. Providers and model IDs are remembered in the browser.

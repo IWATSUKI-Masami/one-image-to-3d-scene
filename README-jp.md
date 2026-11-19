@@ -102,7 +102,7 @@ AI Settings では次の項目を設定できます。
 |---|---|
 | Object detection & checks | 物体検出・チェックに使う AI（OpenAI / Gemini。既定は OpenAI） |
 | Image completion | 画像補完に使う AI（OpenAI / Gemini。既定は OpenAI） |
-| Background removal | 背景除去のモデル（RMBG 2.0 / RMBG 3.0）。Gemini で補完するときだけ使い、OpenAI を選んでいる間は選択できない |
+| Background removal | 背景除去のモデル（RMBG 2.0 / RMBG 3.0。既定は RMBG 2.0）。Gemini で補完するときだけ使い、OpenAI を選んでいる間は選択できない |
 | API keys | OpenAI と Gemini の API キー |
 | Models | 使うモデルの ID |
 | Hugging Face Spaces | 背景除去・深度推定・3D 生成で使う Space の ID（複製した Space など） |
@@ -116,7 +116,7 @@ AI Settings では次の項目を設定できます。
 
 - OpenAI は補完画像を透明背景で返します。Gemini は透明背景を出力できないため、補完後に背景除去を行います。背景除去に失敗した場合は、補完画像のカードに表示されます。
 - 物体検出と画像補完の既定は、どちらも OpenAI です。
-- 背景除去には **BRIA RMBG 2.0** または **BRIA RMBG 3.0**（既定）を使います。AI Settings の **Background removal** で選べます。OpenAI で補完している間は背景除去を使わないので、選択できなくなります。どちらの Space も API は同じです。RMBG 2.0 はずっと軽く、複製すれば T4 で動きます。
+- 背景除去には **BRIA RMBG 2.0**（既定）または **BRIA RMBG 3.0** を使います。AI Settings の **Background removal** で選べます。OpenAI で補完している間は背景除去を使わないので、選択できなくなります。どちらの Space も API は同じです。RMBG 2.0 はずっと軽く、複製すれば T4 で動きます。
 - モデルIDは頻繁に変わります。モデルが提供終了になった場合は、AI Settings で新しいIDを入力してください。コードの変更は不要です。
 - 論文の結果は `gemini-3-pro-preview` と `gemini-3-pro-image-preview`（どちらも提供終了）で得たものです。他のプロバイダーやモデルでも同じプロンプトを使いますが、検出精度や姿勢の保持には差が出る可能性があります。
 - APIキーはメモリ上にだけ保持します。プロバイダーとモデルIDはブラウザに記憶されます。

@@ -108,7 +108,7 @@ export const loadAISettings = (): AISettings => {
   const settings: AISettings = {
     visionProvider: 'openai',
     imageProvider: 'openai',
-    bgRemoval: 'rmbg3',
+    bgRemoval: 'rmbg2', // RMBG 2.0: much lighter (a duplicate runs on a T4)
     keys: {
       gemini: import.meta.env.VITE_GEMINI_API_KEY || '',
       openai: import.meta.env.VITE_OPENAI_API_KEY || '',
