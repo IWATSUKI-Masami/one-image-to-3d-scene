@@ -356,6 +356,7 @@ const App: React.FC = () => {
     };
     reader.readAsDataURL(file);
 
+    cancelSegmentation();
     setDetectedObjects([]);
     setCroppedImages([]);
 
@@ -383,6 +384,9 @@ const App: React.FC = () => {
 
       const crops = await cropObjectsFromImage(url, objects);
       setCroppedImages(crops);
+
+      // Masks of the visible parts, used to lock them during completion and for object depth
+      void runSegmentation(objects, url);
 
     } catch (err) {
       console.error(err);
@@ -421,30 +425,59 @@ const App: React.FC = () => {
 
 
 
-  /** Segment the visible part of each detected object in the photo (SAM 2.1 in the browser) */
-  const handleSegmentObjects = async (): Promise<DetectedObject[] | null> => {
-    if (!previewUrl || detectedObjects.length === 0 || segmentationProgress) return null;
+  /**
+   * Segment the visible part of each detected object in the photo (SAM 2.1 in the browser).
+   * Runs automatically after object detection; completions started meanwhile wait for it
+   * (segmentationRef), because the masks lock the visible part during completion.
+   */
+  const segmentationRef = useRef<{ run: number; promise: Promise<DetectedObject[] | null> | null }>({ run: 0, promise: null });
+
+  /** Forget a segmentation in progress (a new image or project was loaded) */
+  const cancelSegmentation = () => {
+    segmentationRef.current = { run: segmentationRef.current.run + 1, promise: null };
+    setSegmentationProgress(null);
+  };
+
+  const runSegmentation = (objects: DetectedObject[], imageUrl: string): Promise<DetectedObject[] | null> => {
+    const run = segmentationRef.current.run + 1;
+    const isCurrent = () => segmentationRef.current.run === run;
+    const promise = (async () => {
+      const start = performance.now();
+      setSegmentationProgress('starting');
+      try {
+        const results = await segmentObjects(imageUrl, objects.map(o => o.box_2d), undefined,
+          (message) => { if (isCurrent()) setSegmentationProgress(message); });
+        if (!isCurrent()) return null;
+        const updated = objects.map((obj, i) => {
+          const r = results[i];
+          return r ? { ...obj, mask: { url: r.maskUrl, score: r.score, coverage: r.coverage } } : obj;
+        });
+        setDetectedObjects(updated);
+        setShowMasks(true);
+        setProcessingTimes(prev => new Map(prev).set('Segmentation (all)', (performance.now() - start) / 1000));
+        const failed = objects.filter((_, i) => !results[i]).map(o => o.label);
+        if (failed.length > 0) setError(`Segmentation failed for: ${failed.join(', ')}. See the console for details.`);
+        return updated;
+      } catch (e: any) {
+        console.error('Segmentation failed:', e);
+        if (isCurrent()) setError(`Segmentation failed: ${e?.message || e}. Use "Segment Objects" above the photo to try again.`);
+        return null;
+      } finally {
+        if (isCurrent()) {
+          setSegmentationProgress(null);
+          segmentationRef.current = { run, promise: null };
+        }
+      }
+    })();
+    segmentationRef.current = { run, promise };
+    return promise;
+  };
+
+  /** Segment again by hand (after a failure, or for a project saved without masks) */
+  const handleSegmentObjects = async () => {
+    if (!previewUrl || detectedObjects.length === 0 || segmentationRef.current.promise) return;
     setError(null);
-    const start = performance.now();
-    try {
-      const results = await segmentObjects(previewUrl, detectedObjects.map(o => o.box_2d), undefined, setSegmentationProgress);
-      const updated = detectedObjects.map((obj, i) => {
-        const r = results[i];
-        return r ? { ...obj, mask: { url: r.maskUrl, score: r.score, coverage: r.coverage } } : obj;
-      });
-      setDetectedObjects(updated);
-      setShowMasks(true);
-      setProcessingTimes(prev => new Map(prev).set('Segmentation (all)', (performance.now() - start) / 1000));
-      const failed = detectedObjects.filter((_, i) => !results[i]).map(o => o.label);
-      if (failed.length > 0) setError(`Segmentation failed for: ${failed.join(', ')}. See the console for details.`);
-      return updated;
-    } catch (e: any) {
-      console.error('Segmentation failed:', e);
-      setError(`Segmentation failed: ${e?.message || e}`);
-      return null;
-    } finally {
-      setSegmentationProgress(null);
-    }
+    await runSegmentation(detectedObjects, previewUrl);
   };
 
   const handleGenerate3D = async (item: CroppedObject) => {
@@ -564,6 +597,7 @@ const App: React.FC = () => {
     setMode('batch-remove');
     setPreviewUrl(null);
     setOriginalImageDimensions(null);
+    cancelSegmentation();
     setDetectedObjects([]);
 
     setCompletedImages([]);
@@ -729,7 +763,10 @@ const App: React.FC = () => {
 
   /** The object's photo mask (SAM) cut to its crop, if the photo was segmented */
   const loadCropObjectMask = async (item: CroppedObject): Promise<ImageData | undefined> => {
-    const obj = detectedObjects.find(o => o.mask && sameBox(o.box_2d, item.box_2d));
+    // Completion started while the photo is still being segmented: wait for the masks
+    const pending = segmentationRef.current.promise;
+    const objects = (pending ? await pending : null) ?? detectedObjects;
+    const obj = objects.find(o => o.mask && sameBox(o.box_2d, item.box_2d));
     if (!obj?.mask) return undefined;
     const [img, crop] = await Promise.all([loadImage(obj.mask.url), loadImage(item.imageUrl)]);
     const [ymin, xmin, ymax, xmax] = item.box_2d;
@@ -1049,6 +1086,7 @@ const App: React.FC = () => {
     setCompletionResult(null);
     setModel3DSource(null);
     setOriginalImageDimensions(null);
+    cancelSegmentation();
     setDetectedObjects([]);
     setCroppedImages([]);
 
@@ -1178,6 +1216,7 @@ const App: React.FC = () => {
 
       setOriginalImageDimensions(archive.originalImageDimensions);
       setSourceImageName(archive.sourceImageName ?? null);
+      cancelSegmentation();
       setDetectedObjects(archive.detectedObjects);
 
       // Restore URLs
@@ -1758,7 +1797,7 @@ const App: React.FC = () => {
                           <button
                             onClick={handleSegmentObjects}
                             disabled={!!segmentationProgress}
-                            title="Segment the visible pixels of each detected object (SAM 2.1, runs in the browser; the model is downloaded on first use). Used for object depth and for fitting partially visible objects."
+                            title="The visible pixels of each detected object are segmented automatically after detection (SAM 2.1, runs in the browser; the model is downloaded on first use). They lock the visible part during completion and give each object's depth; completions started while segmenting wait for the masks. Click to segment again."
                             className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium text-emerald-700 border border-emerald-200 bg-white hover:bg-emerald-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                           >
                             {segmentationProgress ? <Spinner size={12} /> : <Layers size={12} />}
