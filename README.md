@@ -53,7 +53,7 @@ Results with OpenAI (detection and completion; the right chair in the completion
   </tr>
   <tr>
     <td width="50%"><img src="docs/images/scene-result.webp" alt="3D scene"><br><sub><b>7. Scene composition</b> — all 8 objects placed with perspective at the depth of their PC Boxes; the chairs, of which only strips of the backrests are visible, stand behind the people. The table, visible only as the front of its top, is still placed only roughly</sub></td>
-    <td width="50%"></td>
+    <td width="50%"><img src="docs/images/step7-scene-ui.webp" alt="3D scene with its controls"><br><sub><b>3D Scene tab</b> — the scene with its controls: depth range and point size, <b>Perspective</b>, <b>Align</b> (front alignment), boxes and point cloud, <b>Save</b> / <b>Load</b> of the layout and <b>Edit</b> for moving models by hand</sub></td>
   </tr>
 </table>
 

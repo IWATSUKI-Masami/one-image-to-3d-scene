@@ -96,7 +96,7 @@ Mostly solved (see "Implemented"). Objects of which only a small part is visible
 
 1. **Object masks** (**Segment Objects**): SAM 2.1 runs in the browser, prompted with each detected box.
 2. **Canvas**: the VLM estimates from the whole photo how far the object extends beyond its box on each side; the crop is placed on a canvas of the image model's output size with that room. Only the object's pixels are drawn, and an OpenAI edit mask locks them. The whole photo with the object marked is given as a reference image.
-3. **Check**: the visible part is searched for near its box by correlation (small shifts and size changes are corrected); if it moved further, the completion is retried, and AKAZE remains the fallback.
+3. **Check**: the visible part is searched for near its box by correlation (small shifts and size changes are corrected); if it moved further, the completion is retried, and AKAZE remains the fallback. The retries cost API credits; **Attempts: 1** completes each object once, for users who adjust the placement by hand (see the README's section on API usage).
 4. **Front alignment** (item 4) makes the model's front view match the completed image, so the visible part's box maps onto the right part of the model.
 
 ### Remaining
