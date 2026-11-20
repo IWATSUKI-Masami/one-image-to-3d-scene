@@ -21,6 +21,12 @@ This is the reference implementation of the paper listed in [Citation](#citation
 
 The sample photo [`samples/two-people-at-table.webp`](samples/two-people-at-table.webp) is AI-generated and is the input used in the paper. You can use it to try the app.
 
+## Highlights
+
+- **Partly visible objects at the right size.** While generative AI draws the hidden parts, the visible part is kept at a known place, so its place in the completed image is known without feature matching and the 3D model is placed by it. The chairs at the edges of the sample, of which only a thin part of the backrest is visible, stand behind the people.
+- **Orientation by render-and-compare.** Each 3D model is rendered while turning around the vertical axis and compared with its completed image (silhouette, aspect ratio, shading), then turned to face the camera as in the photo.
+- **Runs in your browser.** React and Three.js; object masks (SAM 2.1) and the alignment are computed in the browser. Detection and completion use your own OpenAI or Gemini key, and 3D generation uses Hugging Face Spaces.
+
 ## Pipeline
 
 | # | Phase | Method |
@@ -199,7 +205,7 @@ Planned: [Pixal3D](https://huggingface.co/TencentARC/Pixal3D) (pixel-aligned ima
 
 ## Citation
 
-If you use this software in your research, please cite:
+If you use this software in your research, please cite the paper below. The same information is in [`CITATION.cff`](CITATION.cff), so GitHub's **Cite this repository** button (in the About section) gives it in APA and BibTeX formats.
 
 ```bibtex
 @techreport{iwatsuki2026oneimage3d,

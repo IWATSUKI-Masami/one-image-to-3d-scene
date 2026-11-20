@@ -1,0 +1,40 @@
+cff-version: 1.2.0
+message: "If you use this software in your research, please cite the paper below."
+title: "One Image to 3D Scene"
+type: software
+authors:
+  - family-names: Iwatsuki
+    given-names: Masami
+repository-code: "https://github.com/IWATSUKI-Masami/one-image-to-3d-scene"
+license: MIT
+abstract: >-
+  A web app that reconstructs a 3D scene from a single monocular RGB image with an
+  object-based approach: each object is detected, its hidden parts are completed
+  with generative AI while the visible part keeps its place, it is turned into a
+  3D model, and the models are placed in 3D space by monocular depth estimation.
+keywords:
+  - 3D scene reconstruction
+  - single image
+  - generative AI
+  - image completion
+  - image-to-3D
+  - monocular depth estimation
+  - Three.js
+preferred-citation:
+  type: report
+  authors:
+    - family-names: Iwatsuki
+      given-names: Masami
+    - family-names: Watanabe
+      given-names: Mizuki
+  title: "Depth-Based High-Precision 3D Scene Reconstruction from a Single Monocular Image: Object-Based Approach Using Generative AI"
+  collection-title: "IEICE Technical Report"
+  institution:
+    name: "The Institute of Electronics, Information and Communication Engineers"
+  number: "KBSE2025-61"
+  start: 73
+  end: 78
+  year: 2026
+  month: 3
+  languages:
+    - jpn

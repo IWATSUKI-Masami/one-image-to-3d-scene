@@ -40,6 +40,8 @@ User interface and documentation:
 - The info panel at the bottom left of the 3D scene can be hidden (×) and shown again (i).
 - **Processing statistics** (**Stats** in the header): a CSV file with one row per completed object — image sides it touches, mask coverage, estimated hidden extent, edit mask, how the visible part was located, attempts and their results, placement score, front-alignment angle/score/IoU of its 3D model, and processing times — so the method can be evaluated without the browser console. 3D model cards show their alignment angle and score.
 - Documentation: a sample photo (`samples/two-people-at-table.webp`, AI-generated) and a walkthrough with a screenshot of every step (detection, masks, cropping, completion, 3D models, depth map, scene, the 3D Scene tab and the scene edited by hand) in the README; a README section on which steps use API credits and how to keep usage low; `docs/hugging-face-spaces.md` (tokens, gated models, the `HF_TOKEN` Space secret, GPU per Space, the changes a Hunyuan3D-2.1 duplicate needs on a dedicated GPU, common errors); `docs/roadmap.md`. All documents in English and Japanese.
+- **Highlights** section near the top of the README (partly visible objects at the right size, orientation by render-and-compare, runs in the browser), in English and Japanese.
+- `CITATION.cff` with the paper as the preferred citation, so GitHub shows **Cite this repository** (APA and BibTeX).
 
 ### Changed
 
