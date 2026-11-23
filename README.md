@@ -21,6 +21,8 @@ This is the reference implementation of the paper listed in [Citation](#citation
 
 Both sample photos are AI-generated, and you can use them to try the app: [`samples/cafe-couple.webp`](samples/cafe-couple.webp) (above, generated with Gemini) and [`samples/two-people-at-table.webp`](samples/two-people-at-table.webp), the input used in the paper and in the walkthrough below.
 
+The scene above is the automatic result. The placement can also be adjusted by hand in edit mode (**Edit ON** in the 3D Scene tab); see *Edited by hand* in the walkthrough below.
+
 ## Highlights
 
 - **Partly visible objects at the right size.** While generative AI draws the hidden parts, the visible part is kept at a known place, so its place in the completed image is known without feature matching and the 3D model is placed by it. The chairs at the edges of the paper's sample, of which only a thin part of the backrest is visible, stand behind the people.
