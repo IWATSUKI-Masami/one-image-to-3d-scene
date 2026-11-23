@@ -26,6 +26,8 @@
 <p align="center"><img src="docs/images/demo-rotate.gif" alt="論文のサンプルの3Dシーンをアプリで回したところ" width="480"></p>
 <p align="center"><sub>論文のサンプルの3Dシーンを、アプリで回したところです（自動の配置）。処理の流れ全体のデモ動画：<a href="docs/videos/demo-ja.mp4"><code>docs/videos/demo-ja.mp4</code></a>（24秒、正方形、日本語字幕）、<a href="docs/videos/demo.mp4"><code>docs/videos/demo.mp4</code></a>（33秒、英語字幕）</sub></p>
 
+手法と実装の解説記事を Qiita に書きました：[生成AIで隠れた部分を描き足しても位置がずれない：1枚の写真から3Dシーンを組み立てる](https://qiita.com/miwastsuki2026/items/08ce2be1fc32118401ae)
+
 ## 特徴
 
 - **一部しか写っていない物体も、正しい大きさで置ける。** 生成AIが隠れた部分を描き足す間も、見えている部分を決まった位置に保つので、補完画像の中でのその位置が特徴点マッチングなしで分かり、それを基準に3Dモデルを置けます。論文のサンプルの両端の、背もたれの細い部分しか見えない椅子も、人物の後ろに立ちます。
