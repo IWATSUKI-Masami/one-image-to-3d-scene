@@ -24,7 +24,7 @@ Both sample photos are AI-generated, and you can use them to try the app: [`samp
 The scene above is the automatic result. The placement can also be adjusted by hand in edit mode (**Edit ON** in the 3D Scene tab); see *Edited by hand* in the walkthrough below.
 
 <p align="center"><img src="docs/images/demo-rotate.gif" alt="The 3D scene of the paper's sample, turned around in the app" width="480"></p>
-<p align="center"><sub>The 3D scene of the paper's sample, turned around in the app (automatic placement). Demo video of the whole process (33 s): <a href="docs/videos/demo.mp4"><code>docs/videos/demo.mp4</code></a></sub></p>
+<p align="center"><sub>The 3D scene of the paper's sample, turned around in the app (automatic placement). Demo videos of the whole process: <a href="docs/videos/demo.mp4"><code>docs/videos/demo.mp4</code></a> (33 s, English captions) and <a href="docs/videos/demo-ja.mp4"><code>docs/videos/demo-ja.mp4</code></a> (24 s, square, Japanese captions)</sub></p>
 
 ## Highlights
 

@@ -24,7 +24,7 @@
 上の3Dシーンは自動で配置した結果です。配置は、3D Scene タブの編集モード（**Edit ON**）で手で調整することもできます（下の「手で編集した結果」を参照）。
 
 <p align="center"><img src="docs/images/demo-rotate.gif" alt="論文のサンプルの3Dシーンをアプリで回したところ" width="480"></p>
-<p align="center"><sub>論文のサンプルの3Dシーンを、アプリで回したところです（自動の配置）。処理の流れ全体のデモ動画（33秒）：<a href="docs/videos/demo.mp4"><code>docs/videos/demo.mp4</code></a></sub></p>
+<p align="center"><sub>論文のサンプルの3Dシーンを、アプリで回したところです（自動の配置）。処理の流れ全体のデモ動画：<a href="docs/videos/demo-ja.mp4"><code>docs/videos/demo-ja.mp4</code></a>（24秒、正方形、日本語字幕）、<a href="docs/videos/demo.mp4"><code>docs/videos/demo.mp4</code></a>（33秒、英語字幕）</sub></p>
 
 ## 特徴
 
