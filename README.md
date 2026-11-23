@@ -23,6 +23,9 @@ Both sample photos are AI-generated, and you can use them to try the app: [`samp
 
 The scene above is the automatic result. The placement can also be adjusted by hand in edit mode (**Edit ON** in the 3D Scene tab); see *Edited by hand* in the walkthrough below.
 
+<p align="center"><img src="docs/images/demo-rotate.gif" alt="The 3D scene of the paper's sample, turned around in the app" width="480"></p>
+<p align="center"><sub>The 3D scene of the paper's sample, turned around in the app (automatic placement). Demo video of the whole process (33 s): <a href="docs/videos/demo.mp4"><code>docs/videos/demo.mp4</code></a></sub></p>
+
 ## Highlights
 
 - **Partly visible objects at the right size.** While generative AI draws the hidden parts, the visible part is kept at a known place, so its place in the completed image is known without feature matching and the 3D model is placed by it. The chairs at the edges of the paper's sample, of which only a thin part of the backrest is visible, stand behind the people.
@@ -198,7 +201,7 @@ The repeated attempts are there so that the objects can be placed automatically.
 ├── utils.ts                # Cropping, AKAZE matching, depth, 3D generation APIs
 ├── types.ts                # Type definitions
 ├── samples/                # Sample photo
-└── docs/                   # Hugging Face Spaces guide, development history, roadmap, README images
+└── docs/                   # Hugging Face Spaces guide, development history, roadmap, README images and demo video
 ```
 
 ## Future work

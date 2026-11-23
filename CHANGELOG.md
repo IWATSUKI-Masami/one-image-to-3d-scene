@@ -43,6 +43,7 @@ User interface and documentation:
 - **Highlights** section near the top of the README (partly visible objects at the right size, orientation by render-and-compare, runs in the browser), in English and Japanese.
 - `CITATION.cff` with the paper as the preferred citation, so GitHub shows **Cite this repository** (APA and BibTeX).
 - A second sample photo, `samples/cafe-couple.webp` (generated with Gemini), and its automatic result, seen from the photo's camera, at the top of the README (`docs/images/scene-hero.webp`). The walkthrough still uses the paper's sample.
+- A demo near the top of the README: an animation of the paper's sample turned around in the app (`docs/images/demo-rotate.gif`, automatic placement) and a 33-second video of the whole process (`docs/videos/demo.mp4`).
 - A new image of the paper's sample edited by hand (table and chairs moved and scaled; `docs/images/scene-edited.webp`) in the README walkthrough.
 
 ### Changed

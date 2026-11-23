@@ -23,6 +23,9 @@
 
 上の3Dシーンは自動で配置した結果です。配置は、3D Scene タブの編集モード（**Edit ON**）で手で調整することもできます（下の「手で編集した結果」を参照）。
 
+<p align="center"><img src="docs/images/demo-rotate.gif" alt="論文のサンプルの3Dシーンをアプリで回したところ" width="480"></p>
+<p align="center"><sub>論文のサンプルの3Dシーンを、アプリで回したところです（自動の配置）。処理の流れ全体のデモ動画（33秒）：<a href="docs/videos/demo.mp4"><code>docs/videos/demo.mp4</code></a></sub></p>
+
 ## 特徴
 
 - **一部しか写っていない物体も、正しい大きさで置ける。** 生成AIが隠れた部分を描き足す間も、見えている部分を決まった位置に保つので、補完画像の中でのその位置が特徴点マッチングなしで分かり、それを基準に3Dモデルを置けます。論文のサンプルの両端の、背もたれの細い部分しか見えない椅子も、人物の後ろに立ちます。
@@ -200,7 +203,7 @@ AI Settings では次の項目を設定できます。
 ├── utils.ts                # 切り出し、AKAZEマッチング、深度推定、3D生成API
 ├── types.ts                # 型定義
 ├── samples/                # サンプル画像
-└── docs/                   # Hugging Face Spaces の手順、開発の経緯、今後の拡張、README の画像
+└── docs/                   # Hugging Face Spaces の手順、開発の経緯、今後の拡張、README の画像とデモ動画
 ```
 
 ## 今後の拡張
