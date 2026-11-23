@@ -42,6 +42,7 @@ User interface and documentation:
 - Documentation: a sample photo (`samples/two-people-at-table.webp`, AI-generated) and a walkthrough with a screenshot of every step (detection, masks, cropping, completion, 3D models, depth map, scene, the 3D Scene tab and the scene edited by hand) in the README; a README section on which steps use API credits and how to keep usage low; `docs/hugging-face-spaces.md` (tokens, gated models, the `HF_TOKEN` Space secret, GPU per Space, the changes a Hunyuan3D-2.1 duplicate needs on a dedicated GPU, common errors); `docs/roadmap.md`. All documents in English and Japanese.
 - **Highlights** section near the top of the README (partly visible objects at the right size, orientation by render-and-compare, runs in the browser), in English and Japanese.
 - `CITATION.cff` with the paper as the preferred citation, so GitHub shows **Cite this repository** (APA and BibTeX).
+- A second sample photo, `samples/cafe-couple.webp` (generated with Gemini), and its automatic result, seen from the photo's camera, at the top of the README (`docs/images/scene-hero.webp`). The walkthrough still uses the paper's sample.
 
 ### Changed
 

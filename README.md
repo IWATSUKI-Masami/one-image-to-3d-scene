@@ -10,20 +10,20 @@ This is the reference implementation of the paper listed in [Citation](#citation
 
 <table>
   <tr>
-    <td><img src="samples/two-people-at-table.webp" alt="Input: two people talking at a table" width="420"></td>
-    <td><img src="docs/images/scene-result.webp" alt="Reconstructed 3D scene with 3D models placed by depth" width="420"></td>
+    <td><img src="samples/cafe-couple.webp" alt="Input: two people laughing at a round café table" width="420"></td>
+    <td><img src="docs/images/scene-hero.webp" alt="Reconstructed 3D scene, seen from the camera of the photo" width="420"></td>
   </tr>
   <tr>
     <td align="center">Input: a single photo</td>
-    <td align="center">Reconstructed 3D scene</td>
+    <td align="center">Reconstructed 3D scene (automatic, seen from the photo's camera)</td>
   </tr>
 </table>
 
-The sample photo [`samples/two-people-at-table.webp`](samples/two-people-at-table.webp) is AI-generated and is the input used in the paper. You can use it to try the app.
+Both sample photos are AI-generated, and you can use them to try the app: [`samples/cafe-couple.webp`](samples/cafe-couple.webp) (above, generated with Gemini) and [`samples/two-people-at-table.webp`](samples/two-people-at-table.webp), the input used in the paper and in the walkthrough below.
 
 ## Highlights
 
-- **Partly visible objects at the right size.** While generative AI draws the hidden parts, the visible part is kept at a known place, so its place in the completed image is known without feature matching and the 3D model is placed by it. The chairs at the edges of the sample, of which only a thin part of the backrest is visible, stand behind the people.
+- **Partly visible objects at the right size.** While generative AI draws the hidden parts, the visible part is kept at a known place, so its place in the completed image is known without feature matching and the 3D model is placed by it. The chairs at the edges of the paper's sample, of which only a thin part of the backrest is visible, stand behind the people.
 - **Orientation by render-and-compare.** Each 3D model is rendered while turning around the vertical axis and compared with its completed image (silhouette, aspect ratio, shading), then turned to face the camera as in the photo.
 - **Runs in your browser.** React and Three.js; object masks (SAM 2.1) and the alignment are computed in the browser. Detection and completion use your own OpenAI or Gemini key, and 3D generation uses Hugging Face Spaces.
 

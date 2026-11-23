@@ -10,20 +10,20 @@
 
 <table>
   <tr>
-    <td><img src="samples/two-people-at-table.webp" alt="入力：テーブルで話す2人" width="420"></td>
-    <td><img src="docs/images/scene-result.webp" alt="深度に基づいて3Dモデルを配置した3Dシーン" width="420"></td>
+    <td><img src="samples/cafe-couple.webp" alt="入力：カフェの丸いテーブルで笑い合う2人" width="420"></td>
+    <td><img src="docs/images/scene-hero.webp" alt="写真のカメラの位置から見た、復元した3Dシーン" width="420"></td>
   </tr>
   <tr>
     <td align="center">入力：1枚の写真</td>
-    <td align="center">復元した3Dシーン</td>
+    <td align="center">復元した3Dシーン（自動、写真のカメラの位置から見たもの）</td>
   </tr>
 </table>
 
-サンプル画像 [`samples/two-people-at-table.webp`](samples/two-people-at-table.webp) は生成AIで作成したもので、論文でも入力として使っています。アプリを試す際にお使いください。
+サンプル画像はどちらも生成AIで作成したもので、アプリを試す際にお使いください。上の [`samples/cafe-couple.webp`](samples/cafe-couple.webp) は Gemini で作成しました。[`samples/two-people-at-table.webp`](samples/two-people-at-table.webp) は論文で入力として使ったもので、下の「処理の流れ（サンプル画像）」でも使っています。
 
 ## 特徴
 
-- **一部しか写っていない物体も、正しい大きさで置ける。** 生成AIが隠れた部分を描き足す間も、見えている部分を決まった位置に保つので、補完画像の中でのその位置が特徴点マッチングなしで分かり、それを基準に3Dモデルを置けます。サンプルの両端の、背もたれの細い部分しか見えない椅子も、人物の後ろに立ちます。
+- **一部しか写っていない物体も、正しい大きさで置ける。** 生成AIが隠れた部分を描き足す間も、見えている部分を決まった位置に保つので、補完画像の中でのその位置が特徴点マッチングなしで分かり、それを基準に3Dモデルを置けます。論文のサンプルの両端の、背もたれの細い部分しか見えない椅子も、人物の後ろに立ちます。
 - **描画して比べて、向きを合わせる。** 各3Dモデルを縦軸まわりに回しながら描画して補完画像と比べ（シルエット、縦横比、明暗）、写真と同じようにカメラの方へ向けます。
 - **ブラウザで動く。** React と Three.js で作られ、物体マスク（SAM 2.1）と向き合わせはブラウザ内で計算します。物体検出と補完には各自の OpenAI または Gemini の APIキーを、3D生成には Hugging Face の Space を使います。
 
