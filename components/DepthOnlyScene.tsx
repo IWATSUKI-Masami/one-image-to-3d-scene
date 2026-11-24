@@ -79,6 +79,8 @@ const transformOf = (obj: THREE.Object3D): SavedTransform => ({
     scale: obj.scale.toArray() as [number, number, number],
 });
 
+const isDefaultCamera = (c: { pitchDeg: number; hfovDeg: number }) => c.pitchDeg === 0 && c.hfovDeg === ASSUMED_HFOV_DEG;
+
 const applyTransform = (obj: THREE.Object3D, t: SavedTransform) => {
     obj.position.fromArray(t.position);
     obj.rotation.set(t.rotation[0], t.rotation[1], t.rotation[2]);
@@ -194,6 +196,12 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     // Object-id rendering from the photo's camera (visible parts only): 0 = none, i + 1 = containers[i]
     const idRenderRef = useRef<((containers: THREE.Object3D[], W: number, H: number) => Uint8Array) | null>(null);
     const floorYRef = useRef(-1);
+    // The photo's camera: downward tilt and horizontal field of view. The scene is built for a
+    // level camera with ASSUMED_HFOV_DEG; Arrange may change both, re-projecting the models so
+    // that they keep their place and apparent size in the photo (saved with the layout)
+    const photoCameraRef = useRef<{ pitchDeg: number; hfovDeg: number }>(initialLayout?.settings?.photoCamera ?? { pitchDeg: 0, hfovDeg: ASSUMED_HFOV_DEG });
+    /** Place the point cloud (built for the default camera) for the current photo camera */
+    const applyCameraToPointsRef = useRef<() => void>(() => {});
     const gridRef = useRef<THREE.GridHelper | null>(null);
     const [arranging, setArranging] = useState(false);
     // The report of the last run saved with the project (if any) is available again after loading
@@ -211,8 +219,9 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     // Edit history (Undo / Redo) of placements set by hand
     // Each history entry is a group of model changes undone together (one drag, or one Arrange run)
     // (an Arrange run also carries its record, which Undo removes and Redo restores)
-    const undoStackRef = useRef<{ steps: EditStep[]; run?: ArrangeRun }[]>([]);
-    const redoStackRef = useRef<{ steps: EditStep[]; run?: ArrangeRun }[]>([]);
+    type CameraState = { pitchDeg: number; hfovDeg: number };
+    const undoStackRef = useRef<{ steps: EditStep[]; run?: ArrangeRun; camera?: { before: CameraState; after: CameraState } }[]>([]);
+    const redoStackRef = useRef<{ steps: EditStep[]; run?: ArrangeRun; camera?: { before: CameraState; after: CameraState } }[]>([]);
     // Arrange runs whose changes are in the current placements (saved with the layout and the project)
     const arrangeRunsRef = useRef<ArrangeRun[]>(initialLayout?.arrangeRuns ?? []);
     // Reference analysis checked by a person, for evaluating Arrange (never shown to the model)
@@ -268,7 +277,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         const s = sceneRef.current;
         const byId = new Map(positionedModels.map(m => [m.id, m]));
         return {
-            settings: { depthScale, perspective, applyAlignment, pointSize },
+            settings: { depthScale, perspective, applyAlignment, pointSize, ...(isDefaultCamera(photoCameraRef.current) ? {} : { photoCamera: { ...photoCameraRef.current } }) },
             camera: s ? {
                 position: s.camera.position.toArray() as [number, number, number],
                 target: s.controls.target.toArray() as [number, number, number],
@@ -292,11 +301,11 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     reportLayoutRef.current = () => onLayoutChange?.(currentLayout());
 
     /** Record an edit (a new edit clears the redo history) */
-    const pushStepRef = useRef<(step: EditStep | EditStep[], run?: ArrangeRun) => void>(() => {});
-    pushStepRef.current = (step, run) => {
+    const pushStepRef = useRef<(step: EditStep | EditStep[], run?: ArrangeRun, camera?: { before: CameraState; after: CameraState }) => void>(() => {});
+    pushStepRef.current = (step, run, camera) => {
         const steps = Array.isArray(step) ? step : [step];
-        if (steps.length === 0) return;
-        undoStackRef.current.push({ steps, run });
+        if (steps.length === 0 && !camera) return;
+        undoStackRef.current.push({ steps, run, camera });
         if (undoStackRef.current.length > 100) undoStackRef.current.shift();
         redoStackRef.current = [];
         updateHistorySize();
@@ -316,6 +325,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         const group = undoStackRef.current.pop();
         if (!group) return;
         for (const step of [...group.steps].reverse()) placeModel(step.modelId, step.before);
+        if (group.camera) { photoCameraRef.current = group.camera.before; applyCameraToPointsRef.current(); }
         if (group.run) arrangeRunsRef.current = arrangeRunsRef.current.filter(r => r !== group.run);
         redoStackRef.current.push(group);
         updateHistorySize();
@@ -326,6 +336,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         const group = redoStackRef.current.pop();
         if (!group) return;
         for (const step of group.steps) placeModel(step.modelId, step.after);
+        if (group.camera) { photoCameraRef.current = group.camera.after; applyCameraToPointsRef.current(); }
         if (group.run) arrangeRunsRef.current = [...arrangeRunsRef.current, group.run];
         undoStackRef.current.push(group);
         updateHistorySize();
@@ -513,9 +524,10 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         // Floor: the bottom of the point cloud is only the lower edge of the photo (often a
         // table top or people's laps), so use the lowest model instead (completed people
         // have their feet, furniture its legs)
-        const floorY = Math.min(...entries.map(e => boxOf(e.container).min.y));
+        let floorY = Math.min(...entries.map(e => boxOf(e.container).min.y));
         floorYRef.current = floorY;
         if (gridRef.current) gridRef.current.position.y = floorY;
+        const cameraBefore = { ...photoCameraRef.current };
 
         // Photo match: each object's mask in the photo (SAM 2.1), at the size of the id rendering
         const MW = 384, MH = Math.max(1, Math.round(MW / originalAspectRatio));
@@ -655,9 +667,50 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 }
                 return problems;
             },
-            snapshot: () => entries.map(({ model, container }) => ({ id: model.id, t: transformOf(container), set: layoutRef.current.get(model.id) })),
-            restore: (snap) => {
-                for (const { id, t, set } of snap as { id: string; t: SavedTransform; set?: SavedTransform }[]) {
+            camera: () => ({ ...photoCameraRef.current }),
+            setCamera: (pitchDeg, hfovDeg) => {
+                // Re-project every model from the current photo camera to the new one: same
+                // place in the photo, same distance from the camera, and the same apparent size
+                // (scaled by the change of the field of view); models stay upright
+                const old = photoCameraRef.current;
+                if (old.pitchDeg === pitchDeg && old.hfovDeg === hfovDeg) return [];
+                const rad = Math.PI / 180;
+                const tH0 = Math.tan(old.hfovDeg / 2 * rad), tH1 = Math.tan(hfovDeg / 2 * rad);
+                const tV0 = tH0 / originalAspectRatio, tV1 = tH1 / originalAspectRatio;
+                const toCam = new THREE.Matrix4().makeRotationX(old.pitchDeg * rad);
+                const toWorld = new THREE.Matrix4().makeRotationX(-pitchDeg * rad);
+                const problems: string[] = [];
+                for (const { model, container } of entries) {
+                    const c = boxOf(container).getCenter(new THREE.Vector3());
+                    const cc = c.clone().applyMatrix4(toCam);
+                    if (cc.z > -1e-6) { problems.push(`${shortId.get(model.id)}: behind the camera, not moved`); continue; }
+                    const xn = cc.x / -cc.z / tH0, yn = cc.y / -cc.z / tV0;
+                    const target = new THREE.Vector3(xn * tH1, yn * tV1, -1).normalize().multiplyScalar(cc.length()).applyMatrix4(toWorld);
+                    container.scale.multiplyScalar(tH1 / tH0);
+                    container.position.add(target.sub(boxOf(container).getCenter(new THREE.Vector3())));
+                    container.updateMatrixWorld(true);
+                    layoutRef.current.set(model.id, transformOf(container));
+                }
+                photoCameraRef.current = { pitchDeg, hfovDeg };
+                applyCameraToPointsRef.current();
+                // The floor is again the bottom of the lowest model (supports need fixing after this)
+                floorY = Math.min(...entries.map(e => boxOf(e.container).min.y));
+                floorYRef.current = floorY;
+                if (gridRef.current) gridRef.current.position.y = floorY;
+                return problems;
+            },
+            snapshot: () => ({
+                camera: { ...photoCameraRef.current }, floorY,
+                models: entries.map(({ model, container }) => ({ id: model.id, t: transformOf(container), set: layoutRef.current.get(model.id) })),
+            }),
+            restore: (snapshot) => {
+                const snap = snapshot as { camera: CameraState; floorY: number; models: { id: string; t: SavedTransform; set?: SavedTransform }[] };
+                photoCameraRef.current = { ...snap.camera };
+                applyCameraToPointsRef.current();
+                floorY = snap.floorY;
+                floorYRef.current = floorY;
+                if (gridRef.current) gridRef.current.position.y = floorY;
+                for (const { id, t, set } of snap.models) {
                     const entry = entries.find(e => e.model.id === id);
                     if (!entry) continue;
                     applyTransform(entry.container, t);
@@ -805,7 +858,9 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 };
                 arrangeRunsRef.current = [...arrangeRunsRef.current, run];
             }
-            pushStepRef.current(steps, run);
+            const cameraAfter = { ...photoCameraRef.current };
+            const cameraChanged = cameraAfter.pitchDeg !== cameraBefore.pitchDeg || cameraAfter.hfovDeg !== cameraBefore.hfovDeg;
+            pushStepRef.current(steps, run, cameraChanged ? { before: cameraBefore, after: cameraAfter } : undefined);
             reportLayoutRef.current();
             arrangeAbortRef.current = null;
             setArranging(false);
@@ -1041,7 +1096,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             version: 1,
             savedAt: new Date().toISOString(),
             scene: sceneName,
-            settings: { depthScale, perspective, applyAlignment, pointSize },
+            settings: { depthScale, perspective, applyAlignment, pointSize, ...(isDefaultCamera(photoCameraRef.current) ? {} : { photoCamera: { ...photoCameraRef.current } }) },
             camera: {
                 position: s.camera.position.toArray() as [number, number, number],
                 target: s.controls.target.toArray() as [number, number, number],
@@ -1134,6 +1189,10 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         }
 
         const st = layout.settings ?? ({} as SceneLayoutFile['settings']);
+        photoCameraRef.current = st.photoCamera && typeof st.photoCamera.pitchDeg === 'number' && typeof st.photoCamera.hfovDeg === 'number'
+            ? { pitchDeg: st.photoCamera.pitchDeg, hfovDeg: st.photoCamera.hfovDeg }
+            : { pitchDeg: 0, hfovDeg: ASSUMED_HFOV_DEG };
+        applyCameraToPointsRef.current();
         if (typeof st.pointSize === 'number') setPointSize(st.pointSize);
         const rebuild = (typeof st.depthScale === 'number' && st.depthScale !== depthScale)
             || (typeof st.perspective === 'boolean' && st.perspective !== perspective)
@@ -1384,16 +1443,34 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         // models and the floor grid, and the object names drawn on them. Rendered into
         // the visible canvas at another size and copied at once (before the browser
         // presents the frame); the animation loop draws the normal view again.
+        /** The photo's camera at the origin: its field of view and downward tilt as set by Arrange */
+        const makePhotoCamera = () => {
+            const { pitchDeg, hfovDeg } = photoCameraRef.current;
+            const tH = Math.tan((hfovDeg / 2) * Math.PI / 180);
+            const pc = new THREE.PerspectiveCamera(2 * Math.atan(tH / originalAspectRatio) * 180 / Math.PI, originalAspectRatio, 0.01, 1000);
+            pc.position.set(0, 0, 0);
+            pc.rotation.set(-pitchDeg * Math.PI / 180, 0, 0);
+            pc.updateMatrixWorld();
+            return pc;
+        };
+        // The point cloud is built for a level camera with the assumed field of view; for another
+        // photo camera it is widened or narrowed (at its depth) and tilted with the camera
+        applyCameraToPointsRef.current = () => {
+            const pts = sceneRef.current?.points;
+            if (!pts || !perspective) return;
+            const { pitchDeg, hfovDeg } = photoCameraRef.current;
+            const k = Math.tan((hfovDeg / 2) * Math.PI / 180) / tanHalf;
+            pts.scale.set(k, k, 1);
+            pts.rotation.set(-pitchDeg * Math.PI / 180, 0, 0);
+        };
+
         arrangeRenderRef.current = (view, labels) => {
             const W = 1024;
             const photoAspect = originalAspectRatio;
             const H = view === 'photo' ? Math.round(W / photoAspect) : W;
             let cam: THREE.Camera;
             if (view === 'photo') {
-                const pc = new THREE.PerspectiveCamera(2 * Math.atan(tanHalf / photoAspect) * 180 / Math.PI, photoAspect, 0.01, 1000);
-                pc.position.set(0, 0, 0);
-                pc.lookAt(0, 0, -1);
-                cam = pc;
+                cam = makePhotoCamera();
             } else if (view === 'oblique') {
                 // From the front left and above (camera side, turned 40° to the left, 30° down),
                 // so that distances along the line of sight and contacts become visible
@@ -1458,10 +1535,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         // color that encodes its index (no lighting, no tone mapping), with depth test, so
         // parts hidden behind other models do not count
         idRenderRef.current = (containers, W, H) => {
-            const pc = new THREE.PerspectiveCamera(2 * Math.atan(tanHalf / originalAspectRatio) * 180 / Math.PI, originalAspectRatio, 0.01, 1000);
-            pc.position.set(0, 0, 0);
-            pc.lookAt(0, 0, -1);
-            pc.updateMatrixWorld();
+            const pc = makePhotoCamera();
             const saved: { mesh: THREE.Mesh; material: THREE.Material | THREE.Material[] }[] = [];
             const created: THREE.Material[] = [];
             containers.forEach((container, i) => {
@@ -1597,6 +1671,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 // Store reference
                 if (sceneRef.current) {
                     sceneRef.current.points = points;
+                    applyCameraToPointsRef.current();
                     // Apply current visibility state
                     points.visible = showPointCloudRef.current;
                 }

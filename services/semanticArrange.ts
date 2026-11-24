@@ -80,7 +80,11 @@ export interface ArrangeScene {
     apply(edits: PlacementEdit[]): string[];
     /** Render a view with the object labels drawn on it; base64 JPEG without the data: prefix */
     render(view: ArrangeView): Promise<string>;
-    /** The placements of all models, to go back to later */
+    /** The photo's camera: downward tilt and horizontal field of view (degrees) */
+    camera(): { pitchDeg: number; hfovDeg: number };
+    /** Change the photo's camera; every model keeps its place and apparent size in the photo. Returns problems */
+    setCamera(pitchDeg: number, hfovDeg: number): string[];
+    /** The placements of all models (and the camera), to go back to later */
     snapshot(): unknown;
     /** Put the models back where a snapshot had them */
     restore(snapshot: unknown): void;
@@ -122,6 +126,8 @@ export interface ArrangeRoundRecord {
     call: number;
     reason: string;
     edits: PlacementEdit[];
+    /** Camera set in this round (before the edits), if any */
+    camera?: { pitchDeg: number; hfovDeg: number };
     problems: string[];
     /** Milliseconds to apply the edits, render the views and measure the scene */
     applyMs: number;
@@ -131,6 +137,8 @@ export interface ArrangeRoundRecord {
     issues: number;
     /** Relation and size warnings from the scene analysis (undefined without an analysis) */
     relationIssues?: number;
+    /** The photo's camera after the round */
+    cameraAfter?: { pitchDeg: number; hfovDeg: number };
     /** The same against the reference analysis (evaluation only; undefined without a reference) */
     refRelationIssues?: number;
     refRelationWarnings?: Record<string, string[]>;
@@ -224,6 +232,7 @@ Your task: make the scene physically and semantically consistent with the photo.
 - A seat in the scene goes under the person who sits on it: use place_under (it centers the seat under the person and stands it on the floor), then turn it with rotate_y_deg so that the person faces the way the seat faces (backrest behind the back), and adjust with move; check in the top and oblique views that the seat is under the hips.
 - Generated models can have wrong proportions (e.g. furniture that is too low or too thick); fix them with scale_axes (stretch along the model's own x, y, z) rather than by changing the whole object's size. Never stretch people: their body proportions stay as generated (scale_axes is refused for people; use scale). Do not stretch other objects only to improve the photo match either; proportion_change in the object list shows how far each object is from the generated model's proportions.
 - Orientation ("faces"): people, chairs and other objects with a front should face the way they face in the photo.
+- The photo's camera: the scene was built for a level camera (pitch_deg 0) with a 60° horizontal field of view, which is only an assumption. If the objects cannot all have their real sizes and their places in the photo at the same time (e.g. a table top at its real height falls below its place in the photo, cups resting on the table come out too large, people seated behind the table look too small), the camera is probably tilted down (most photos of people at a table: about 5-20°) or has another field of view (phones about 65-75°, zoomed photos narrower). Then set camera with update_placements: all models keep their place and apparent size in the photo, and you fix the supports again in the same or the next round (drop_on floor for furniture and people, rest_on for objects on tops). Change the camera early, before fine-tuning, and only for such a conflict.
 - Avoid intersections, except where parts overlap in reality (legs under a table).
 - Do not change objects that are already right.
 
@@ -238,7 +247,7 @@ Work in rounds: call update_placements with the edits for one round (you can edi
 const TOOLS: ToolSpec[] = [
     {
         name: 'update_placements',
-        description: 'Change the placement of one or more models. For each edit, the fields that are given are applied in this order: scale, scale_axes, rotate_y_deg, place_under, along_ray, move, center, rest_on, drop_on. Returns the new object list and new renderings (photo view, top view and oblique view).',
+        description: 'Change the placement of one or more models, optionally after setting the photo\'s camera (camera). For each edit, the fields that are given are applied in this order: scale, scale_axes, rotate_y_deg, place_under, along_ray, move, center, rest_on, drop_on. Returns the new object list and new renderings (photo view, top view and oblique view).',
         schema: {
             type: 'object',
             properties: {
@@ -261,6 +270,16 @@ const TOOLS: ToolSpec[] = [
                         required: ['id'],
                         additionalProperties: false,
                     },
+                },
+                camera: {
+                    type: 'object',
+                    description: 'Optional: set the photo\'s camera before the edits (downward tilt and horizontal field of view). Every model keeps its place and apparent size in the photo; supports must be fixed again afterwards.',
+                    properties: {
+                        pitch_deg: { type: 'number', description: 'Downward tilt of the camera in degrees (0 = level; e.g. 10 for a camera looking slightly down)' },
+                        hfov_deg: { type: 'number', description: 'Horizontal field of view in degrees (60 = default; wider for phone cameras, narrower for zoomed photos)' },
+                    },
+                    required: ['pitch_deg', 'hfov_deg'],
+                    additionalProperties: false,
                 },
                 reason: { type: 'string', description: 'What these edits fix, in one or two sentences' },
             },
@@ -317,7 +336,8 @@ const describeObjects = (scene: ArrangeScene, objects: ArrangeObject[], relation
             },
         } : {}),
     }));
-    return `floorY = ${round3(scene.floorY())}${mean !== undefined ? `\nmean photo_match iou = ${round3(mean)}` : ''}\nphysical issues = ${scene.issueCount()}${relationIssues !== undefined ? `\nrelation issues = ${relationIssues}` : ''}\nObjects:\n${lines.join('\n')}`;
+    const cam = scene.camera();
+    return `camera: pitch_deg ${round3(cam.pitchDeg)} (downward tilt), hfov_deg ${round3(cam.hfovDeg)}\nfloorY = ${round3(scene.floorY())}${mean !== undefined ? `\nmean photo_match iou = ${round3(mean)}` : ''}\nphysical issues = ${scene.issueCount()}${relationIssues !== undefined ? `\nrelation issues = ${relationIssues}` : ''}\nObjects:\n${lines.join('\n')}`;
 };
 
 const imageBlock = (base64: string): Block => ({ type: 'image', base64 });
@@ -337,6 +357,18 @@ const photoToJpeg = async (url: string): Promise<string> => {
     c.height = Math.round(img.naturalHeight * s);
     c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height);
     return c.toDataURL('image/jpeg', 0.88).split(',')[1];
+};
+
+/** The camera requested with update_placements, if any (tilt -10..45°, field of view 30..100°) */
+const validateCamera = (input: unknown, problems: string[]): { pitchDeg: number; hfovDeg: number } | undefined => {
+    const c = (input as { camera?: { pitch_deg?: unknown; hfov_deg?: unknown } })?.camera;
+    if (c === undefined || c === null) return undefined;
+    const p = c.pitch_deg, f = c.hfov_deg;
+    if (typeof p !== 'number' || typeof f !== 'number' || !Number.isFinite(p) || !Number.isFinite(f) || p < -10 || p > 45 || f < 30 || f > 100) {
+        problems.push('camera: pitch_deg must be -10..45 and hfov_deg 30..100; the camera was not changed');
+        return undefined;
+    }
+    return { pitchDeg: p, hfovDeg: f };
 };
 
 const isVec3 = (v: unknown): v is [number, number, number] =>
@@ -518,7 +550,7 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
     const initial = await renderAll();
     record.initial = {
         round: 0, renderMs: initial.ms, measureMs: before.ms, meanIoU: photoIoUBefore, issues: issuesBefore, relationIssues: relationIssuesBefore,
-        refRelationIssues: before.refRelationIssues, refRelationWarnings: before.refRelationWarnings,
+        refRelationIssues: before.refRelationIssues, refRelationWarnings: before.refRelationWarnings, cameraAfter: scene.camera(),
         objects: summarizeObjects(objectsBefore), images: initial.images,
     };
 
@@ -587,11 +619,13 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
                 continue;
             }
             const { edits, problems } = validateEdits(tool.input);
+            const camera = validateCamera(tool.input, problems);
             rounds++;
             nudged = false;
             const reason = String((tool.input as { reason?: unknown })?.reason ?? '').trim();
             onProgress?.(`Round ${rounds}: ${reason || `${edits.length} edit(s)`}`);
             const ta = now();
+            if (camera) problems.push(...scene.setCamera(camera.pitchDeg, camera.hfovDeg));
             problems.push(...scene.apply(edits));
             const applyMs = now() - ta;
             const rendered = await renderAll();
@@ -602,7 +636,7 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
             lastRef = after.refRelationIssues;
             states.push({ round: rounds, score: stateScore(after), snap: scene.snapshot(), objects: after.objects, issues: after.issues, relationIssues: after.relationIssues, refRelationIssues: after.refRelationIssues });
             record.rounds.push({
-                round: rounds, call: callIndex, reason, edits, problems,
+                round: rounds, call: callIndex, reason, edits, ...(camera ? { camera } : {}), problems, cameraAfter: scene.camera(),
                 applyMs: Math.round(applyMs), renderMs: Math.round(rendered.ms), measureMs: Math.round(after.ms),
                 meanIoU: meanPhotoIoU(after.objects), issues: after.issues, relationIssues: after.relationIssues,
                 refRelationIssues: after.refRelationIssues, refRelationWarnings: after.refRelationWarnings, objects: summarizeObjects(after.objects), images: rendered.images,

@@ -167,7 +167,11 @@ export interface ReferenceAnalysis {
 
 /** Scene settings, camera and model placements (in a project: only the placements set by hand) */
 export interface SceneLayout {
-  settings: { depthScale: number; perspective: boolean; applyAlignment: boolean; pointSize: number };
+  settings: {
+    depthScale: number; perspective: boolean; applyAlignment: boolean; pointSize: number;
+    /** The photo's camera as set by Arrange: downward tilt and horizontal field of view (default 0° and 60°) */
+    photoCamera?: { pitchDeg: number; hfovDeg: number };
+  };
   camera?: { position: [number, number, number]; target: [number, number, number]; fov: number };
   models: SceneModelPlacement[];
   /** Arrange runs whose changes are in the placements (oldest first); undone runs are removed */

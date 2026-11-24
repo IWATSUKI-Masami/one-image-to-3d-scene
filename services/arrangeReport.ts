@@ -102,6 +102,7 @@ export const buildArrangeReport = (r: ArrangeReportInput) => {
         `Outcome: ${outcome}, rounds: ${record.rounds.length}${kept ? `; kept ${kept.round === 0 ? 'the scene as before the run' : `round ${kept.round}`} (score ${kept.score.toFixed(3)}), which scored better than round ${kept.lastRound} (${kept.lastScore.toFixed(3)})` : ''}`,
         `Photo match (mean IoU with the photo masks): ${f(before?.meanIoU)} -> ${f(after?.meanIoU)}`,
         `Physical issues (floating, sunk, inside another model): ${before?.issues ?? '-'} -> ${after?.issues ?? '-'}`,
+        `Photo camera (downward tilt, horizontal field of view): ${before?.cameraAfter ? `${before.cameraAfter.pitchDeg}°, ${before.cameraAfter.hfovDeg}°` : '-'} -> ${after?.cameraAfter ? `${after.cameraAfter.pitchDeg}°, ${after.cameraAfter.hfovDeg}°` : '-'}`,
         `Relation issues (relations and sizes of the scene analysis not satisfied): ${rel(before?.relationIssues)} -> ${rel(after?.relationIssues)}`,
         ...(ref ? [`Relation issues against the reference analysis (${ref.fileName ?? 'checked by a person'}): ${rel(before?.refRelationIssues)} -> ${rel(after?.refRelationIssues)}`] : []),
         ...(cmp ? [`Analysis vs reference: relations found ${cmp.found}/${cmp.reference} (recall ${pct(cmp.recall)}), correct ${cmp.correct}/${cmp.given} (precision ${pct(cmp.precision)}), contact visibility right ${cmp.contactRight}/${cmp.contactTotal}, mean height error ${pct(cmp.heightError)}`] : []),
@@ -138,6 +139,7 @@ export const buildArrangeReport = (r: ArrangeReportInput) => {
         'Edits per round (as requested by the model):',
         ...record.rounds.flatMap(rd => [
             `  round ${rd.round}:`,
+            ...(rd.camera ? [`    camera: pitch ${rd.camera.pitchDeg}°, horizontal field of view ${rd.camera.hfovDeg}°`] : []),
             ...rd.edits.map(e => `    ${JSON.stringify(e)}`),
             ...(rd.problems.length ? [`    problems: ${rd.problems.join('; ')}`] : []),
         ]),
@@ -174,6 +176,8 @@ export const buildArrangeReport = (r: ArrangeReportInput) => {
         `outcome,${outcome}`,
         `rounds,${record.rounds.length}`,
         `kept_round,${kept ? kept.round : record.rounds.length}`,
+        `camera_pitch_deg,${before?.cameraAfter?.pitchDeg ?? ''},${after?.cameraAfter?.pitchDeg ?? ''}`,
+        `camera_hfov_deg,${before?.cameraAfter?.hfovDeg ?? ''},${after?.cameraAfter?.hfovDeg ?? ''}`,
         `elapsed_s,${f(totals.elapsedS, 1)}`,
         `api_s,${f(totals.apiS, 1)}`,
         `local_s,${f(totals.localS, 1)}`,
@@ -213,14 +217,14 @@ export const buildArrangeReport = (r: ArrangeReportInput) => {
     const roundsCsv = [
         ...header,
         '',
-        ['round', 'call', 'api_s', 'input_tokens', 'output_tokens', 'reasoning_tokens', 'apply_ms', 'render_ms', 'measure_ms', 'mean_iou', 'physical_issues', 'relation_issues', 'ref_relation_issues', 'max_proportion_change', 'edits',
+        ['round', 'call', 'api_s', 'input_tokens', 'output_tokens', 'reasoning_tokens', 'apply_ms', 'render_ms', 'measure_ms', 'mean_iou', 'physical_issues', 'relation_issues', 'ref_relation_issues', 'camera_pitch_deg', 'camera_hfov_deg', 'max_proportion_change', 'edits',
             ...objectIds.map(id => `iou_${id}`), 'reason'].join(','),
-        ...(before ? [['0', '', '', '', '', '', '', before.renderMs.toFixed(0), before.measureMs.toFixed(0), f(before.meanIoU), before.issues, before.relationIssues ?? '', before.refRelationIssues ?? '', f(maxProp(before.objects)), 0,
+        ...(before ? [['0', '', '', '', '', '', '', before.renderMs.toFixed(0), before.measureMs.toFixed(0), f(before.meanIoU), before.issues, before.relationIssues ?? '', before.refRelationIssues ?? '', before.cameraAfter?.pitchDeg ?? '', before.cameraAfter?.hfovDeg ?? '', f(maxProp(before.objects)), 0,
             ...objectIds.map(id => f(before.objects.find(o => o.id === id)?.iou)), q('before')].join(',')] : []),
         ...record.rounds.map(rd => {
             const c = callOf.get(rd.call);
             return [rd.round, rd.call, c ? f(c.durationMs / 1000, 1) : '', c?.usage.input ?? '', c?.usage.output ?? '', c?.usage.reasoning ?? '',
-                rd.applyMs, rd.renderMs, rd.measureMs, f(rd.meanIoU), rd.issues, rd.relationIssues ?? '', rd.refRelationIssues ?? '', f(maxProp(rd.objects)), rd.edits.length,
+                rd.applyMs, rd.renderMs, rd.measureMs, f(rd.meanIoU), rd.issues, rd.relationIssues ?? '', rd.refRelationIssues ?? '', rd.cameraAfter?.pitchDeg ?? '', rd.cameraAfter?.hfovDeg ?? '', f(maxProp(rd.objects)), rd.edits.length,
                 ...objectIds.map(id => f(rd.objects.find(o => o.id === id)?.iou)), q(rd.reason)].join(',');
         }),
         '',
