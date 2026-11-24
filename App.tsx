@@ -2329,6 +2329,9 @@ const App: React.FC = () => {
                             sceneName={sourceImageName ?? undefined}
                             initialLayout={sceneLayoutRef.current ?? undefined}
                             onLayoutChange={(layout) => { sceneLayoutRef.current = layout; }}
+                            claudeApiKey={aiSettings.keys.anthropic}
+                            claudeModel={aiSettings.models.claudeArrange}
+                            onOpenSettings={openAISettings}
                           />
                         </div>
                       </div>

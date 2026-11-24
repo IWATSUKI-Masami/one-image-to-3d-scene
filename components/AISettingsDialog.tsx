@@ -12,6 +12,7 @@ interface Props {
 const KEY_FIELDS: { key: keyof AIKeys; label: string; placeholder: string }[] = [
   { key: 'openai', label: 'OpenAI API key', placeholder: 'sk-...' },
   { key: 'gemini', label: 'Google Gemini API key', placeholder: 'AIza...' },
+  { key: 'anthropic', label: 'Anthropic API key (optional: Arrange in the 3D scene)', placeholder: 'sk-ant-...' },
 ];
 
 const SPACE_FIELDS: { key: keyof HFSpaces; label: string }[] = [
@@ -22,11 +23,12 @@ const SPACE_FIELDS: { key: keyof HFSpaces; label: string }[] = [
   { key: 'hunyuan3d', label: 'Hunyuan3D-2.1' },
 ];
 
-const MODEL_FIELDS: { key: keyof AIModels; label: string; provider: AIProvider; role: 'vision' | 'image' }[] = [
+const MODEL_FIELDS: { key: keyof AIModels; label: string; provider: AIProvider | 'anthropic'; role: 'vision' | 'image' | 'arrange' }[] = [
   { key: 'openaiVision', label: 'OpenAI (detection)', provider: 'openai', role: 'vision' },
   { key: 'geminiVision', label: 'Gemini (detection)', provider: 'gemini', role: 'vision' },
   { key: 'openaiImage', label: 'OpenAI (completion)', provider: 'openai', role: 'image' },
   { key: 'geminiImage', label: 'Gemini (completion)', provider: 'gemini', role: 'image' },
+  { key: 'claudeArrange', label: 'Claude (3D scene Arrange)', provider: 'anthropic', role: 'arrange' },
 ];
 
 const SegmentedButtons = <T extends string>({ options, value, onSelect, disabled = false }: {
@@ -56,13 +58,14 @@ export const AISettingsDialog: React.FC<Props> = ({ settings, onChange, onClose 
   const setModel = (key: keyof AIModels, value: string) => update({ models: { ...settings.models, [key]: value } });
   const setSpace = (key: keyof HFSpaces, value: string) => update({ spaces: { ...settings.spaces, [key]: value } });
 
-  const neededKeys = new Set<AIProvider>([settings.visionProvider, settings.imageProvider]);
+  const neededKeys = new Set<keyof AIKeys>([settings.visionProvider, settings.imageProvider]);
   // Only the Space of the selected background-removal model is used
   const bgRemovalUsed = usesBgRemoval(settings);
   const isSpaceActive = (key: keyof HFSpaces) =>
     (key !== 'rmbg' && key !== 'rmbg2') || (bgRemovalUsed && key === BG_REMOVAL_SPACE_KEY[settings.bgRemoval]);
   const isActive = (field: typeof MODEL_FIELDS[number]) =>
-    field.role === 'vision' ? field.provider === settings.visionProvider : field.provider === settings.imageProvider;
+    field.role === 'arrange' ? true
+      : field.role === 'vision' ? field.provider === settings.visionProvider : field.provider === settings.imageProvider;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>

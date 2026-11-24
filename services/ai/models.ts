@@ -17,6 +17,7 @@ export const DEFAULT_MODELS: AIModels = {
   geminiImage: 'gemini-3-pro-image',
   openaiVision: 'gpt-5.6-sol',
   openaiImage: 'gpt-image-2.6-sunburst',
+  claudeArrange: 'claude-opus-5-5',
 };
 
 /**
@@ -38,6 +39,7 @@ export const MODEL_SUGGESTIONS: Record<keyof AIModels, string[]> = {
   geminiImage: ['gemini-3-pro-image', 'gemini-3.1-flash-image', 'gemini-nano-banana-2.1'],
   openaiVision: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.5'],
   openaiImage: ['gpt-image-2.6-sunburst', 'gpt-image-2.6-flare', 'gpt-image-2'],
+  claudeArrange: ['claude-opus-5-5', 'claude-fable-5-2', 'claude-sonnet-5-5'],
 };
 
 // Key order is the display order (OpenAI first: it is the default)
@@ -112,6 +114,7 @@ export const loadAISettings = (): AISettings => {
     keys: {
       gemini: import.meta.env.VITE_GEMINI_API_KEY || '',
       openai: import.meta.env.VITE_OPENAI_API_KEY || '',
+      anthropic: import.meta.env.VITE_ANTHROPIC_API_KEY || '',
     },
     models: { ...DEFAULT_MODELS },
     spaces: { ...DEFAULT_SPACES },

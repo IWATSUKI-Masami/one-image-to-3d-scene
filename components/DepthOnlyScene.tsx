@@ -8,6 +8,7 @@ import { alignmentYawDeg, ASSUMED_HFOV_DEG, MIN_ALIGNMENT_SCORE, viewAngleDeg } 
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { Spinner } from './Spinner';
 import { DetectedObject, Model3D, SceneLayout } from '../types';
+import { ArrangeObject, ArrangeScene, ArrangeView, PlacementEdit, arrangeSceneWithClaude } from '../services/semanticArrange';
 import { Box2D, DepthRange, ObjectMask, depthFromBrightness, loadObjectMask, medianDepthInBox, sameBox } from './depthSampling';
 
 const boxKey = (box: Box2D): string => box.map(v => v.toFixed(6)).join(',');
@@ -106,6 +107,11 @@ interface DepthOnlySceneProps {
     initialLayout?: SceneLayout;
     /** Called when placements set by hand, the settings or the camera change, so the project can save them */
     onLayoutChange?: (layout: SceneLayout) => void;
+    /** Anthropic API key and Claude model for Arrange (semantic arrangement of the models) */
+    claudeApiKey?: string;
+    claudeModel?: string;
+    /** Opens the AI Settings dialog (when the Anthropic API key is missing) */
+    onOpenSettings?: () => void;
 }
 
 export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
@@ -118,6 +124,9 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     sceneName,
     initialLayout,
     onLayoutChange,
+    claudeApiKey,
+    claudeModel,
+    onOpenSettings,
 }) => {
     const mountRef = useRef<HTMLDivElement>(null);
     const [loading, setLoading] = useState(true);
@@ -137,9 +146,16 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     const [showInfo, setShowInfo] = useState(true);
     const [showWholeModelBoxes, setShowWholeModelBoxes] = useState(false); // Whole Boxes off by default
     const [transformMode, setTransformMode] = useState<'translate' | 'rotate' | 'scale'>('translate');
+    // Arrange (Claude): render function set by the scene setup, progress log, cancel
+    const arrangeRenderRef = useRef<((view: ArrangeView, labels: { text: string; center: THREE.Vector3 }[]) => string) | null>(null);
+    const floorYRef = useRef(-1);
+    const [arranging, setArranging] = useState(false);
+    const [arrangeLog, setArrangeLog] = useState<string[]>([]);
+    const arrangeAbortRef = useRef<AbortController | null>(null);
     // Edit history (Undo / Redo) of placements set by hand
-    const undoStackRef = useRef<EditStep[]>([]);
-    const redoStackRef = useRef<EditStep[]>([]);
+    // Each history entry is a group of model changes undone together (one drag, or one Arrange run)
+    const undoStackRef = useRef<EditStep[][]>([]);
+    const redoStackRef = useRef<EditStep[][]>([]);
     const [historySize, setHistorySize] = useState({ undo: 0, redo: 0 });
     const updateHistorySize = () => setHistorySize({ undo: undoStackRef.current.length, redo: redoStackRef.current.length });
     // Placement of the model being dragged, when the drag started (undefined = automatic)
@@ -200,9 +216,11 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     reportLayoutRef.current = () => onLayoutChange?.(currentLayout());
 
     /** Record an edit (a new edit clears the redo history) */
-    const pushStepRef = useRef<(step: EditStep) => void>(() => {});
+    const pushStepRef = useRef<(step: EditStep | EditStep[]) => void>(() => {});
     pushStepRef.current = (step) => {
-        undoStackRef.current.push(step);
+        const group = Array.isArray(step) ? step : [step];
+        if (group.length === 0) return;
+        undoStackRef.current.push(group);
         if (undoStackRef.current.length > 100) undoStackRef.current.shift();
         redoStackRef.current = [];
         updateHistorySize();
@@ -219,21 +237,146 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
 
     const undoRef = useRef<() => void>(() => {});
     undoRef.current = () => {
-        const step = undoStackRef.current.pop();
-        if (!step) return;
-        placeModel(step.modelId, step.before);
-        redoStackRef.current.push(step);
+        const group = undoStackRef.current.pop();
+        if (!group) return;
+        for (const step of [...group].reverse()) placeModel(step.modelId, step.before);
+        redoStackRef.current.push(group);
         updateHistorySize();
         reportLayoutRef.current();
     };
     const redoRef = useRef<() => void>(() => {});
     redoRef.current = () => {
-        const step = redoStackRef.current.pop();
-        if (!step) return;
-        placeModel(step.modelId, step.after);
-        undoStackRef.current.push(step);
+        const group = redoStackRef.current.pop();
+        if (!group) return;
+        for (const step of group) placeModel(step.modelId, step.after);
+        undoStackRef.current.push(group);
         updateHistorySize();
         reportLayoutRef.current();
+    };
+
+    /**
+     * Arrange: let Claude move, turn and scale the models so that the scene matches the
+     * photo (supports, seated people, relative sizes, orientation). The result becomes
+     * placements set by hand and one Undo step.
+     */
+    const handleArrange = async () => {
+        if (arranging) return;
+        if (!claudeApiKey) {
+            alert('Arrange uses Claude (Anthropic API). Enter an Anthropic API key in AI Settings.');
+            onOpenSettings?.();
+            return;
+        }
+        const render = arrangeRenderRef.current;
+        if (!render) return;
+        const entries = positionedModels.flatMap((model) => {
+            const container = meshContainersRef.current.find(c => c.userData.modelId === model.id);
+            return container ? [{ model, container }] : [];
+        });
+        if (entries.length === 0) return;
+        // Short ids for Claude (o1, o2, ...)
+        const shortId = new Map(entries.map((e, i) => [e.model.id, `o${i + 1}`]));
+        const byShort = new Map(entries.map((e, i) => [`o${i + 1}`, e]));
+        const describe = (model: Model3D) => model.box_2d
+            ? detectedObjects.find(o => sameBox(o.box_2d, model.box_2d!))?.description
+            : undefined;
+        const nameOf = (model: Model3D) => `${shortId.get(model.id)} ${model.label.replace(/\s*\(Completed\)\s*$/i, '')}`;
+        const boxOf = (o: THREE.Object3D) => { o.updateMatrixWorld(true); return new THREE.Box3().setFromObject(o); };
+        const before = new Map(entries.map(e => [e.model.id, layoutRef.current.get(e.model.id)]));
+
+        const arrangeScene: ArrangeScene = {
+            objects: (): ArrangeObject[] => entries.map(({ model, container }) => {
+                const b = boxOf(container);
+                const c = b.getCenter(new THREE.Vector3()), sz = b.getSize(new THREE.Vector3());
+                return {
+                    id: shortId.get(model.id)!,
+                    label: model.label.replace(/\s*\(Completed\)\s*$/i, ''),
+                    description: describe(model),
+                    type: model.type,
+                    photoBox: model.box_2d,
+                    center: c.toArray() as [number, number, number],
+                    size: sz.toArray() as [number, number, number],
+                    rotationYDeg: container.rotation.y * 180 / Math.PI,
+                };
+            }),
+            floorY: () => floorYRef.current,
+            apply: (edits: PlacementEdit[]) => {
+                const problems: string[] = [];
+                const shiftCenterTo = (o: THREE.Object3D, target: THREE.Vector3) => {
+                    o.position.add(target.clone().sub(boxOf(o).getCenter(new THREE.Vector3())));
+                };
+                for (const edit of edits) {
+                    const entry = byShort.get(edit.id);
+                    if (!entry) { problems.push(`unknown id ${edit.id}`); continue; }
+                    const o = entry.container;
+                    if (edit.scale !== undefined) {
+                        const c = boxOf(o).getCenter(new THREE.Vector3());
+                        o.scale.multiplyScalar(edit.scale);
+                        shiftCenterTo(o, c);
+                    }
+                    if (edit.rotate_y_deg !== undefined) {
+                        const c = boxOf(o).getCenter(new THREE.Vector3());
+                        o.rotation.y += edit.rotate_y_deg * Math.PI / 180;
+                        shiftCenterTo(o, c);
+                    }
+                    if (edit.along_ray !== undefined) {
+                        const c = boxOf(o).getCenter(new THREE.Vector3());
+                        o.scale.multiplyScalar(edit.along_ray);
+                        shiftCenterTo(o, c.multiplyScalar(edit.along_ray));
+                    }
+                    if (edit.move) o.position.add(new THREE.Vector3(...edit.move));
+                    if (edit.center) shiftCenterTo(o, new THREE.Vector3(...edit.center));
+                    if (edit.rest_on !== undefined) {
+                        let top: number | undefined;
+                        if (edit.rest_on === 'floor') top = floorYRef.current;
+                        else {
+                            const support = byShort.get(edit.rest_on);
+                            if (support && support !== entry) top = boxOf(support.container).max.y;
+                            else problems.push(`${edit.id}: unknown support ${edit.rest_on}`);
+                        }
+                        if (top !== undefined) o.position.y += top - boxOf(o).min.y;
+                    }
+                    o.updateMatrixWorld(true);
+                    layoutRef.current.set(entry.model.id, transformOf(o));
+                }
+                return problems;
+            },
+            render: async (view) => render(view, entries.map(({ model, container }) => ({
+                text: nameOf(model),
+                center: boxOf(container).getCenter(new THREE.Vector3()),
+            }))),
+        };
+
+        transformControlsRef.current?.detach();
+        setSelectedModelIndex(-1);
+        const controller = new AbortController();
+        arrangeAbortRef.current = controller;
+        setArranging(true);
+        setArrangeLog(['Starting…']);
+        const log = (m: string) => setArrangeLog(prev => [...prev.slice(-30), m]);
+        try {
+            const result = await arrangeSceneWithClaude(arrangeScene, {
+                apiKey: claudeApiKey,
+                model: claudeModel || 'claude-opus-5-5',
+                photoUrl: imageUrl,
+                signal: controller.signal,
+                onProgress: log,
+            });
+            log(`Done (${result.rounds} round${result.rounds === 1 ? '' : 's'}). ${result.summary}`);
+        } catch (e: any) {
+            log(controller.signal.aborted ? 'Cancelled.' : `Failed: ${e?.message || e}`);
+            console.error('Arrange failed:', e);
+        } finally {
+            // Whatever was changed is one Undo step
+            const steps: EditStep[] = entries.flatMap(({ model, container }) => {
+                const after = transformOf(container);
+                const prev = before.get(model.id);
+                return sameTransform(prev ?? container.userData.autoTransform, after) ? [] : [{ modelId: model.id, before: prev, after }];
+            });
+            pushStepRef.current(steps);
+            reportLayoutRef.current();
+            arrangeAbortRef.current = null;
+            setArranging(false);
+        }
     };
 
     // Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) in edit mode; Cmd on macOS
@@ -697,6 +840,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         const gridHelper = new THREE.GridHelper(10, 20, 0xcccccc, 0xe0e0e0);
         gridHelper.position.y = -1; // Position below the scene
         scene.add(gridHelper);
+        floorYRef.current = -1;
 
         // Bounding box group
         const boundingBoxGroup = new THREE.Group();
@@ -771,6 +915,67 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         const transformHelper = transformControls.getHelper();
         scene.add(transformHelper);
         transformControlsRef.current = transformControls;
+
+        // Renderings for Arrange: from the photo's camera, or from above, with only the
+        // models and the floor grid, and the object names drawn on them. Rendered into
+        // the visible canvas at another size and copied at once (before the browser
+        // presents the frame); the animation loop draws the normal view again.
+        arrangeRenderRef.current = (view, labels) => {
+            const W = 1024;
+            const photoAspect = originalAspectRatio;
+            const H = view === 'photo' ? Math.round(W / photoAspect) : W;
+            let cam: THREE.Camera;
+            if (view === 'photo') {
+                const pc = new THREE.PerspectiveCamera(2 * Math.atan(tanHalf / photoAspect) * 180 / Math.PI, photoAspect, 0.01, 1000);
+                pc.position.set(0, 0, 0);
+                pc.lookAt(0, 0, -1);
+                cam = pc;
+            } else {
+                const b = new THREE.Box3().setFromObject(modelsGroup);
+                const c = b.getCenter(new THREE.Vector3());
+                const half = Math.max(b.max.x - b.min.x, b.max.z - b.min.z) * 0.6 + 0.05;
+                const oc = new THREE.OrthographicCamera(-half, half, half, -half, 0.01, 1000);
+                oc.position.set(c.x, b.max.y + 10, c.z);
+                oc.up.set(0, 0, -1); // away from the photo's camera is up in the image
+                oc.lookAt(c.x, b.min.y, c.z);
+                cam = oc;
+            }
+            cam.updateMatrixWorld();
+            const hidden = [boundingBoxGroup, modelBoxesGroup, wholeModelBoxesGroup, transformHelper, sceneRef.current?.points]
+                .filter((o): o is THREE.Object3D => !!o && o.visible);
+            hidden.forEach(o => { o.visible = false; });
+            const modelsVisible = modelsGroup.visible;
+            modelsGroup.visible = true;
+            const prevSize = renderer.getSize(new THREE.Vector2());
+            const prevRatio = renderer.getPixelRatio();
+            renderer.setPixelRatio(1);
+            renderer.setSize(W, H, false);
+            renderer.render(scene, cam);
+            const out = document.createElement('canvas');
+            out.width = W; out.height = H;
+            const ctx = out.getContext('2d')!;
+            ctx.drawImage(renderer.domElement, 0, 0, W, H);
+            renderer.setPixelRatio(prevRatio);
+            renderer.setSize(prevSize.x, prevSize.y, false);
+            hidden.forEach(o => { o.visible = true; });
+            modelsGroup.visible = modelsVisible;
+            // Object names at the projected centers
+            ctx.font = 'bold 18px sans-serif';
+            ctx.textBaseline = 'middle';
+            for (const { text, center } of labels) {
+                const p = center.clone().project(cam);
+                if (p.z < -1 || p.z > 1) continue;
+                const w = ctx.measureText(text).width + 8;
+                // Keep the label inside the image (objects cut off at the border)
+                const x = Math.min(Math.max((p.x + 1) / 2 * W, w / 2), W - w / 2);
+                const y = Math.min(Math.max((1 - p.y) / 2 * H, 12), H - 12);
+                ctx.fillStyle = 'rgba(0,0,0,0.65)';
+                ctx.fillRect(x - w / 2, y - 12, w, 24);
+                ctx.fillStyle = '#fff';
+                ctx.fillText(text, x - w / 2 + 4, y);
+            }
+            return out.toDataURL('image/jpeg', 0.85).split(',')[1];
+        };
 
         // Clear mesh containers and whole box containers for new scene
         meshContainersRef.current = [];
@@ -887,6 +1092,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     camera.position.set(0, 0, 0);
                     controls.target.set(0, 0, center.z);
                     gridHelper.position.y = box.min.y; // floor under the scene
+                    floorYRef.current = box.min.y;
                 } else {
                     camera.position.set(center.x, center.y, center.z + maxDim * 1.5);
                     controls.target.copy(center);
@@ -1355,6 +1561,23 @@ transformControlsRef.current.attach(meshContainer);
         <div className="w-full min-h-[600px] bg-slate-800 rounded-xl border border-slate-700 relative overflow-hidden shadow-inner">
             <div ref={mountRef} className="w-full h-[600px]" />
 
+            {/* Arrange (Claude) progress */}
+            {arrangeLog.length > 0 && (
+                <div className="absolute bottom-4 right-4 z-20 w-80 max-h-64 flex flex-col bg-slate-900/95 border border-violet-500/60 rounded-lg shadow-lg text-xs text-slate-200">
+                    <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700">
+                        <span className="font-semibold text-violet-300">✨ Arrange (Claude)</span>
+                        {arranging ? (
+                            <button onClick={() => arrangeAbortRef.current?.abort()} className="px-2 py-0.5 rounded bg-red-600 hover:bg-red-500 text-white">Cancel</button>
+                        ) : (
+                            <button onClick={() => setArrangeLog([])} className="text-slate-400 hover:text-white" title="Close">×</button>
+                        )}
+                    </div>
+                    <div className="overflow-y-auto px-3 py-2 space-y-1 whitespace-pre-wrap">
+                        {arrangeLog.map((m, i) => <p key={i} className={i === arrangeLog.length - 1 ? 'text-slate-100' : 'text-slate-400'}>{m}</p>)}
+                    </div>
+                </div>
+            )}
+
             {/* Controls Panel */}
             <div className="absolute top-2 right-4 bg-slate-900/95 backdrop-blur px-4 py-3 rounded-lg shadow-md z-20 border border-slate-700">
                 {/* Sliders Row */}
@@ -1646,6 +1869,16 @@ transformControlsRef.current.attach(meshContainer);
                             title="Export the models as placed as one GLB file, for other 3D software (large: it contains every model)"
                         >
                             GLB
+                        </button>
+                        <button
+                            onClick={handleArrange}
+                            disabled={arranging || !perspective}
+                            className="px-2 py-1 text-xs rounded bg-violet-600 text-white hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                            title={perspective
+                                ? 'Arrange the models with Claude (Anthropic API) so that the scene matches the photo: objects on the table, people on their chairs, plausible sizes and orientations. Uses several API calls with images. The result can be undone (Undo in edit mode).'
+                                : 'Arrange needs Perspective on'}
+                        >
+                            {arranging ? '✨ Arranging…' : '✨ Arrange'}
                         </button>
                         {/* Edit Mode Toggle - on right */}
                         <button

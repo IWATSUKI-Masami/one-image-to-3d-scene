@@ -146,14 +146,16 @@ export type VisionProvider = AIProvider;
 /** Provider for image completion (outpainting) */
 export type ImageProvider = AIProvider;
 
-/** API key per provider */
-export type AIKeys = Record<AIProvider, string>;
+/** API key per provider (Anthropic: semantic arrangement of the 3D scene with Claude) */
+export type AIKeys = Record<AIProvider | 'anthropic', string>;
 
 export interface AIModels {
   geminiVision: string;
   geminiImage: string;
   openaiVision: string;
   openaiImage: string;
+  /** Claude model that arranges the 3D scene (Arrange in the scene panel) */
+  claudeArrange: string;
 }
 
 /**
