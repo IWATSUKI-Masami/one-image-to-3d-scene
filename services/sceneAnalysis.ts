@@ -183,6 +183,8 @@ export const unitsPerMeter = (analysis: SceneAnalysis, boxes: RelationBox[]): nu
 
 /** Size outside this ratio of the analysis' real size is reported */
 const SIZE_RATIO = 1.33;
+/** Width outside this ratio of the analysis' real width is reported (not for people) */
+const WIDTH_RATIO = 1.4;
 
 /**
  * Relation and size warnings per object (by id). Checked on the bounding boxes, with
@@ -243,6 +245,13 @@ export const checkRelations = (analysis: SceneAnalysis, boxes: RelationBox[], fl
             const h = b.size[1] / upm;
             const ratio = h / o.height_m;
             if (ratio > SIZE_RATIO || ratio < 1 / SIZE_RATIO) add(o.id, `is ${h.toFixed(2)} m tall at the scene's scale; the analysis expects about ${o.height_m.toFixed(2)} m`);
+            // Width (the longer side of the footprint) of objects other than people, whose
+            // width depends on their pose: a generated table can be much longer than the real one
+            if (b.type !== 'person' && b.footprint && o.width_m) {
+                const w = 2 * Math.max(...b.footprint.half) / upm;
+                const wr = w / o.width_m;
+                if (wr > WIDTH_RATIO || wr < 1 / WIDTH_RATIO) add(o.id, `is ${w.toFixed(2)} m wide at the scene's scale; the analysis expects about ${o.width_m.toFixed(2)} m`);
+            }
         }
     }
     return out;
