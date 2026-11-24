@@ -12,7 +12,7 @@
  * The scene itself (three.js) is behind the ArrangeScene interface, implemented by
  * the 3D scene component.
  */
-import { ARRANGE_PROVIDER_LABELS, ArrangeProvider, Block, ToolResult, ToolSpec, createArrangeChat } from './arrangeProviders';
+import { ARRANGE_PROVIDER_LABELS, ArrangeProvider, Block, ToolResult, ToolSpec, Usage, createArrangeChat } from './arrangeProviders';
 
 /** One model in the scene, in world units (see the system prompt for the conventions) */
 export interface ArrangeObject {
@@ -87,7 +87,59 @@ export interface ArrangeOptions {
     maxRounds?: number;
     signal?: AbortSignal;
     onProgress?: (message: string) => void;
+    /** Filled while the run goes on (also kept when it fails or is cancelled) */
+    record?: ArrangeRecord;
 }
+
+/** One API call */
+export interface ArrangeCallRecord {
+    index: number;
+    /** Milliseconds since the start of the run, and duration of the call */
+    startMs: number;
+    durationMs: number;
+    usage: Usage;
+    /** Model that answered (as reported by the API) */
+    model?: string;
+    /** Tools it called */
+    tools: string[];
+}
+
+/** One round of edits and the scene after it */
+export interface ArrangeRoundRecord {
+    round: number;
+    /** Index of the API call that requested it */
+    call: number;
+    reason: string;
+    edits: PlacementEdit[];
+    problems: string[];
+    /** Milliseconds to apply the edits, render the views and measure the scene */
+    applyMs: number;
+    renderMs: number;
+    measureMs: number;
+    meanIoU?: number;
+    issues: number;
+    objects: { id: string; label: string; iou?: number; areaRatio?: number; warnings?: string[] }[];
+    /** Renderings after the round (base64 JPEG): photo view, top view, oblique view */
+    images: { photo: string; top: string; oblique: string };
+}
+
+export interface ArrangeRecord {
+    settings: { provider: ArrangeProvider; model: string; effort: string; maxRounds: number; promptVersion: string; appVersion: string };
+    startedAt: number;
+    /** Scene before the first round (round 0) */
+    initial?: Omit<ArrangeRoundRecord, 'call' | 'reason' | 'edits' | 'problems' | 'applyMs'>;
+    /** The photo (base64 JPEG) */
+    photo?: string;
+    calls: ArrangeCallRecord[];
+    rounds: ArrangeRoundRecord[];
+}
+
+/** Version of the app (package version and git commit, set at build time) */
+export const APP_VERSION: string = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'unknown';
+
+/** Effort used for every provider */
+export const ARRANGE_EFFORT = 'high';
+
 
 export interface ArrangeResult {
     rounds: number;
@@ -191,11 +243,18 @@ const TOOLS: ToolSpec[] = [
     },
 ];
 
+/** Short hash of the prompt and tools, to tell which version of the instructions a result comes from */
+export const ARRANGE_PROMPT_VERSION = (() => {
+    const text = SYSTEM_PROMPT + JSON.stringify(TOOLS);
+    let h = 5381;
+    for (let i = 0; i < text.length; i++) h = ((h << 5) + h + text.charCodeAt(i)) | 0;
+    return (h >>> 0).toString(16).padStart(8, '0');
+})();
+
 const round3 = (v: number) => Math.round(v * 1000) / 1000;
 
 /** The object list given to Claude */
-const describeObjects = (scene: ArrangeScene): string => {
-    const objects = scene.objects();
+const describeObjects = (scene: ArrangeScene, objects: ArrangeObject[] = scene.objects()): string => {
     const mean = meanPhotoIoU(objects);
     const lines = objects.map(o => JSON.stringify({
         id: o.id,
@@ -297,16 +356,40 @@ const validateEdits = (input: unknown): { edits: PlacementEdit[]; problems: stri
 export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions): Promise<ArrangeResult> => {
     const { provider, apiKey, model, photoUrl, maxRounds = 6, signal, onProgress } = options;
     const name = ARRANGE_PROVIDER_LABELS[provider];
+    const startedAt = Date.now();
+    const record: ArrangeRecord = options.record ?? {
+        settings: { provider, model, effort: ARRANGE_EFFORT, maxRounds, promptVersion: ARRANGE_PROMPT_VERSION, appVersion: APP_VERSION },
+        startedAt, calls: [], rounds: [],
+    };
+    const now = () => performance.now();
+    /** Measure the scene: objects with photo match and warnings, and the number of physical issues */
+    const measure = () => {
+        const t = now();
+        const objects = scene.objects();
+        return { objects, issues: scene.issueCount(), ms: now() - t };
+    };
+    const summarizeObjects = (objects: ArrangeObject[]) => objects.map(o => ({
+        id: o.id, label: o.label, iou: o.photoMatch?.iou, areaRatio: o.photoMatch?.areaRatio, warnings: o.warnings,
+    }));
+    const renderAll = async () => {
+        const t = now();
+        const [photo, top, oblique] = await Promise.all([scene.render('photo'), scene.render('top'), scene.render('oblique')]);
+        return { images: { photo, top, oblique }, ms: now() - t };
+    };
 
     onProgress?.('Rendering the scene…');
-    const objectsBefore = scene.objects();
+    const before = measure();
+    const objectsBefore = before.objects;
     const photoIoUBefore = meanPhotoIoU(objectsBefore);
-    const issuesBefore = scene.issueCount();
-    const end = () => {
-        const objectsAfter = scene.objects();
-        return { photoIoUBefore, photoIoUAfter: meanPhotoIoU(objectsAfter), issuesBefore, issuesAfter: scene.issueCount(), objectsBefore, objectsAfter };
+    const issuesBefore = before.issues;
+    let lastObjects = objectsBefore, lastIssues = issuesBefore;
+    const end = () => ({ photoIoUBefore, photoIoUAfter: meanPhotoIoU(lastObjects), issuesBefore, issuesAfter: lastIssues, objectsBefore, objectsAfter: lastObjects });
+    const [photo, initial] = await Promise.all([photoToJpeg(photoUrl), renderAll()]);
+    record.photo = photo;
+    record.initial = {
+        round: 0, renderMs: initial.ms, measureMs: before.ms, meanIoU: photoIoUBefore, issues: issuesBefore,
+        objects: summarizeObjects(objectsBefore), images: initial.images,
     };
-    const [photo, photoView, topView, obliqueView] = await Promise.all([photoToJpeg(photoUrl), scene.render('photo'), scene.render('top'), scene.render('oblique')]);
 
     const chat = createArrangeChat({
         provider, apiKey, model, signal,
@@ -316,19 +399,22 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
             { type: 'text', text: 'Photo:' },
             imageBlock(photo),
             { type: 'text', text: 'Photo view of the current scene:' },
-            imageBlock(photoView),
+            imageBlock(initial.images.photo),
             { type: 'text', text: 'Top view of the current scene:' },
-            imageBlock(topView),
+            imageBlock(initial.images.top),
             { type: 'text', text: 'Oblique view of the current scene:' },
-            imageBlock(obliqueView),
-            { type: 'text', text: `${describeObjects(scene)}\n\nArrange the scene so that it matches the photo. Use update_placements, and call finish when done.` },
+            imageBlock(initial.images.oblique),
+            { type: 'text', text: `${describeObjects(scene, objectsBefore)}\n\nArrange the scene so that it matches the photo. Use update_placements, and call finish when done.` },
         ],
     });
 
     let rounds = 0;
     for (let turn = 0; turn < maxRounds + 3; turn++) {
         onProgress?.(rounds === 0 ? `${name} is looking at the photo and the scene…` : `${name} is checking round ${rounds}…`);
-        const { texts, calls } = await chat.next();
+        const t0 = now(), startMs = Date.now() - startedAt;
+        const { texts, calls, usage, model: answeredBy } = await chat.next();
+        const callIndex = record.calls.length + 1;
+        record.calls.push({ index: callIndex, startMs, durationMs: Math.round(now() - t0), usage, model: answeredBy, tools: calls.map(c => c.name) });
 
         if (calls.length === 0) {
             // A final answer without tools becomes the summary
@@ -358,18 +444,28 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
             rounds++;
             const reason = String((tool.input as { reason?: unknown })?.reason ?? '').trim();
             onProgress?.(`Round ${rounds}: ${reason || `${edits.length} edit(s)`}`);
+            const ta = now();
             problems.push(...scene.apply(edits));
-            const [newPhotoView, newTopView, newObliqueView] = await Promise.all([scene.render('photo'), scene.render('top'), scene.render('oblique')]);
+            const applyMs = now() - ta;
+            const rendered = await renderAll();
+            const after = measure();
+            lastObjects = after.objects;
+            lastIssues = after.issues;
+            record.rounds.push({
+                round: rounds, call: callIndex, reason, edits, problems,
+                applyMs: Math.round(applyMs), renderMs: Math.round(rendered.ms), measureMs: Math.round(after.ms),
+                meanIoU: meanPhotoIoU(after.objects), issues: after.issues, objects: summarizeObjects(after.objects), images: rendered.images,
+            });
             results.push({
                 id: tool.id,
                 name: tool.name,
                 blocks: [
-                    { type: 'text', text: `${problems.length ? `Problems: ${problems.join('; ')}\n` : ''}Applied ${edits.length} edit(s) (round ${rounds} of at most ${maxRounds}).\n${describeObjects(scene)}\nPhoto view:` },
-                    imageBlock(newPhotoView),
+                    { type: 'text', text: `${problems.length ? `Problems: ${problems.join('; ')}\n` : ''}Applied ${edits.length} edit(s) (round ${rounds} of at most ${maxRounds}).\n${describeObjects(scene, after.objects)}\nPhoto view:` },
+                    imageBlock(rendered.images.photo),
                     { type: 'text', text: 'Top view:' },
-                    imageBlock(newTopView),
+                    imageBlock(rendered.images.top),
                     { type: 'text', text: 'Oblique view:' },
-                    imageBlock(newObliqueView),
+                    imageBlock(rendered.images.oblique),
                 ],
             });
         }

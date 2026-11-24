@@ -43,7 +43,9 @@ export interface ToolSpec {
 
 export interface ToolCall { id: string; name: string; input: unknown }
 export interface ToolResult { id: string; name: string; isError?: boolean; blocks: Block[] }
-export interface Turn { texts: string[]; calls: ToolCall[] }
+/** Tokens of one API call (reasoning tokens are part of the output; cache reads part of the input) */
+export interface Usage { input: number; output: number; reasoning?: number; cacheRead?: number; cacheWrite?: number }
+export interface Turn { texts: string[]; calls: ToolCall[]; usage: Usage; model?: string }
 
 export interface ArrangeChat {
     /** Ask the model for its next turn */
@@ -100,9 +102,18 @@ const claudeChat = (o: ChatOptions): ArrangeChat => {
             if (response.stop_reason === 'max_tokens') throw new Error('Claude\'s answer was cut off (max_tokens).');
             // Keep the whole assistant turn (thinking blocks included) unchanged
             messages.push({ role: 'assistant', content: response.content });
+            const u = response.usage;
             return {
                 texts: response.content.flatMap(b => b.type === 'text' && b.text.trim() ? [b.text.trim()] : []),
                 calls: response.content.flatMap(b => b.type === 'tool_use' ? [{ id: b.id, name: b.name, input: b.input }] : []),
+                // input_tokens excludes cached tokens; count them in the input as well
+                usage: {
+                    input: (u?.input_tokens ?? 0) + (u?.cache_read_input_tokens ?? 0) + (u?.cache_creation_input_tokens ?? 0),
+                    output: u?.output_tokens ?? 0,
+                    cacheRead: u?.cache_read_input_tokens ?? 0,
+                    cacheWrite: u?.cache_creation_input_tokens ?? 0,
+                },
+                model: response.model,
             };
         },
         addToolResults(results) {
@@ -165,7 +176,16 @@ const openaiChat = (o: ChatOptions): ArrangeChat => {
                     calls.push({ id: item.call_id, name: item.name, input: args });
                 }
             }
-            return { texts, calls };
+            const u = response.usage;
+            return {
+                texts, calls, model: response.model,
+                usage: {
+                    input: u?.input_tokens ?? 0,
+                    output: u?.output_tokens ?? 0,
+                    reasoning: u?.output_tokens_details?.reasoning_tokens ?? 0,
+                    cacheRead: u?.input_tokens_details?.cached_tokens ?? 0,
+                },
+            };
         },
         addToolResults(results) {
             for (const r of results) {
@@ -219,7 +239,17 @@ const geminiChat = (o: ChatOptions): ArrangeChat => {
                     calls.push({ id: part.functionCall.id ?? `call_${++callCount}`, name: part.functionCall.name, input: part.functionCall.args ?? {} });
                 }
             }
-            return { texts, calls };
+            const u = response.usageMetadata;
+            return {
+                texts, calls, model: response.modelVersion,
+                // Gemini counts thinking separately from the candidates; both are billed as output
+                usage: {
+                    input: u?.promptTokenCount ?? 0,
+                    output: (u?.candidatesTokenCount ?? 0) + (u?.thoughtsTokenCount ?? 0),
+                    reasoning: u?.thoughtsTokenCount ?? 0,
+                    cacheRead: u?.cachedContentTokenCount ?? 0,
+                },
+            };
         },
         addToolResults(results) {
             // Function responses first, then the renderings as images in the same user turn

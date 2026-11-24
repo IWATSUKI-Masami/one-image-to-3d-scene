@@ -128,6 +128,15 @@ export interface ArrangeRun {
   /** Number of physical issues before and after */
   issuesBefore?: number;
   issuesAfter?: number;
+  /** Times (seconds: total, waiting for the API), tokens and estimated cost (USD, list prices) */
+  elapsedS?: number;
+  apiS?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  costUsd?: number;
+  /** Version of the instructions and of the app that produced it */
+  promptVersion?: string;
+  appVersion?: string;
   /** The run's report (settings, photo match per object before and after, and the log) as text */
   report?: string;
 }

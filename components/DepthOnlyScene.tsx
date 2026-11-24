@@ -9,7 +9,8 @@ import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { Spinner } from './Spinner';
 import { checkPhysics } from './physicsChecks';
 import { ArrangeRun, DetectedObject, Model3D, SceneLayout } from '../types';
-import { ArrangeObject, ArrangeScene, ArrangeView, PlacementEdit, arrangeScene } from '../services/semanticArrange';
+import { APP_VERSION, ARRANGE_EFFORT, ARRANGE_PROMPT_VERSION, ArrangeObject, ArrangeRecord, ArrangeScene, ArrangeView, PlacementEdit, arrangeScene } from '../services/semanticArrange';
+import { buildArrangeImageSheet, buildArrangeReport } from '../services/arrangeReport';
 import { ARRANGE_PROVIDER_FILE_NAMES, ARRANGE_PROVIDER_LABELS, ArrangeProvider, sceneEditState } from '../services/arrangeProviders';
 import { Box2D, DepthRange, ObjectMask, depthFromBrightness, loadObjectMask, medianDepthInBox, sameBox } from './depthSampling';
 
@@ -149,6 +150,8 @@ interface DepthOnlySceneProps {
     onLayoutChange?: (layout: SceneLayout) => void;
     /** Provider, API key and model for Arrange (semantic arrangement of the models) */
     arrange?: { provider: ArrangeProvider; apiKey: string; model: string };
+    /** Reports how long a step took (seconds), for the Processing Times panel */
+    onProcessingTime?: (label: string, seconds: number) => void;
     /** Opens the AI Settings dialog (when the API key for Arrange is missing) */
     onOpenSettings?: () => void;
 }
@@ -164,6 +167,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     initialLayout,
     onLayoutChange,
     arrange,
+    onProcessingTime,
     onOpenSettings,
 }) => {
     const mountRef = useRef<HTMLDivElement>(null);
@@ -197,7 +201,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     // The panel can be closed and opened again (📋 Log); the log stays until the next run
     const [showArrangeLog, setShowArrangeLog] = useState(false);
     // Report of the last run (text) and its photo match per object (CSV), for saving
-    const [arrangeReport, setArrangeReport] = useState<{ text: string; csv?: string; name: string } | null>(() =>
+    const [arrangeReport, setArrangeReport] = useState<{ text: string; csv?: string; roundsCsv?: string; record?: ArrangeRecord; name: string } | null>(() =>
         savedRun?.report ? { text: savedRun.report, name: `arrange-${ARRANGE_PROVIDER_FILE_NAMES[savedRun.provider]}` } : null);
     // How the last Arrange run ended, and how long it has been running (seconds)
     const [arrangeStatus, setArrangeStatus] = useState<'running' | 'done' | 'failed' | 'cancelled' | null>(savedRun?.report ? savedRun.outcome : null);
@@ -652,19 +656,27 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             fullLog.push(`[${mmss((Date.now() - startedAt) / 1000)}] ${m}`);
             // Long comments (e.g. Gemini returns its reasoning as text) are shortened in the
             // panel; the report (Save log) keeps them in full
-            const short = m.length > 400 && !m.startsWith('Done') ? `${m.slice(0, 400).trimEnd()}… (full text in Save log)` : m;
+            const short = m.length > 400 && !m.startsWith('Done') ? `${m.slice(0, 400).trimEnd()}… (full text: Log button)` : m;
             setArrangeLog(prev => [...prev, short]);
         };
         let outcome: 'done' | 'failed' | 'cancelled' = 'done';
         let result: Awaited<ReturnType<typeof arrangeScene>> | undefined;
+        // Filled by the run as it goes (also kept when it fails or is cancelled)
+        const MAX_ROUNDS = 6;
+        const record: ArrangeRecord = {
+            settings: { provider: arrange.provider, model: arrange.model, effort: ARRANGE_EFFORT, maxRounds: MAX_ROUNDS, promptVersion: ARRANGE_PROMPT_VERSION, appVersion: APP_VERSION },
+            startedAt, calls: [], rounds: [],
+        };
         try {
             result = await arrangeScene(arrangeSceneApi, {
                 provider: arrange.provider,
                 apiKey: arrange.apiKey,
                 model: arrange.model,
                 photoUrl: imageUrl,
+                maxRounds: MAX_ROUNDS,
                 signal: controller.signal,
                 onProgress: log,
+                record,
             });
             const iou = result.photoIoUBefore !== undefined && result.photoIoUAfter !== undefined
                 ? `\nPhoto match (mean IoU with the photo masks): ${result.photoIoUBefore.toFixed(2)} → ${result.photoIoUAfter.toFixed(2)}`
@@ -684,49 +696,17 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 const prev = before.get(model.id);
                 return sameTransform(prev ?? container.userData.autoTransform, after) ? [] : [{ modelId: model.id, before: prev, after }];
             });
-            // Report: settings, photo match per object before and after, and the full log
-            const providerName = `${ARRANGE_PROVIDER_LABELS[arrange.provider]} (${arrange.model})`;
-            const elapsed = (Date.now() - startedAt) / 1000;
-            const objectsBefore = new Map((result?.objectsBefore ?? []).map(o => [o.id, o]));
-            const objectRows = (result?.objectsAfter ?? []).map(o => ({
-                id: o.id, label: o.label, before: objectsBefore.get(o.id)?.photoMatch, after: o.photoMatch,
-                warningsBefore: objectsBefore.get(o.id)?.warnings ?? [], warningsAfter: o.warnings ?? [],
-            }));
-            const f = (v: number | undefined) => v === undefined ? '-' : v.toFixed(3);
-            const report = [
-                'Arrange report',
-                `Scene: ${sceneName ?? ''}`,
-                `Provider: ${providerName}`,
-                `Started: ${new Date(startedAt).toISOString()}`,
-                `Ended: ${new Date().toISOString()} (elapsed ${mmss(elapsed)})`,
-                `Outcome: ${outcome}, rounds: ${result?.rounds ?? 0}`,
-                `Photo match (mean IoU with the photo masks): ${f(result?.photoIoUBefore)} -> ${f(result?.photoIoUAfter)}`,
-                `Physical issues (floating, sunk, inside another model): ${result?.issuesBefore ?? '-'} -> ${result?.issuesAfter ?? '-'}`,
-                '',
-                'Photo match per object (IoU before -> after; area ratio before -> after):',
-                ...objectRows.map(r => `  ${r.id} ${r.label}: ${f(r.before?.iou)} -> ${f(r.after?.iou)}; ${f(r.before?.areaRatio)} -> ${f(r.after?.areaRatio)}`),
-                '',
-                'Physical warnings per object (before -> after):',
-                ...objectRows.map(r => `  ${r.id} ${r.label}: ${r.warningsBefore.join('; ') || 'none'} -> ${r.warningsAfter.join('; ') || 'none'}`),
-                '',
-                'Log:',
-                ...fullLog,
-            ].join('\n');
-            const csv = [
-                `scene,"${(sceneName ?? '').replace(/"/g, '""')}"`,
-                `provider,${providerName}`,
-                `outcome,${outcome}`,
-                `rounds,${result?.rounds ?? 0}`,
-                `elapsed_s,${Math.round(elapsed)}`,
-                `physical_issues,${result?.issuesBefore ?? ''},${result?.issuesAfter ?? ''}`,
-                '',
-                'object,iou_before,iou_after,area_ratio_before,area_ratio_after,offset_x_before,offset_y_before,offset_x_after,offset_y_after,warnings_before,warnings_after',
-                ...objectRows.map(r => [`"${r.label.replace(/"/g, '""')}"`, f(r.before?.iou), f(r.after?.iou), f(r.before?.areaRatio), f(r.after?.areaRatio),
-                    f(r.before?.offset[0]), f(r.before?.offset[1]), f(r.after?.offset[0]), f(r.after?.offset[1]),
-                    `"${r.warningsBefore.join('; ')}"`, `"${r.warningsAfter.join('; ')}"`].join(',')),
-                `mean,${f(result?.photoIoUBefore)},${f(result?.photoIoUAfter)},,,,,,`,
-            ].join('\n');
-            setArrangeReport({ text: report, csv, name: `arrange-${ARRANGE_PROVIDER_FILE_NAMES[arrange.provider]}` });
+            // Report: settings, times, tokens and cost, rounds with their edits and metrics,
+            // photo match and warnings per object, and the full log (also for a failed run)
+            const endedAt = Date.now();
+            const built = buildArrangeReport({
+                record, sceneName, outcome, endedAt, summary: result?.summary,
+                objectsBefore: result?.objectsBefore, objectsAfter: result?.objectsAfter, log: fullLog,
+            });
+            const report = built.text;
+            setArrangeReport({ text: report, csv: built.objectsCsv, roundsCsv: built.roundsCsv, record, name: `arrange-${ARRANGE_PROVIDER_FILE_NAMES[arrange.provider]}` });
+            onProcessingTime?.(`Arrange (${ARRANGE_PROVIDER_LABELS[arrange.provider]})`, built.totals.elapsedS);
+            onProcessingTime?.(`Arrange (${ARRANGE_PROVIDER_LABELS[arrange.provider]}) API`, built.totals.apiS);
 
             // Record the run with its changes (Undo removes it again), so files say "arranged-<provider>"
             let run: ArrangeRun | undefined;
@@ -740,6 +720,13 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     ...(result?.photoIoUBefore !== undefined ? { photoIoUBefore: result.photoIoUBefore } : {}),
                     ...(result?.photoIoUAfter !== undefined ? { photoIoUAfter: result.photoIoUAfter } : {}),
                     ...(result ? { issuesBefore: result.issuesBefore, issuesAfter: result.issuesAfter } : {}),
+                    elapsedS: Math.round(built.totals.elapsedS * 10) / 10,
+                    apiS: Math.round(built.totals.apiS * 10) / 10,
+                    inputTokens: built.totals.inputTokens,
+                    outputTokens: built.totals.outputTokens,
+                    ...(built.totals.costUsd !== undefined ? { costUsd: Math.round(built.totals.costUsd * 10000) / 10000 } : {}),
+                    promptVersion: ARRANGE_PROMPT_VERSION,
+                    appVersion: APP_VERSION,
                     report,
                 };
                 arrangeRunsRef.current = [...arrangeRunsRef.current, run];
@@ -2060,14 +2047,32 @@ transformControlsRef.current.attach(meshContainer);
                                             className="px-1.5 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-200"
                                             title="Save the report: provider, times, photo match per object before and after, and the full log (text)"
                                         >
-                                            Save log
+                                            Log
                                         </button>
                                         {arrangeReport.csv && <button
                                             onClick={() => download(new Blob(['\uFEFF' + arrangeReport.csv!], { type: 'text/csv' }), `${fileBase()}_${arrangeReport.name}_${fileStamp()}.csv`)}
                                             className="px-1.5 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-200"
-                                            title="Save the photo match per object before and after (CSV)"
+                                            title="Save the photo match and warnings per object before and after, with the run's settings, times, tokens and cost (CSV)"
                                         >
-                                            Save CSV
+                                            CSV
+                                        </button>}
+                                        {arrangeReport.roundsCsv && <button
+                                            onClick={() => download(new Blob(['\uFEFF' + arrangeReport.roundsCsv!], { type: 'text/csv' }), `${fileBase()}_${arrangeReport.name}_rounds_${fileStamp()}.csv`)}
+                                            className="px-1.5 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-200"
+                                            title="Save each round and API call: photo match, physical issues, edits, times, tokens (CSV)"
+                                        >
+                                            Rounds
+                                        </button>}
+                                        {arrangeReport.record?.initial && <button
+                                            onClick={async () => {
+                                                const png = await buildArrangeImageSheet(arrangeReport.record!, `${sceneName ?? 'scene'} — Arrange with ${ARRANGE_PROVIDER_LABELS[arrangeReport.record!.settings.provider]} (${arrangeReport.record!.settings.model})`);
+                                                if (!png) return;
+                                                const a = document.createElement('a'); a.href = png; a.download = `${fileBase()}_${arrangeReport.name}_images_${fileStamp()}.png`; a.click();
+                                            }}
+                                            className="px-1.5 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-200"
+                                            title="Save one image with the photo and the renderings the model saw in every round (PNG)"
+                                        >
+                                            Images
                                         </button>}
                                     </>
                                 )}
