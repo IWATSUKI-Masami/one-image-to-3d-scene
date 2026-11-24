@@ -148,6 +148,8 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     const [transformMode, setTransformMode] = useState<'translate' | 'rotate' | 'scale'>('translate');
     // Arrange (Claude): render function set by the scene setup, progress log, cancel
     const arrangeRenderRef = useRef<((view: ArrangeView, labels: { text: string; center: THREE.Vector3 }[]) => string) | null>(null);
+    // Object-id rendering from the photo's camera (visible parts only): 0 = none, i + 1 = containers[i]
+    const idRenderRef = useRef<((containers: THREE.Object3D[], W: number, H: number) => Uint8Array) | null>(null);
     const floorYRef = useRef(-1);
     const gridRef = useRef<THREE.GridHelper | null>(null);
     const [arranging, setArranging] = useState(false);
@@ -311,6 +313,11 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             return container ? [{ model, container }] : [];
         });
         if (entries.length === 0) return;
+        const expected = positionedModels.filter(m => m.glbUrl).length;
+        if (entries.length < expected) {
+            alert(`The 3D models are still loading (${entries.length} of ${expected}). Try Arrange again in a moment.`);
+            return;
+        }
         // Short ids for Claude (o1, o2, ...)
         const shortId = new Map(entries.map((e, i) => [e.model.id, `o${i + 1}`]));
         const byShort = new Map(entries.map((e, i) => [`o${i + 1}`, e]));
@@ -327,11 +334,57 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         floorYRef.current = floorY;
         if (gridRef.current) gridRef.current.position.y = floorY;
 
+        // Photo match: each object's mask in the photo (SAM 2.1), at the size of the id rendering
+        const MW = 384, MH = Math.max(1, Math.round(MW / originalAspectRatio));
+        const masks = await Promise.all(entries.map(async ({ model }) => {
+            const obj = model.box_2d ? detectedObjects.find(o => o.mask && sameBox(o.box_2d, model.box_2d!)) : undefined;
+            if (!obj?.mask) return null;
+            try {
+                const img = await loadImageAsync(obj.mask.url);
+                const c = document.createElement('canvas');
+                c.width = MW; c.height = MH;
+                const ctx = c.getContext('2d', { willReadFrequently: true })!;
+                ctx.drawImage(img, 0, 0, MW, MH);
+                const { data } = ctx.getImageData(0, 0, MW, MH);
+                const m = new Uint8Array(MW * MH);
+                for (let i = 0; i < m.length; i++) m[i] = data[i * 4 + 3] > 128 ? 1 : 0;
+                return m;
+            } catch (e) {
+                console.warn(`Arrange: could not load the mask of ${model.label}`, e);
+                return null;
+            }
+        }));
+        const photoMatches = (): (ArrangeObject['photoMatch'])[] => {
+            const idRender = idRenderRef.current;
+            if (!idRender || masks.every(m => !m)) return entries.map(() => undefined);
+            const ids = idRender(entries.map(e => e.container), MW, MH);
+            return entries.map((_, i) => {
+                const mask = masks[i];
+                if (!mask) return undefined;
+                let inter = 0, union = 0, rendered = 0, maskArea = 0, rx = 0, ry = 0, mx = 0, my = 0;
+                for (let p = 0; p < ids.length; p++) {
+                    const r = ids[p] === i + 1 ? 1 : 0, m = mask[p];
+                    if (r) { rendered++; rx += p % MW; ry += Math.floor(p / MW); }
+                    if (m) { maskArea++; mx += p % MW; my += Math.floor(p / MW); }
+                    if (r && m) inter++;
+                    if (r || m) union++;
+                }
+                if (maskArea === 0) return undefined;
+                const offset: [number, number] = rendered > 0
+                    ? [(rx / rendered - mx / maskArea) / MW, (ry / rendered - my / maskArea) / MH]
+                    : [0, 0];
+                return { iou: union ? inter / union : 0, areaRatio: rendered / maskArea, offset };
+            });
+        };
+
         const arrangeScene: ArrangeScene = {
-            objects: (): ArrangeObject[] => entries.map(({ model, container }) => {
+            objects: (): ArrangeObject[] => {
+              const matches = photoMatches();
+              return entries.map(({ model, container }, i) => {
                 const b = boxOf(container);
                 const c = b.getCenter(new THREE.Vector3()), sz = b.getSize(new THREE.Vector3());
                 return {
+                    photoMatch: matches[i],
                     id: shortId.get(model.id)!,
                     label: model.label.replace(/\s*\(Completed\)\s*$/i, ''),
                     description: describe(model),
@@ -341,7 +394,8 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     size: sz.toArray() as [number, number, number],
                     rotationYDeg: container.rotation.y * 180 / Math.PI,
                 };
-            }),
+              });
+            },
             floorY: () => floorY,
             apply: (edits: PlacementEdit[]) => {
                 const problems: string[] = [];
@@ -451,7 +505,10 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 signal: controller.signal,
                 onProgress: log,
             });
-            log(`Done (${result.rounds} round${result.rounds === 1 ? '' : 's'}). ${result.summary}`);
+            const iou = result.photoIoUBefore !== undefined && result.photoIoUAfter !== undefined
+                ? `\nPhoto match (mean IoU with the photo masks): ${result.photoIoUBefore.toFixed(2)} → ${result.photoIoUAfter.toFixed(2)}`
+                : '';
+            log(`Done (${result.rounds} round${result.rounds === 1 ? '' : 's'}). ${result.summary}${iou}`);
         } catch (e: any) {
             outcome = controller.signal.aborted ? 'cancelled' : 'failed';
             log(controller.signal.aborted ? 'Cancelled.' : `Failed: ${e?.message || e}`);
@@ -1083,6 +1140,63 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 ctx.fillText(text, x - w / 2 + 4, y);
             }
             return out.toDataURL('image/jpeg', 0.85).split(',')[1];
+        };
+
+        // Which model is seen at each pixel from the photo's camera: every model drawn in a flat
+        // color that encodes its index (no lighting, no tone mapping), with depth test, so
+        // parts hidden behind other models do not count
+        idRenderRef.current = (containers, W, H) => {
+            const pc = new THREE.PerspectiveCamera(2 * Math.atan(tanHalf / originalAspectRatio) * 180 / Math.PI, originalAspectRatio, 0.01, 1000);
+            pc.position.set(0, 0, 0);
+            pc.lookAt(0, 0, -1);
+            pc.updateMatrixWorld();
+            const saved: { mesh: THREE.Mesh; material: THREE.Material | THREE.Material[] }[] = [];
+            const created: THREE.Material[] = [];
+            containers.forEach((container, i) => {
+                const mat = new THREE.MeshBasicMaterial({ toneMapped: false, side: THREE.DoubleSide });
+                mat.color.setRGB(((i + 1) * 8) / 255, 0, 0, THREE.SRGBColorSpace);
+                created.push(mat);
+                container.traverse((node) => {
+                    const mesh = node as THREE.Mesh;
+                    if (!mesh.isMesh) return;
+                    saved.push({ mesh, material: mesh.material });
+                    mesh.material = mat;
+                });
+            });
+            const others = scene.children.filter(o => o !== modelsGroup && o.visible);
+            others.forEach(o => { o.visible = false; });
+            const modelsVisible = modelsGroup.visible;
+            modelsGroup.visible = true;
+            const background = scene.background;
+            scene.background = new THREE.Color(0, 0, 0);
+            const toneMapping = renderer.toneMapping;
+            renderer.toneMapping = THREE.NoToneMapping;
+            const prevSize = renderer.getSize(new THREE.Vector2());
+            const prevRatio = renderer.getPixelRatio();
+            renderer.setPixelRatio(1);
+            renderer.setSize(W, H, false);
+            renderer.render(scene, pc);
+            const c = document.createElement('canvas');
+            c.width = W; c.height = H;
+            const ctx = c.getContext('2d', { willReadFrequently: true })!;
+            ctx.drawImage(renderer.domElement, 0, 0, W, H);
+            renderer.setPixelRatio(prevRatio);
+            renderer.setSize(prevSize.x, prevSize.y, false);
+            renderer.toneMapping = toneMapping;
+            scene.background = background;
+            modelsGroup.visible = modelsVisible;
+            others.forEach(o => { o.visible = true; });
+            saved.forEach(({ mesh, material }) => { mesh.material = material; });
+            created.forEach(m => m.dispose());
+            const { data } = ctx.getImageData(0, 0, W, H);
+            const ids = new Uint8Array(W * H);
+            for (let i = 0; i < ids.length; i++) {
+                const r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2];
+                if (g > 6 || b > 6 || r < 4) continue;
+                const k = Math.round(r / 8);
+                if (k >= 1 && k <= containers.length && Math.abs(r - k * 8) <= 2) ids[i] = k; // edges blended with the background are skipped
+            }
+            return ids;
         };
 
         // Clear mesh containers and whole box containers for new scene

@@ -28,6 +28,13 @@ export interface ArrangeObject {
     size: [number, number, number];
     /** Rotation about the vertical axis (degrees) */
     rotationYDeg: number;
+    /**
+     * How well the model's visible part, rendered from the photo's camera, matches the
+     * object's mask in the photo (SAM 2.1): intersection over union, rendered area / mask
+     * area, and the offset of the rendered centroid from the mask centroid (fractions of
+     * the image width and height; + = right / down). Missing when the object has no mask.
+     */
+    photoMatch?: { iou: number; areaRatio: number; offset: [number, number] };
 }
 
 /** One change requested by Claude; every field is optional and applied in this order */
@@ -80,7 +87,16 @@ export interface ArrangeOptions {
 export interface ArrangeResult {
     rounds: number;
     summary: string;
+    /** Mean photo IoU of the objects with a mask, before and after (undefined without masks) */
+    photoIoUBefore?: number;
+    photoIoUAfter?: number;
 }
+
+/** Mean photo IoU over the objects that have a mask */
+export const meanPhotoIoU = (objects: ArrangeObject[]): number | undefined => {
+    const v = objects.flatMap(o => o.photoMatch ? [o.photoMatch.iou] : []);
+    return v.length ? v.reduce((a, b) => a + b, 0) / v.length : undefined;
+};
 
 /** Models that accept the server-side refusal fallback ("default" form) */
 const FALLBACK_MODELS = new Set(['claude-opus-5-5', 'claude-fable-5-2', 'claude-fable-5-1', 'claude-sonnet-5-5', 'claude-opus-5']);
@@ -111,6 +127,8 @@ Your task: make the scene physically and semantically consistent with the photo.
 - Do not change objects that are already right.
 
 Contacts: people at a table sit close to it, with their forearms or hands on the table top when the photo shows that; a table that people sit at is between or beside them as in the photo, not a wall in front of them. Use the top and oblique views to check who sits where around the table.
+
+Photo match: for objects with a mask in the photo, photo_match compares the model's visible part rendered from the photo's camera (hidden parts behind other models excluded) with the object's mask in the photo: iou (1 = perfect), area_ratio (rendered / photo; > 1 = too large or too near), and offset_xy (where the rendering is relative to the photo, as fractions of the image; + = right / down). Use it to check that your changes keep each object where and as large as it is in the photo, and to find objects that are off (e.g. area_ratio 1.6 and offset_xy [0.05, 0] means too large and too far right). It cannot be perfect: the models' shapes and poses differ from the photo, and objects hidden in the photo by things that are not in the scene lower it. Do not trade physical plausibility for a small gain in it, but avoid changes that lower it clearly.
 
 Check the top view as well as the photo view: an object can look right from the camera but be at the wrong distance (e.g. a cup on the far side of the table instead of the near side). Compare where objects are on the table in the photo (near or far edge, left or right) with the top view.
 
@@ -169,7 +187,9 @@ const round3 = (v: number) => Math.round(v * 1000) / 1000;
 
 /** The object list given to Claude */
 const describeObjects = (scene: ArrangeScene): string => {
-    const lines = scene.objects().map(o => JSON.stringify({
+    const objects = scene.objects();
+    const mean = meanPhotoIoU(objects);
+    const lines = objects.map(o => JSON.stringify({
         id: o.id,
         label: o.label,
         type: o.type ?? 'object',
@@ -180,8 +200,15 @@ const describeObjects = (scene: ArrangeScene): string => {
         bottom_y: round3(o.center[1] - o.size[1] / 2),
         top_y: round3(o.center[1] + o.size[1] / 2),
         rotation_y_deg: Math.round(o.rotationYDeg),
+        ...(o.photoMatch ? {
+            photo_match: {
+                iou: round3(o.photoMatch.iou),
+                area_ratio: round3(o.photoMatch.areaRatio),
+                offset_xy: o.photoMatch.offset.map(round3),
+            },
+        } : {}),
     }));
-    return `floorY = ${round3(scene.floorY())}\nObjects:\n${lines.join('\n')}`;
+    return `floorY = ${round3(scene.floorY())}${mean !== undefined ? `\nmean photo_match iou = ${round3(mean)}` : ''}\nObjects:\n${lines.join('\n')}`;
 };
 
 const imageBlock = (base64: string, mediaType: 'image/jpeg' | 'image/png' = 'image/jpeg'): Anthropic.Beta.BetaImageBlockParam => ({
@@ -266,6 +293,8 @@ export const arrangeSceneWithClaude = async (scene: ArrangeScene, options: Arran
     const useFallbacks = FALLBACK_MODELS.has(model);
 
     onProgress?.('Rendering the scene…');
+    const photoIoUBefore = meanPhotoIoU(scene.objects());
+    const finalIoU = () => meanPhotoIoU(scene.objects());
     const [photo, photoView, topView, obliqueView] = await Promise.all([photoToJpeg(photoUrl), scene.render('photo'), scene.render('top'), scene.render('oblique')]);
 
     const messages: Anthropic.Beta.BetaMessageParam[] = [{
@@ -315,13 +344,13 @@ export const arrangeSceneWithClaude = async (scene: ArrangeScene, options: Arran
         }
         if (toolUses.length === 0) {
             const text = response.content.filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === 'text').map(b => b.text).join('\n');
-            return { rounds, summary: text.trim() || 'Claude ended without calling finish.' };
+            return { rounds, summary: text.trim() || 'Claude ended without calling finish.', photoIoUBefore, photoIoUAfter: finalIoU() };
         }
 
         const finish = toolUses.find(t => t.name === 'finish');
         if (finish) {
             const summary = String((finish.input as { summary?: unknown })?.summary ?? '').trim();
-            return { rounds, summary: summary || 'Done.' };
+            return { rounds, summary: summary || 'Done.', photoIoUBefore, photoIoUAfter: finalIoU() };
         }
 
         // All tool results of this turn go back in one user message
@@ -356,5 +385,5 @@ export const arrangeSceneWithClaude = async (scene: ArrangeScene, options: Arran
         }
         messages.push({ role: 'user', content: results });
     }
-    return { rounds, summary: 'Stopped after the maximum number of rounds.' };
+    return { rounds, summary: 'Stopped after the maximum number of rounds.', photoIoUBefore, photoIoUAfter: finalIoU() };
 };
