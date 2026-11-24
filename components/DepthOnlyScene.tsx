@@ -51,6 +51,41 @@ const loadSceneMasks = async (models: Model3D[], objects: DetectedObject[]) => {
     return { byModel, byBox };
 };
 
+/** Position, rotation (Euler XYZ, radians) and scale of a model's container in the scene */
+interface SavedTransform {
+    position: [number, number, number];
+    rotation: [number, number, number];
+    scale: [number, number, number];
+}
+
+/** Scene layout file: where each model is, without the models themselves (they are in the project) */
+interface SceneLayoutFile {
+    format: 'one-image-to-3d-scene/layout';
+    version: 1;
+    savedAt: string;
+    scene?: string;
+    settings: { depthScale: number; perspective: boolean; applyAlignment: boolean; pointSize: number };
+    camera?: { position: [number, number, number]; target: [number, number, number]; fov: number };
+    models: ({ id: string; label: string; box_2d?: Box2D } & SavedTransform)[];
+}
+
+const LAYOUT_FORMAT = 'one-image-to-3d-scene/layout';
+
+const transformOf = (obj: THREE.Object3D): SavedTransform => ({
+    position: obj.position.toArray() as [number, number, number],
+    rotation: [obj.rotation.x, obj.rotation.y, obj.rotation.z],
+    scale: obj.scale.toArray() as [number, number, number],
+});
+
+const applyTransform = (obj: THREE.Object3D, t: SavedTransform) => {
+    obj.position.fromArray(t.position);
+    obj.rotation.set(t.rotation[0], t.rotation[1], t.rotation[2]);
+    obj.scale.fromArray(t.scale);
+};
+
+const isVec3 = (v: unknown): v is [number, number, number] =>
+    Array.isArray(v) && v.length === 3 && v.every(n => typeof n === 'number' && Number.isFinite(n));
+
 interface DepthOnlySceneProps {
     imageUrl: string;
     depthMapUrl: string;
@@ -58,6 +93,8 @@ interface DepthOnlySceneProps {
     detectedObjects?: DetectedObject[];
     positionedModels?: Model3D[];
     showModels?: boolean;
+    /** Used in the names of saved files (e.g. the photo's name) */
+    sceneName?: string;
 }
 
 export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
@@ -67,6 +104,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     detectedObjects = [],
     positionedModels = [],
     showModels = true,
+    sceneName,
 }) => {
     const mountRef = useRef<HTMLDivElement>(null);
     const [loading, setLoading] = useState(true);
@@ -103,8 +141,11 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     const editModeRef = useRef(false); // Track editMode for use in click handler closure
     const raycasterRef = useRef(new THREE.Raycaster());
     const mouseRef = useRef(new THREE.Vector2());
-    // Store original transforms for reset functionality
-    const originalTransformsRef = useRef<Map<number, { position: THREE.Vector3; rotation: THREE.Euler; scale: THREE.Vector3 }>>(new Map());
+    // Placements set by hand (edit mode) or loaded from a layout file, by model id.
+    // They replace the automatic placement and survive scene rebuilds (e.g. a depth change).
+    const layoutRef = useRef<Map<string, SavedTransform>>(new Map());
+    // Camera of a loaded layout, applied once the rebuilt scene is ready
+    const pendingCameraRef = useRef<SceneLayoutFile['camera'] | null>(null);
 
     // Store references for dynamic updates
     const sceneRef = useRef<{
@@ -261,39 +302,150 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         }
     }, [editMode]);
 
-    // Save scene to glTF/GLB file
-    const handleSaveScene = () => {
-        if (!sceneRef.current?.modelsGroup) return;
+    const fileStamp = () => {
+        const d = new Date();
+        const p2 = (n: number) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
+    };
+    const fileBase = () => (sceneName || 'scene').replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 60) || 'scene';
 
-        const exporter = new GLTFExporter();
-        exporter.parse(
+    const download = (blob: Blob, name: string) => {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = name;
+        link.click();
+        URL.revokeObjectURL(url);
+    };
+
+    /**
+     * Save the scene layout: where each model is (position, rotation, scale), the
+     * scene settings and the camera, as a small JSON file. The models themselves are
+     * not included; they are in the project, and the layout refers to them by id.
+     */
+    const handleSaveScene = () => {
+        const s = sceneRef.current;
+        if (!s) return;
+        const byId = new Map(positionedModels.map(m => [m.id, m]));
+        const layout: SceneLayoutFile = {
+            format: LAYOUT_FORMAT,
+            version: 1,
+            savedAt: new Date().toISOString(),
+            scene: sceneName,
+            settings: { depthScale, perspective, applyAlignment, pointSize },
+            camera: {
+                position: s.camera.position.toArray() as [number, number, number],
+                target: s.controls.target.toArray() as [number, number, number],
+                fov: s.camera.fov,
+            },
+            models: meshContainersRef.current.flatMap((container) => {
+                const id = container.userData.modelId as string | undefined;
+                const model = id ? byId.get(id) : undefined;
+                return model ? [{ id: model.id, label: model.label, box_2d: model.box_2d, ...transformOf(container) }] : [];
+            }),
+        };
+        download(new Blob([JSON.stringify(layout, null, 1)], { type: 'application/json' }), `${fileBase()}_layout_${fileStamp()}.json`);
+    };
+
+    /** Export the models as placed in the scene as one GLB file (for other 3D software; large) */
+    const handleExportGlb = () => {
+        if (!sceneRef.current?.modelsGroup) return;
+        new GLTFExporter().parse(
             sceneRef.current.modelsGroup,
-            (result) => {
-                const blob = new Blob([result as ArrayBuffer], { type: 'application/octet-stream' });
-                const url = URL.createObjectURL(blob);
-                const link = document.createElement('a');
-                link.href = url;
-                link.download = 'scene.glb';
-                link.click();
-                URL.revokeObjectURL(url);
-            },
-            (error) => {
-                console.error('Error exporting scene:', error);
-            },
+            (result) => download(new Blob([result as ArrayBuffer], { type: 'model/gltf-binary' }), `${fileBase()}_scene_${fileStamp()}.glb`),
+            (error) => console.error('Error exporting scene:', error),
             { binary: true }
         );
     };
 
-    // Load scene from glTF/GLB file
+    /** Put the models of the current scene where the layout says (models without an entry keep the automatic placement) */
+    const applyLayoutToScene = () => {
+        for (const container of meshContainersRef.current) {
+            const t = layoutRef.current.get(container.userData.modelId);
+            if (t) applyTransform(container, t);
+        }
+    };
+
+    const applyPendingCamera = () => {
+        const s = sceneRef.current;
+        const cam = pendingCameraRef.current;
+        if (!s || !cam) return;
+        s.camera.position.fromArray(cam.position);
+        s.controls.target.fromArray(cam.target);
+        s.camera.fov = cam.fov;
+        s.camera.updateProjectionMatrix();
+        s.controls.update();
+        pendingCameraRef.current = null;
+    };
+
+    /** Load a scene layout (JSON) saved with Save */
+    const loadLayout = (text: string) => {
+        let layout: SceneLayoutFile;
+        try {
+            layout = JSON.parse(text);
+        } catch {
+            alert('This file is not a scene layout (invalid JSON).');
+            return;
+        }
+        if (layout?.format !== LAYOUT_FORMAT || !Array.isArray(layout.models)) {
+            alert('This file is not a scene layout saved with Save. (A project file is loaded with Load Project in the header.)');
+            return;
+        }
+        // Match by model id; if the models were generated again, by label and photo box
+        const next = new Map<string, SavedTransform>();
+        const missing: string[] = [];
+        for (const entry of layout.models) {
+            if (!isVec3(entry.position) || !isVec3(entry.rotation) || !isVec3(entry.scale)) continue;
+            const model = positionedModels.find(m => m.id === entry.id)
+                ?? positionedModels.find(m => m.label === entry.label && !!m.box_2d && !!entry.box_2d && sameBox(m.box_2d, entry.box_2d));
+            if (model) next.set(model.id, { position: entry.position, rotation: entry.rotation, scale: entry.scale });
+            else missing.push(entry.label || entry.id);
+        }
+        if (next.size === 0) {
+            alert('None of the models in this layout are in the current scene.');
+            return;
+        }
+        layoutRef.current = next;
+        transformControlsRef.current?.detach();
+        setSelectedModelIndex(-1);
+        if (layout.camera && isVec3(layout.camera.position) && isVec3(layout.camera.target) && typeof layout.camera.fov === 'number') {
+            pendingCameraRef.current = layout.camera;
+        }
+
+        const st = layout.settings ?? ({} as SceneLayoutFile['settings']);
+        if (typeof st.pointSize === 'number') setPointSize(st.pointSize);
+        const rebuild = (typeof st.depthScale === 'number' && st.depthScale !== depthScale)
+            || (typeof st.perspective === 'boolean' && st.perspective !== perspective)
+            || (typeof st.applyAlignment === 'boolean' && st.applyAlignment !== applyAlignment);
+        if (rebuild) {
+            // The scene is rebuilt with these settings; the models are placed from layoutRef as they load
+            if (typeof st.depthScale === 'number') setDepthScale(st.depthScale);
+            if (typeof st.perspective === 'boolean') setPerspective(st.perspective);
+            if (typeof st.applyAlignment === 'boolean') setApplyAlignment(st.applyAlignment);
+        } else {
+            applyLayoutToScene();
+            applyPendingCamera();
+        }
+        if (missing.length > 0) {
+            alert(`Layout loaded. Not in the current scene (kept out): ${missing.join(', ')}`);
+        }
+    };
+
+    // Load a scene layout (JSON, from Save) or a GLB exported with Export GLB
     const handleLoadScene = () => {
         const input = document.createElement('input');
         input.type = 'file';
-        input.accept = '.glb,.gltf';
+        input.accept = '.json,.glb,.gltf';
         input.onchange = (e) => {
             const file = (e.target as HTMLInputElement).files?.[0];
             if (!file || !sceneRef.current?.modelsGroup) return;
 
             const reader = new FileReader();
+            if (file.name.toLowerCase().endsWith('.json')) {
+                reader.onload = (event) => loadLayout(event.target?.result as string);
+                reader.readAsText(file);
+                return;
+            }
             reader.onload = (event) => {
                 const arrayBuffer = event.target?.result as ArrayBuffer;
                 const loader = new GLTFLoader();
@@ -457,6 +609,9 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 // Dragging started
                 isDraggingRef.current = true;
             } else {
+                // Remember the placement set by hand, so that it survives scene rebuilds and is saved with Save
+                const edited = transformControls.object;
+                if (edited?.userData.modelId) layoutRef.current.set(edited.userData.modelId, transformOf(edited));
                 // Dragging ended - keep isDraggingRef true for a short time to block click events
                 setTimeout(() => {
                     isDraggingRef.current = false;
@@ -589,6 +744,18 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     controls.target.copy(center);
                 }
                 controls.update();
+
+                // Camera of a layout loaded with other settings (the scene was rebuilt for it)
+                const savedCamera = pendingCameraRef.current;
+                if (savedCamera) {
+                    camera.position.fromArray(savedCamera.position);
+                    controls.target.fromArray(savedCamera.target);
+                    camera.fov = savedCamera.fov;
+                    camera.updateProjectionMatrix();
+                    controls.update();
+                    inPhotoView = false;
+                    pendingCameraRef.current = null;
+                }
 
                 setLoading(false);
             } catch (error) {
@@ -830,6 +997,13 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                         mesh.rotation.y = 0;
                     }
 
+                    // Remember the automatic placement (for Reset), then use a placement set by
+                    // hand or loaded from a layout file, if there is one
+                    meshContainer.userData.modelId = model.id;
+                    meshContainer.userData.autoTransform = transformOf(meshContainer);
+                    const savedPlacement = layoutRef.current.get(model.id);
+                    if (savedPlacement) applyTransform(meshContainer, savedPlacement);
+
                     group.add(meshContainer);
 
                     // Store meshContainer reference and set index for selection
@@ -929,15 +1103,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     const meshContainer = meshContainersRef.current[modelIndex];
 
                     if (meshContainer && transformControlsRef.current) {
-                        // Save original transform if not already saved
-                        if (!originalTransformsRef.current.has(modelIndex)) {
-                            originalTransformsRef.current.set(modelIndex, {
-                                position: meshContainer.position.clone(),
-                                rotation: meshContainer.rotation.clone(),
-                                scale: meshContainer.scale.clone()
-                            });
-                        }
-                        transformControlsRef.current.attach(meshContainer);
+transformControlsRef.current.attach(meshContainer);
                         setSelectedModelIndex(modelIndex);
                         // Highlight the selected whole box
                         highlightWholeBox(modelIndex, true);
@@ -1262,19 +1428,16 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                             </button>
                         )}
                         {/* Reset button - restore selected model to original position */}
-                        {selectedModelIndex >= 0 && originalTransformsRef.current.has(selectedModelIndex) && (
+                        {selectedModelIndex >= 0 && meshContainersRef.current[selectedModelIndex]?.userData.autoTransform && (
                             <button
                                 onClick={() => {
                                     const meshContainer = meshContainersRef.current[selectedModelIndex];
-                                    const original = originalTransformsRef.current.get(selectedModelIndex);
-                                    if (meshContainer && original) {
-                                        meshContainer.position.copy(original.position);
-                                        meshContainer.rotation.copy(original.rotation);
-                                        meshContainer.scale.copy(original.scale);
-                                    }
+                                    if (!meshContainer) return;
+                                    applyTransform(meshContainer, meshContainer.userData.autoTransform);
+                                    layoutRef.current.delete(meshContainer.userData.modelId);
                                 }}
                                 className="px-2 py-1 text-xs rounded bg-orange-600 text-white hover:bg-orange-500"
-                                title="Reset to original position/rotation/scale"
+                                title="Back to the automatic placement"
                             >
                                 ↩️ Reset
                             </button>
@@ -1283,16 +1446,23 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                         <button
                             onClick={handleSaveScene}
                             className="px-2 py-1 text-xs rounded bg-cyan-600 text-white hover:bg-cyan-500"
-                            title="Save scene as GLB file (CAD compatible)"
+                            title="Save the scene layout (where each model is, the settings and the camera) as a small JSON file. The models are not included: load the layout into the same project."
                         >
                             💾 Save
                         </button>
                         <button
                             onClick={handleLoadScene}
                             className="px-2 py-1 text-xs rounded bg-cyan-600 text-white hover:bg-cyan-500"
-                            title="Load scene from GLB file"
+                            title="Load a scene layout (JSON) saved with Save, or a GLB exported with GLB"
                         >
                             📂 Load
+                        </button>
+                        <button
+                            onClick={handleExportGlb}
+                            className="px-2 py-1 text-xs rounded bg-slate-600 text-slate-200 hover:bg-slate-500"
+                            title="Export the models as placed as one GLB file, for other 3D software (large: it contains every model)"
+                        >
+                            GLB
                         </button>
                         {/* Edit Mode Toggle - on right */}
                         <button

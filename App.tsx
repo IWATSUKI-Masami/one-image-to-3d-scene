@@ -2300,6 +2300,7 @@ const App: React.FC = () => {
                             detectedObjects={detectedObjects}
                             positionedModels={positionedModels}
                             showModels={true}
+                            sceneName={sourceImageName ?? undefined}
                           />
                         </div>
                       </div>
