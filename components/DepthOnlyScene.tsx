@@ -8,7 +8,8 @@ import { alignmentYawDeg, ASSUMED_HFOV_DEG, MIN_ALIGNMENT_SCORE, viewAngleDeg } 
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { Spinner } from './Spinner';
 import { checkPhysics } from './physicsChecks';
-import { ArrangeRun, DetectedObject, Model3D, SceneLayout } from '../types';
+import { ArrangeRun, DetectedObject, Model3D, ReferenceAnalysis, SceneLayout } from '../types';
+import type { SceneAnalysis } from '../services/sceneAnalysis';
 import { APP_VERSION, ARRANGE_EFFORT, ARRANGE_PROMPT_VERSION, ArrangeObject, ArrangeRecord, ArrangeScene, ArrangeView, PlacementEdit, arrangeScene } from '../services/semanticArrange';
 import { buildArrangeImageSheet, buildArrangeReport } from '../services/arrangeReport';
 import { ARRANGE_PROVIDER_FILE_NAMES, ARRANGE_PROVIDER_LABELS, ArrangeProvider, sceneEditState } from '../services/arrangeProviders';
@@ -214,6 +215,11 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     const redoStackRef = useRef<{ steps: EditStep[]; run?: ArrangeRun }[]>([]);
     // Arrange runs whose changes are in the current placements (saved with the layout and the project)
     const arrangeRunsRef = useRef<ArrangeRun[]>(initialLayout?.arrangeRuns ?? []);
+    // Reference analysis checked by a person, for evaluating Arrange (never shown to the model)
+    const [referenceAnalysis, setReferenceAnalysis] = useState<ReferenceAnalysis | undefined>(initialLayout?.referenceAnalysis);
+    const referenceRef = useRef(referenceAnalysis);
+    referenceRef.current = referenceAnalysis;
+    const referenceInputRef = useRef<HTMLInputElement>(null);
     const [historySize, setHistorySize] = useState({ undo: 0, redo: 0 });
     const updateHistorySize = () => setHistorySize({ undo: undoStackRef.current.length, redo: redoStackRef.current.length });
     // Placement of the model being dragged, when the drag started (undefined = automatic)
@@ -268,6 +274,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 return label ? [{ id, label, box_2d: model?.box_2d ?? kept?.box_2d, ...t }] : [];
             }),
             ...(arrangeRunsRef.current.length ? { arrangeRuns: [...arrangeRunsRef.current] } : {}),
+            ...(referenceRef.current ? { referenceAnalysis: referenceRef.current } : {}),
         };
     };
     /** "", "edited" or "arranged-<provider>", for file names */
@@ -677,6 +684,32 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             startedAt, calls: [], rounds: [],
         };
         try {
+            // Reference analysis: its ids mapped to this run's ids by the labels
+            let reference: SceneAnalysis | undefined;
+            const refA = referenceRef.current;
+            if (refA) {
+                const clean = (t: string) => t.replace(/\s*\(Completed\)\s*$/i, '').trim().toLowerCase();
+                const idMap = new Map<string, string>();
+                for (const o of refA.objects) {
+                    const byLabel = o.label ? entries.findIndex(e => clean(e.model.label) === clean(o.label!)) : -1;
+                    if (byLabel >= 0) idMap.set(o.id, `o${byLabel + 1}`);
+                    else if (byShort.has(o.id)) idMap.set(o.id, o.id);
+                }
+                const mapId = (id: string) => id === 'floor' || id === 'none' ? id : idMap.get(id);
+                reference = {
+                    scene: refA.scene,
+                    scale_reference: { ids: refA.scale_reference.ids.flatMap(id => idMap.get(id) ?? []), reason: refA.scale_reference.reason },
+                    objects: refA.objects.flatMap(o => idMap.has(o.id) ? [{ id: idMap.get(o.id)!, height_m: o.height_m, width_m: o.width_m, pose: o.pose }] : []),
+                    relations: refA.relations.flatMap(r => {
+                        const subject = mapId(r.subject), object = mapId(r.object);
+                        return subject && object ? [{ ...r, subject, object }] : [];
+                    }),
+                    notes: refA.notes,
+                    fileName: refA.fileName,
+                };
+                const unmatched = refA.objects.filter(o => !idMap.has(o.id)).map(o => o.label ?? o.id);
+                log(`Reference analysis for the evaluation: ${refA.fileName ?? 'loaded'} (${reference.relations.length} relations)${unmatched.length ? `; not in this scene: ${unmatched.join(', ')}` : ''}`);
+            }
             result = await arrangeScene(arrangeSceneApi, {
                 provider: arrange.provider,
                 apiKey: arrange.apiKey,
@@ -686,11 +719,12 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 signal: controller.signal,
                 onProgress: log,
                 record,
+                reference,
             });
             const iou = result.photoIoUBefore !== undefined && result.photoIoUAfter !== undefined
                 ? `\nPhoto match (mean IoU with the photo masks): ${result.photoIoUBefore.toFixed(2)} → ${result.photoIoUAfter.toFixed(2)}`
                 : '';
-            log(`Done (${result.rounds} round${result.rounds === 1 ? '' : 's'}). ${result.summary}${iou}\nPhysical issues (floating, sunk, inside another model): ${result.issuesBefore} → ${result.issuesAfter}${result.relationIssuesBefore !== undefined ? `\nRelation issues (scene analysis): ${result.relationIssuesBefore} → ${result.relationIssuesAfter}` : ''}`);
+            log(`Done (${result.rounds} round${result.rounds === 1 ? '' : 's'}). ${result.summary}${iou}\nPhysical issues (floating, sunk, inside another model): ${result.issuesBefore} → ${result.issuesAfter}${result.relationIssuesBefore !== undefined ? `\nRelation issues (scene analysis): ${result.relationIssuesBefore} → ${result.relationIssuesAfter}` : ''}${result.refRelationIssuesBefore !== undefined ? `\nRelation issues (reference analysis): ${result.refRelationIssuesBefore} → ${result.refRelationIssuesAfter}` : ''}`);
         } catch (e: any) {
             outcome = controller.signal.aborted ? 'cancelled' : 'failed';
             log(controller.signal.aborted ? 'Cancelled.' : `Failed: ${e?.message || e}`);
@@ -728,7 +762,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     outcome,
                     ...(result?.photoIoUBefore !== undefined ? { photoIoUBefore: result.photoIoUBefore } : {}),
                     ...(result?.photoIoUAfter !== undefined ? { photoIoUAfter: result.photoIoUAfter } : {}),
-                    ...(result ? { issuesBefore: result.issuesBefore, issuesAfter: result.issuesAfter, relationIssuesBefore: result.relationIssuesBefore, relationIssuesAfter: result.relationIssuesAfter } : {}),
+                    ...(result ? { issuesBefore: result.issuesBefore, issuesAfter: result.issuesAfter, relationIssuesBefore: result.relationIssuesBefore, relationIssuesAfter: result.relationIssuesAfter, refRelationIssuesBefore: result.refRelationIssuesBefore, refRelationIssuesAfter: result.refRelationIssuesAfter } : {}),
                     elapsedS: Math.round(built.totals.elapsedS * 10) / 10,
                     apiS: Math.round(built.totals.apiS * 10) / 10,
                     inputTokens: built.totals.inputTokens,
@@ -929,6 +963,29 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     };
     const fileBase = () => (sceneName || 'scene').replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 60) || 'scene';
 
+    /** Load a reference analysis (JSON checked by a person) for evaluating Arrange */
+    const handleReferenceFile = async (file: File) => {
+        try {
+            const data = JSON.parse(await file.text());
+            if (!data || !Array.isArray(data.objects) || !Array.isArray(data.relations)) {
+                alert('This file is not a reference analysis (it needs "objects" and "relations").');
+                return;
+            }
+            const ref: ReferenceAnalysis = {
+                format: data.format, scene: String(data.scene ?? ''),
+                scale_reference: { ids: Array.isArray(data.scale_reference?.ids) ? data.scale_reference.ids.map(String) : [], reason: String(data.scale_reference?.reason ?? '') },
+                objects: data.objects, relations: data.relations, notes: String(data.notes ?? ''),
+                ...(data.part_relations ? { part_relations: data.part_relations } : {}),
+                fileName: file.name,
+            };
+            setReferenceAnalysis(ref);
+            referenceRef.current = ref;
+            reportLayoutRef.current();
+        } catch (e: any) {
+            alert(`Could not read the reference analysis: ${e?.message || e}`);
+        }
+    };
+
     const download = (blob: Blob, name: string) => {
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -964,6 +1021,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 return model ? [{ id: model.id, label: model.label, box_2d: model.box_2d, ...transformOf(container) }] : [];
             }),
             ...(arrangeRunsRef.current.length ? { arrangeRuns: [...arrangeRunsRef.current] } : {}),
+            ...(referenceRef.current ? { referenceAnalysis: referenceRef.current } : {}),
         };
         // layout-edited: some models were placed by hand (or by a loaded layout);
         // layout-arranged-<provider>: by Arrange (possibly corrected by hand afterwards)
@@ -1032,6 +1090,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         }
         layoutRef.current = next;
         arrangeRunsRef.current = Array.isArray(layout.arrangeRuns) ? layout.arrangeRuns : [];
+        if (layout.referenceAnalysis) setReferenceAnalysis(layout.referenceAnalysis);
         // A loaded layout replaces all placements; edits before it cannot be undone one by one
         undoStackRef.current = [];
         redoStackRef.current = [];
@@ -2407,6 +2466,28 @@ transformControlsRef.current.attach(meshContainer);
                         >
                             📏 Match
                         </button>
+                        <input ref={referenceInputRef} type="file" accept=".json,application/json" className="hidden"
+                            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleReferenceFile(f); e.target.value = ''; }} />
+                        <button
+                            onClick={() => referenceInputRef.current?.click()}
+                            disabled={arranging}
+                            className={`px-2 py-1 text-xs rounded disabled:opacity-50 ${referenceAnalysis ? 'bg-emerald-700 text-white hover:bg-emerald-600' : 'bg-slate-600 text-slate-200 hover:bg-slate-500'}`}
+                            title={referenceAnalysis
+                                ? `Reference analysis: ${referenceAnalysis.fileName ?? 'loaded'} (${referenceAnalysis.relations.length} relations). Arrange runs are also evaluated against it (relation issues, and how well the model's own analysis agrees with it); the model never sees it. Click to load another one.`
+                                : 'Load a reference analysis (relations and real sizes checked by a person, e.g. samples/cafe-couple.analysis.json) to evaluate Arrange runs on a common basis'}
+                        >
+                            {referenceAnalysis ? '📐 Ref ✓' : '📐 Ref'}
+                        </button>
+                        {referenceAnalysis && (
+                            <button
+                                onClick={() => { setReferenceAnalysis(undefined); referenceRef.current = undefined; reportLayoutRef.current(); }}
+                                disabled={arranging}
+                                className="px-1.5 py-1 text-xs rounded bg-slate-600 text-slate-200 hover:bg-slate-500 disabled:opacity-50"
+                                title="Remove the reference analysis"
+                            >
+                                ×
+                            </button>
+                        )}
                         {arrangeLog.length > 0 && !showArrangeLog && (
                             <button
                                 onClick={() => setShowArrangeLog(true)}

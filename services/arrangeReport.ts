@@ -7,6 +7,7 @@
  */
 import { ARRANGE_PROVIDER_LABELS } from './arrangeProviders';
 import type { ArrangeObject, ArrangeRecord } from './semanticArrange';
+import { compareAnalysis } from './sceneAnalysis';
 
 /**
  * List prices (USD per million tokens: input, output) used for the cost estimate.
@@ -84,6 +85,10 @@ export const buildArrangeReport = (r: ArrangeReportInput) => {
     }));
     const a = record.analysis;
     const rel = (v: number | undefined) => v === undefined ? '-' : String(v);
+    const ref = record.reference;
+    const cmp = a && ref ? compareAnalysis(a, ref) : undefined;
+    const pct = (v: number | undefined) => v === undefined ? '-' : `${Math.round(v * 100)}%`;
+    const refWarn = (warnings: Record<string, string[]> | undefined, id: string) => warnings?.[id] ?? [];
 
     const text = [
         'Arrange report',
@@ -96,6 +101,8 @@ export const buildArrangeReport = (r: ArrangeReportInput) => {
         `Photo match (mean IoU with the photo masks): ${f(before?.meanIoU)} -> ${f(after?.meanIoU)}`,
         `Physical issues (floating, sunk, inside another model): ${before?.issues ?? '-'} -> ${after?.issues ?? '-'}`,
         `Relation issues (relations and sizes of the scene analysis not satisfied): ${rel(before?.relationIssues)} -> ${rel(after?.relationIssues)}`,
+        ...(ref ? [`Relation issues against the reference analysis (${ref.fileName ?? 'checked by a person'}): ${rel(before?.refRelationIssues)} -> ${rel(after?.refRelationIssues)}`] : []),
+        ...(cmp ? [`Analysis vs reference: relations found ${cmp.found}/${cmp.reference} (recall ${pct(cmp.recall)}), correct ${cmp.correct}/${cmp.given} (precision ${pct(cmp.precision)}), contact visibility right ${cmp.contactRight}/${cmp.contactTotal}, mean height error ${pct(cmp.heightError)}`] : []),
         ...(r.summary ? ['', `Summary: ${r.summary}`] : []),
         '',
         'Time:',
@@ -110,6 +117,13 @@ export const buildArrangeReport = (r: ArrangeReportInput) => {
             ...a.relations.map(x => `  ${x.subject} ${x.relation} ${x.object}${x.relation === 'on' || x.relation === 'sits_on' ? ` (contact ${x.contact_visible ? 'visible' : 'not visible'})` : ''}`),
             ...(a.notes ? [`  notes: ${a.notes}`] : []),
         ] : ['  none']),
+        ...(cmp ? [
+            '  compared with the reference:',
+            `    missing: ${cmp.missing.join('; ') || 'none'}`,
+            `    not in the reference: ${cmp.extra.join('; ') || 'none'}`,
+            `    heights (model / reference, m): ${cmp.heights.map(h => `${h.id} ${h.model}/${h.reference}`).join(', ')}`,
+        ] : []),
+        ...(record.analysisRaw !== undefined && (!a || a.objects.length === 0) ? [`  as sent by the model: ${JSON.stringify(record.analysisRaw)}`] : []),
         '',
         'Tokens and cost:',
         `  input ${totals.inputTokens}, output ${totals.outputTokens}${totals.reasoningTokens ? ` (reasoning ${totals.reasoningTokens})` : ''}`,
@@ -138,6 +152,11 @@ export const buildArrangeReport = (r: ArrangeReportInput) => {
         'Relation warnings per object (before -> after):',
         ...rows.map(o => `  ${o.id} ${o.label}: ${o.relBefore.join('; ') || 'none'} -> ${o.relAfter.join('; ') || 'none'}`),
         '',
+        ...(ref ? [
+            'Relation warnings against the reference analysis per object (before -> after):',
+            ...rows.map(o => `  ${o.id} ${o.label}: ${refWarn(before?.refRelationWarnings, o.id).join('; ') || 'none'} -> ${refWarn(after?.refRelationWarnings, o.id).join('; ') || 'none'}`),
+            '',
+        ] : []),
         'Log:',
         ...r.log,
     ].join('\n');
@@ -164,17 +183,24 @@ export const buildArrangeReport = (r: ArrangeReportInput) => {
         `physical_issues,${before?.issues ?? ''},${after?.issues ?? ''}`,
         `relation_issues,${before?.relationIssues ?? ''},${after?.relationIssues ?? ''}`,
         `analysis_relations,${a?.relations.length ?? ''}`,
+        `reference,${q(ref?.fileName ?? '')}`,
+        `ref_relation_issues,${before?.refRelationIssues ?? ''},${after?.refRelationIssues ?? ''}`,
+        `analysis_recall,${cmp?.recall !== undefined ? cmp.recall.toFixed(3) : ''},${cmp ? `${cmp.found}/${cmp.reference}` : ''}`,
+        `analysis_precision,${cmp?.precision !== undefined ? cmp.precision.toFixed(3) : ''},${cmp ? `${cmp.correct}/${cmp.given}` : ''}`,
+        `analysis_contact_visibility,${cmp ? `${cmp.contactRight}/${cmp.contactTotal}` : ''}`,
+        `analysis_height_error,${cmp?.heightError !== undefined ? cmp.heightError.toFixed(3) : ''}`,
     ];
 
     const objectsCsv = [
         ...header,
         '',
-        'object,iou_before,iou_after,area_ratio_before,area_ratio_after,offset_x_before,offset_y_before,offset_x_after,offset_y_after,proportion_change_before,proportion_change_after,warnings_before,warnings_after,relation_warnings_before,relation_warnings_after',
+        'object,iou_before,iou_after,area_ratio_before,area_ratio_after,offset_x_before,offset_y_before,offset_x_after,offset_y_after,proportion_change_before,proportion_change_after,warnings_before,warnings_after,relation_warnings_before,relation_warnings_after,ref_relation_warnings_before,ref_relation_warnings_after',
         ...rows.map(o => [q(o.label), f(o.before?.iou), f(o.after?.iou), f(o.before?.areaRatio), f(o.after?.areaRatio),
             f(o.before?.offset[0]), f(o.before?.offset[1]), f(o.after?.offset[0]), f(o.after?.offset[1]),
             f(o.propBefore), f(o.propAfter),
-            q(o.warningsBefore.join('; ')), q(o.warningsAfter.join('; ')), q(o.relBefore.join('; ')), q(o.relAfter.join('; '))].join(',')),
-        `mean,${f(before?.meanIoU)},${f(after?.meanIoU)},,,,,,,,,,,,`,
+            q(o.warningsBefore.join('; ')), q(o.warningsAfter.join('; ')), q(o.relBefore.join('; ')), q(o.relAfter.join('; ')),
+            q(refWarn(before?.refRelationWarnings, o.id).join('; ')), q(refWarn(after?.refRelationWarnings, o.id).join('; '))].join(',')),
+        `mean,${f(before?.meanIoU)},${f(after?.meanIoU)},,,,,,,,,,,,,,`,
     ].join('\n');
 
     // Rounds (with the API call that requested each), then all API calls
@@ -184,14 +210,14 @@ export const buildArrangeReport = (r: ArrangeReportInput) => {
     const roundsCsv = [
         ...header,
         '',
-        ['round', 'call', 'api_s', 'input_tokens', 'output_tokens', 'reasoning_tokens', 'apply_ms', 'render_ms', 'measure_ms', 'mean_iou', 'physical_issues', 'relation_issues', 'max_proportion_change', 'edits',
+        ['round', 'call', 'api_s', 'input_tokens', 'output_tokens', 'reasoning_tokens', 'apply_ms', 'render_ms', 'measure_ms', 'mean_iou', 'physical_issues', 'relation_issues', 'ref_relation_issues', 'max_proportion_change', 'edits',
             ...objectIds.map(id => `iou_${id}`), 'reason'].join(','),
-        ...(before ? [['0', '', '', '', '', '', '', before.renderMs.toFixed(0), before.measureMs.toFixed(0), f(before.meanIoU), before.issues, before.relationIssues ?? '', f(maxProp(before.objects)), 0,
+        ...(before ? [['0', '', '', '', '', '', '', before.renderMs.toFixed(0), before.measureMs.toFixed(0), f(before.meanIoU), before.issues, before.relationIssues ?? '', before.refRelationIssues ?? '', f(maxProp(before.objects)), 0,
             ...objectIds.map(id => f(before.objects.find(o => o.id === id)?.iou)), q('before')].join(',')] : []),
         ...record.rounds.map(rd => {
             const c = callOf.get(rd.call);
             return [rd.round, rd.call, c ? f(c.durationMs / 1000, 1) : '', c?.usage.input ?? '', c?.usage.output ?? '', c?.usage.reasoning ?? '',
-                rd.applyMs, rd.renderMs, rd.measureMs, f(rd.meanIoU), rd.issues, rd.relationIssues ?? '', f(maxProp(rd.objects)), rd.edits.length,
+                rd.applyMs, rd.renderMs, rd.measureMs, f(rd.meanIoU), rd.issues, rd.relationIssues ?? '', rd.refRelationIssues ?? '', f(maxProp(rd.objects)), rd.edits.length,
                 ...objectIds.map(id => f(rd.objects.find(o => o.id === id)?.iou)), q(rd.reason)].join(',');
         }),
         '',

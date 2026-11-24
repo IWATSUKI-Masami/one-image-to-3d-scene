@@ -21,6 +21,9 @@ export interface SceneRelation {
     object: string;
     /** Whether the contact (the subject's bottom touching the object) is visible in the photo */
     contact_visible: boolean;
+    /** Reference analyses: false = not certain (not scored) */
+    certain?: boolean;
+    note?: string;
 }
 
 export interface SceneAnalysis {
@@ -29,6 +32,8 @@ export interface SceneAnalysis {
     objects: { id: string; height_m: number; width_m: number; pose: string }[];
     relations: SceneRelation[];
     notes: string;
+    /** Reference analyses: the file it was loaded from */
+    fileName?: string;
 }
 
 /** Box of a model in world units */
@@ -110,16 +115,25 @@ const RELATIONS: RelationKind[] = ['on', 'sits_on', 'sits_at', 'faces', 'in_fron
 export const parseAnalysis = (input: unknown, ids: Set<string>): SceneAnalysis | undefined => {
     const a = input as Partial<SceneAnalysis> | undefined;
     if (!a || typeof a !== 'object') return undefined;
+    // Ids as listed ("o3"); also accept "3", "O3", "o3 vase" or "o3: vase"
+    const idOf = (v: unknown): string => {
+        if (typeof v === 'number') return ids.has(`o${v}`) ? `o${v}` : String(v);
+        if (typeof v !== 'string') return '';
+        const t = v.trim();
+        if (ids.has(t) || t === 'floor' || t === 'none') return t;
+        const m = /^o?(\d+)\b/i.exec(t);
+        return m && ids.has(`o${m[1]}`) ? `o${m[1]}` : t.toLowerCase();
+    };
     const str = (v: unknown) => typeof v === 'string' ? v : '';
     const num = (v: unknown) => typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0;
     const objects = (Array.isArray(a.objects) ? a.objects : [])
-        .filter(o => ids.has(str(o?.id)))
-        .map(o => ({ id: o.id, height_m: num(o.height_m), width_m: num(o.width_m), pose: str(o.pose) }));
+        .map(o => ({ id: idOf(o?.id), height_m: num(o?.height_m), width_m: num(o?.width_m), pose: str(o?.pose) }))
+        .filter(o => ids.has(o.id));
     const target = (v: string) => ids.has(v) || v === 'floor' || v === 'none';
     const relations = (Array.isArray(a.relations) ? a.relations : [])
-        .filter(r => ids.has(str(r?.subject)) && RELATIONS.includes(r?.relation as RelationKind) && target(str(r?.object)) && r.subject !== r.object)
-        .map(r => ({ subject: r.subject, relation: r.relation, object: r.object, contact_visible: r.contact_visible === true }));
-    const refIds = Array.isArray(a.scale_reference?.ids) ? a.scale_reference.ids.filter(id => ids.has(id)) : [];
+        .map(r => ({ subject: idOf(r?.subject), relation: str(r?.relation).toLowerCase() as RelationKind, object: idOf(r?.object), contact_visible: r?.contact_visible === true }))
+        .filter(r => ids.has(r.subject) && RELATIONS.includes(r.relation) && target(r.object) && r.subject !== r.object);
+    const refIds = Array.isArray(a.scale_reference?.ids) ? a.scale_reference.ids.map(idOf).filter(id => ids.has(id)) : [];
     return {
         scene: str(a.scene),
         scale_reference: { ids: refIds, reason: str(a.scale_reference?.reason) },
@@ -211,3 +225,56 @@ export const describeAnalysis = (a: SceneAnalysis): string => [
     ...a.relations.map(r => `  ${r.subject} ${r.relation} ${r.object}${r.relation === 'on' || r.relation === 'sits_on' ? ` (contact ${r.contact_visible ? 'visible' : 'not visible'} in the photo)` : ''}`),
     ...(a.notes ? [`notes: ${a.notes}`] : []),
 ].join('\n');
+
+/** The reference without its uncertain relations (what the scene is checked against) */
+export const certainPart = (ref: SceneAnalysis): SceneAnalysis => ({ ...ref, relations: ref.relations.filter(r => r.certain !== false) });
+
+const sameRelation = (a: SceneRelation, b: SceneRelation) =>
+    a.relation === b.relation && ((a.subject === b.subject && a.object === b.object)
+        || (a.relation === 'faces' && a.subject === b.object && a.object === b.subject));
+
+export interface AnalysisComparison {
+    /** Certain reference relations the model found, and how many there are */
+    found: number;
+    reference: number;
+    /** Model relations that are in the reference (certain or not), and how many it gave (those matching an uncertain one are not counted) */
+    correct: number;
+    given: number;
+    recall?: number;
+    precision?: number;
+    /** "on" relations found with the right visibility of the contact */
+    contactRight: number;
+    contactTotal: number;
+    /** Mean absolute relative error of the heights (|model / reference - 1|) over the objects in both */
+    heightError?: number;
+    missing: string[];
+    extra: string[];
+    heights: { id: string; model: number; reference: number }[];
+}
+
+const relText = (r: SceneRelation) => `${r.subject} ${r.relation} ${r.object}`;
+
+/** Compare a model's analysis with the reference */
+export const compareAnalysis = (model: SceneAnalysis, ref: SceneAnalysis): AnalysisComparison => {
+    const certain = ref.relations.filter(r => r.certain !== false);
+    const uncertain = ref.relations.filter(r => r.certain === false);
+    const foundRel = certain.filter(r => model.relations.some(m => sameRelation(m, r)));
+    const scored = model.relations.filter(m => !uncertain.some(r => sameRelation(m, r)) || certain.some(r => sameRelation(m, r)));
+    const correct = scored.filter(m => certain.some(r => sameRelation(m, r)));
+    const ons = foundRel.filter(r => r.relation === 'on' || r.relation === 'sits_on');
+    const contactRight = ons.filter(r => model.relations.find(m => sameRelation(m, r))?.contact_visible === r.contact_visible).length;
+    const heights = ref.objects.flatMap(o => {
+        const m = model.objects.find(x => x.id === o.id);
+        return m && m.height_m && o.height_m ? [{ id: o.id, model: m.height_m, reference: o.height_m }] : [];
+    });
+    return {
+        found: foundRel.length, reference: certain.length, correct: correct.length, given: scored.length,
+        recall: certain.length ? foundRel.length / certain.length : undefined,
+        precision: scored.length ? correct.length / scored.length : undefined,
+        contactRight, contactTotal: ons.length,
+        heightError: heights.length ? heights.reduce((s, h) => s + Math.abs(h.model / h.reference - 1), 0) / heights.length : undefined,
+        missing: certain.filter(r => !foundRel.includes(r)).map(relText),
+        extra: scored.filter(m => !correct.includes(m)).map(relText),
+        heights,
+    };
+};

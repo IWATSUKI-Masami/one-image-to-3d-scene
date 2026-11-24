@@ -1,0 +1,187 @@
+{
+  "format": "one-image-to-3d-scene/reference-analysis",
+  "version": 1,
+  "photo": "cafe-couple.webp",
+  "checked_by": "author",
+  "checked_at": "2026-11-24",
+  "scene": "A man and a woman sit at a small round café table, leaning toward each other and laughing; two coffee cups and a vase of roses stand on the table.",
+  "scale_reference": {
+    "ids": [
+      "o1",
+      "o2"
+    ],
+    "reason": "seated adults"
+  },
+  "objects": [
+    {
+      "id": "o1",
+      "label": "laughing woman in black top",
+      "height_m": 1.28,
+      "width_m": 0.6,
+      "pose": "seated, leaning toward o2"
+    },
+    {
+      "id": "o2",
+      "label": "laughing man in navy shirt",
+      "height_m": 1.32,
+      "width_m": 0.65,
+      "pose": "seated, leaning toward o1"
+    },
+    {
+      "id": "o3",
+      "label": "pink roses in ceramic vase",
+      "height_m": 0.45,
+      "width_m": 0.25,
+      "pose": "vase with roses, upright"
+    },
+    {
+      "id": "o4",
+      "label": "left ceramic coffee cup",
+      "height_m": 0.09,
+      "width_m": 0.13,
+      "pose": "cup, upright"
+    },
+    {
+      "id": "o5",
+      "label": "right ceramic coffee cup",
+      "height_m": 0.09,
+      "width_m": 0.13,
+      "pose": "cup, upright"
+    },
+    {
+      "id": "o6",
+      "label": "round wooden table",
+      "height_m": 0.75,
+      "width_m": 1.0,
+      "pose": "round table"
+    }
+  ],
+  "relations": [
+    {
+      "subject": "o4",
+      "relation": "on",
+      "object": "o6",
+      "contact_visible": true
+    },
+    {
+      "subject": "o5",
+      "relation": "on",
+      "object": "o6",
+      "contact_visible": true
+    },
+    {
+      "subject": "o3",
+      "relation": "on",
+      "object": "o6",
+      "contact_visible": true
+    },
+    {
+      "subject": "o6",
+      "relation": "on",
+      "object": "floor",
+      "contact_visible": false
+    },
+    {
+      "subject": "o1",
+      "relation": "sits_on",
+      "object": "none",
+      "contact_visible": false
+    },
+    {
+      "subject": "o2",
+      "relation": "sits_on",
+      "object": "none",
+      "contact_visible": false
+    },
+    {
+      "subject": "o1",
+      "relation": "sits_at",
+      "object": "o6",
+      "contact_visible": false
+    },
+    {
+      "subject": "o2",
+      "relation": "sits_at",
+      "object": "o6",
+      "contact_visible": false
+    },
+    {
+      "subject": "o1",
+      "relation": "faces",
+      "object": "o2",
+      "contact_visible": false,
+      "certain": false,
+      "note": "turned toward each other, not face to face: their lines of sight, if they looked straight ahead, would cross at about 90 degrees"
+    },
+    {
+      "subject": "o2",
+      "relation": "faces",
+      "object": "o1",
+      "contact_visible": false,
+      "certain": false,
+      "note": "see o1 faces o2"
+    },
+    {
+      "subject": "o6",
+      "relation": "in_front_of",
+      "object": "o1",
+      "contact_visible": false
+    },
+    {
+      "subject": "o6",
+      "relation": "in_front_of",
+      "object": "o2",
+      "contact_visible": false
+    },
+    {
+      "subject": "o3",
+      "relation": "in_front_of",
+      "object": "o1",
+      "contact_visible": false
+    },
+    {
+      "subject": "o4",
+      "relation": "in_front_of",
+      "object": "o1",
+      "contact_visible": false
+    },
+    {
+      "subject": "o5",
+      "relation": "in_front_of",
+      "object": "o2",
+      "contact_visible": false
+    },
+    {
+      "subject": "o2",
+      "relation": "in_front_of",
+      "object": "o1",
+      "contact_visible": false,
+      "certain": false,
+      "note": "almost the same distance; the man is slightly nearer"
+    }
+  ],
+  "notes": "Contacts of body parts that the relation types do not cover are listed in part_relations (not checked yet). Table legs are below the photo; the chairs are hidden; the man is cut off at the right and bottom edges. Ids are those of the project's object list; labels are given to match objects if the ids change.",
+  "part_relations": [
+    {
+      "subject": "o2",
+      "part": "right hand",
+      "relation": "behind",
+      "object": "o1",
+      "object_part": "back"
+    },
+    {
+      "subject": "o2",
+      "part": "left wrist",
+      "relation": "under",
+      "object": "o6",
+      "object_part": "top"
+    },
+    {
+      "subject": "o1",
+      "part": "left forearm (elbow to hand)",
+      "relation": "on",
+      "object": "o6",
+      "object_part": "top"
+    }
+  ]
+}

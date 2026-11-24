@@ -13,7 +13,7 @@
  * the 3D scene component.
  */
 import { ARRANGE_PROVIDER_LABELS, ArrangeProvider, Block, ToolResult, ToolSpec, Usage, createArrangeChat } from './arrangeProviders';
-import { ANALYSIS_PROMPT, SCENE_TOOL, SceneAnalysis, checkRelations, describeAnalysis, parseAnalysis } from './sceneAnalysis';
+import { ANALYSIS_PROMPT, SCENE_TOOL, SceneAnalysis, certainPart, checkRelations, describeAnalysis, parseAnalysis } from './sceneAnalysis';
 
 /** One model in the scene, in world units (see the system prompt for the conventions) */
 export interface ArrangeObject {
@@ -94,6 +94,8 @@ export interface ArrangeOptions {
     onProgress?: (message: string) => void;
     /** Filled while the run goes on (also kept when it fails or is cancelled) */
     record?: ArrangeRecord;
+    /** Reference analysis checked by a person (ids as in the object list), for evaluation only: never shown to the model */
+    reference?: SceneAnalysis;
 }
 
 /** One API call */
@@ -125,6 +127,9 @@ export interface ArrangeRoundRecord {
     issues: number;
     /** Relation and size warnings from the scene analysis (undefined without an analysis) */
     relationIssues?: number;
+    /** The same against the reference analysis (evaluation only; undefined without a reference) */
+    refRelationIssues?: number;
+    refRelationWarnings?: Record<string, string[]>;
     objects: { id: string; label: string; iou?: number; areaRatio?: number; warnings?: string[]; relationWarnings?: string[]; proportionChange?: number }[];
     /** Renderings after the round (base64 JPEG): photo view, top view, oblique view */
     images: { photo: string; top: string; oblique: string };
@@ -139,6 +144,10 @@ export interface ArrangeRecord {
     photo?: string;
     /** Semantic analysis of the photo made before the placement rounds */
     analysis?: SceneAnalysis;
+    /** The analysis as the model sent it (before unknown ids and relations were dropped) */
+    analysisRaw?: unknown;
+    /** Reference analysis used for the evaluation */
+    reference?: SceneAnalysis;
     calls: ArrangeCallRecord[];
     rounds: ArrangeRoundRecord[];
 }
@@ -162,6 +171,9 @@ export interface ArrangeResult {
     /** Number of relation and size warnings from the scene analysis before and after */
     relationIssuesBefore?: number;
     relationIssuesAfter?: number;
+    /** The same against the reference analysis (evaluation only) */
+    refRelationIssuesBefore?: number;
+    refRelationIssuesAfter?: number;
     /** The objects (with their photo match) before and after */
     objectsBefore: ArrangeObject[];
     objectsAfter: ArrangeObject[];
@@ -203,7 +215,7 @@ Physical checks: "warnings" lists problems measured on the meshes: floating (the
 
 Check the top view as well as the photo view: an object can look right from the camera but be at the wrong distance (e.g. a cup on the far side of a table instead of the near side). Compare the order along the line of sight ("in_front_of" in the analysis, near or far edge of a support, left or right) with the top view.
 
-Work in rounds: call update_placements with the edits for one round (you can edit several objects at once); you then get the new object list and new renderings. Check them against the photo and correct further. Before you call finish, look at your list of remaining differences and at the relation warnings: if one of them can be fixed with the tools (e.g. a person too far from the table they sit at), fix it in another round first. Call finish when the scene matches the photo well, or when further changes would not help, with a short summary of what you changed. Do at most a few rounds.`;
+Work in rounds: call update_placements with the edits for one round (you can edit several objects at once); you then get the new object list and new renderings. Check them against the photo and correct further. Before you call finish, look at your list of remaining differences and at the relation warnings: if one of them can be fixed with the tools (e.g. a person too far from the table they sit at), fix it in another round first. No warnings is not enough: if an object's photo_match area_ratio is below 0.75 or above 1.33, or its iou is clearly lower than the others', do another round for it, unless you can say why it cannot be fixed (e.g. it is hidden in the photo by something that is not in the scene, or its generated shape differs from the photo); give that reason in the summary. Call finish when the scene matches the photo well, or when further changes would not help, with a short summary of what you changed. Do at most a few rounds.`;
 
 const TOOLS: ToolSpec[] = [
     {
@@ -365,7 +377,7 @@ const validateEdits = (input: unknown): { edits: PlacementEdit[]; problems: stri
  * by hand, one undo step).
  */
 export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions): Promise<ArrangeResult> => {
-    const { provider, apiKey, model, photoUrl, maxRounds = 6, signal, onProgress } = options;
+    const { provider, apiKey, model, photoUrl, maxRounds = 6, signal, onProgress, reference } = options;
     const name = ARRANGE_PROVIDER_LABELS[provider];
     const startedAt = Date.now();
     const record: ArrangeRecord = options.record ?? {
@@ -386,7 +398,14 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
             objects.forEach(o => { o.relationWarnings = warnings.get(o.id) ?? []; });
             relationIssues = [...warnings.values()].reduce((n, w) => n + w.length, 0);
         }
-        return { objects, issues: scene.issueCount(), relationIssues, ms: now() - t };
+        let refRelationIssues: number | undefined, refRelationWarnings: Record<string, string[]> | undefined;
+        if (reference) {
+            const tolerance = 0.015 * Math.max(...objects.map(o => o.size[1]));
+            const warnings = checkRelations(certainPart(reference), objects, scene.floorY(), tolerance);
+            refRelationWarnings = Object.fromEntries(warnings);
+            refRelationIssues = [...warnings.values()].reduce((n, w) => n + w.length, 0);
+        }
+        return { objects, issues: scene.issueCount(), relationIssues, refRelationIssues, refRelationWarnings, ms: now() - t };
     };
     const summarizeObjects = (objects: ArrangeObject[]) => objects.map(o => ({
         id: o.id, label: o.label, iou: o.photoMatch?.iou, areaRatio: o.photoMatch?.areaRatio, warnings: o.warnings, relationWarnings: o.relationWarnings, proportionChange: o.proportionChange,
@@ -425,10 +444,17 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
             const { calls, usage, model: answeredBy } = await analysisChat.next();
             record.calls.push({ index: record.calls.length + 1, startMs, durationMs: Math.round(now() - t0), usage, model: answeredBy, tools: calls.map(c => c.name) });
             const call = calls.find(c => c.name === SCENE_TOOL.name);
-            if (call) analysis = parseAnalysis(call.input, ids);
-            else analysisChat.addText('Call report_scene with your analysis.');
+            if (call) {
+                record.analysisRaw = call.input;
+                const parsed = parseAnalysis(call.input, ids);
+                // An analysis without objects (e.g. ids not taken from the list) is asked again
+                if (parsed && parsed.objects.length > 0) analysis = parsed;
+                else if (attempt === 0) analysisChat.addToolResults([{ id: call.id, name: call.name, isError: true, blocks: [{ type: 'text', text: `The analysis has no objects with the listed ids (${[...ids].join(', ')}). Call report_scene again with every listed object in "objects" and the relations between them, using exactly these ids.` }] }]);
+                else analysis = parsed;
+            } else analysisChat.addText('Call report_scene with your analysis.');
         }
         record.analysis = analysis;
+        record.reference = reference;
         onProgress?.(analysis
             ? `Scene: ${analysis.scene} (${analysis.relations.length} relations)`
             : `${name} gave no scene analysis; arranging without it.`);
@@ -441,14 +467,17 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
     const photoIoUBefore = meanPhotoIoU(objectsBefore);
     const issuesBefore = before.issues;
     const relationIssuesBefore = before.relationIssues;
-    let lastObjects = objectsBefore, lastIssues = issuesBefore, lastRelationIssues = relationIssuesBefore;
+    const refRelationIssuesBefore = before.refRelationIssues;
+    let lastObjects = objectsBefore, lastIssues = issuesBefore, lastRelationIssues = relationIssuesBefore, lastRef = refRelationIssuesBefore;
     const end = () => ({
         photoIoUBefore, photoIoUAfter: meanPhotoIoU(lastObjects), issuesBefore, issuesAfter: lastIssues,
-        relationIssuesBefore, relationIssuesAfter: lastRelationIssues, objectsBefore, objectsAfter: lastObjects,
+        relationIssuesBefore, relationIssuesAfter: lastRelationIssues,
+        refRelationIssuesBefore, refRelationIssuesAfter: lastRef, objectsBefore, objectsAfter: lastObjects,
     });
     const initial = await renderAll();
     record.initial = {
         round: 0, renderMs: initial.ms, measureMs: before.ms, meanIoU: photoIoUBefore, issues: issuesBefore, relationIssues: relationIssuesBefore,
+        refRelationIssues: before.refRelationIssues, refRelationWarnings: before.refRelationWarnings,
         objects: summarizeObjects(objectsBefore), images: initial.images,
     };
 
@@ -478,8 +507,9 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
         record.calls.push({ index: callIndex, startMs, durationMs: Math.round(now() - t0), usage, model: answeredBy, tools: calls.map(c => c.name) });
 
         if (calls.length === 0) {
-            // An answer without tools: ask once to continue with a tool (Gemini sometimes
-            // answers with a stray text after the first round); a second one ends the run
+            // An answer without tools: ask to continue with a tool (Gemini often answers a
+            // round's renderings with an almost empty text, then works on after a plain
+            // request); a second such answer in a row ends the run
             if (!nudged) {
                 nudged = true;
                 texts.forEach(t => onProgress?.(t));
@@ -511,6 +541,7 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
             }
             const { edits, problems } = validateEdits(tool.input);
             rounds++;
+            nudged = false;
             const reason = String((tool.input as { reason?: unknown })?.reason ?? '').trim();
             onProgress?.(`Round ${rounds}: ${reason || `${edits.length} edit(s)`}`);
             const ta = now();
@@ -521,10 +552,12 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
             lastObjects = after.objects;
             lastIssues = after.issues;
             lastRelationIssues = after.relationIssues;
+            lastRef = after.refRelationIssues;
             record.rounds.push({
                 round: rounds, call: callIndex, reason, edits, problems,
                 applyMs: Math.round(applyMs), renderMs: Math.round(rendered.ms), measureMs: Math.round(after.ms),
-                meanIoU: meanPhotoIoU(after.objects), issues: after.issues, relationIssues: after.relationIssues, objects: summarizeObjects(after.objects), images: rendered.images,
+                meanIoU: meanPhotoIoU(after.objects), issues: after.issues, relationIssues: after.relationIssues,
+                refRelationIssues: after.refRelationIssues, refRelationWarnings: after.refRelationWarnings, objects: summarizeObjects(after.objects), images: rendered.images,
             });
             results.push({
                 id: tool.id,

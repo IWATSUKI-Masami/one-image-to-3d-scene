@@ -131,6 +131,9 @@ export interface ArrangeRun {
   /** Relation and size warnings of the scene analysis before and after */
   relationIssuesBefore?: number;
   relationIssuesAfter?: number;
+  /** Relation and size warnings against the reference analysis before and after */
+  refRelationIssuesBefore?: number;
+  refRelationIssuesAfter?: number;
   /** Times (seconds: total, waiting for the API), tokens and estimated cost (USD, list prices) */
   elapsedS?: number;
   apiS?: number;
@@ -144,6 +147,24 @@ export interface ArrangeRun {
   report?: string;
 }
 
+/**
+ * Reference analysis of a photo, checked by a person (relations and real sizes), used to
+ * evaluate Arrange runs on a common basis. Same form as the analysis the models make, plus
+ * relations marked as uncertain (not scored) and labels to match the objects.
+ */
+export interface ReferenceAnalysis {
+  format?: string;
+  scene: string;
+  scale_reference: { ids: string[]; reason: string };
+  objects: { id: string; label?: string; height_m: number; width_m: number; pose: string }[];
+  relations: { subject: string; relation: 'on' | 'sits_on' | 'sits_at' | 'faces' | 'in_front_of'; object: string; contact_visible: boolean; certain?: boolean; note?: string }[];
+  notes: string;
+  /** Contacts of body parts (not checked) */
+  part_relations?: unknown[];
+  /** File it was loaded from */
+  fileName?: string;
+}
+
 /** Scene settings, camera and model placements (in a project: only the placements set by hand) */
 export interface SceneLayout {
   settings: { depthScale: number; perspective: boolean; applyAlignment: boolean; pointSize: number };
@@ -151,6 +172,8 @@ export interface SceneLayout {
   models: SceneModelPlacement[];
   /** Arrange runs whose changes are in the placements (oldest first); undone runs are removed */
   arrangeRuns?: ArrangeRun[];
+  /** Reference analysis for evaluating Arrange (loaded by the user) */
+  referenceAnalysis?: ReferenceAnalysis;
 }
 
 export interface ProjectArchive {
