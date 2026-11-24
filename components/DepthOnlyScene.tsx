@@ -80,6 +80,16 @@ const applyTransform = (obj: THREE.Object3D, t: SavedTransform) => {
     obj.scale.fromArray(t.scale);
 };
 
+/** One step of the edit history: the placement of a model before and after it (undefined = automatic) */
+interface EditStep {
+    modelId: string;
+    before?: SavedTransform;
+    after?: SavedTransform;
+}
+
+const sameTransform = (a?: SavedTransform, b?: SavedTransform) =>
+    !!a && !!b && [...a.position, ...a.rotation, ...a.scale].every((v, i) => Math.abs(v - [...b.position, ...b.rotation, ...b.scale][i]) < 1e-9);
+
 const isVec3 = (v: unknown): v is [number, number, number] =>
     Array.isArray(v) && v.length === 3 && v.every(n => typeof n === 'number' && Number.isFinite(n));
 
@@ -127,6 +137,17 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     const [showInfo, setShowInfo] = useState(true);
     const [showWholeModelBoxes, setShowWholeModelBoxes] = useState(false); // Whole Boxes off by default
     const [transformMode, setTransformMode] = useState<'translate' | 'rotate' | 'scale'>('translate');
+    // Edit history (Undo / Redo) of placements set by hand
+    const undoStackRef = useRef<EditStep[]>([]);
+    const redoStackRef = useRef<EditStep[]>([]);
+    const [historySize, setHistorySize] = useState({ undo: 0, redo: 0 });
+    const updateHistorySize = () => setHistorySize({ undo: undoStackRef.current.length, redo: redoStackRef.current.length });
+    // Placement of the model being dragged, when the drag started (undefined = automatic)
+    const dragStartRef = useRef<{ modelId: string; before?: SavedTransform } | null>(null);
+    // Scale: one handle scales all axes by the same factor (keeps the model's proportions)
+    const [uniformScale, setUniformScale] = useState(true);
+    const uniformScaleRef = useRef(true);
+    uniformScaleRef.current = uniformScale;
     const [selectedModelIndex, setSelectedModelIndex] = useState<number>(-1);
     const [editMode, setEditMode] = useState(false); // When true, clicking empty space won't deselect
 
@@ -177,6 +198,58 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     // Called from event handlers of the scene, which outlive a render: always use the latest
     const reportLayoutRef = useRef<() => void>(() => {});
     reportLayoutRef.current = () => onLayoutChange?.(currentLayout());
+
+    /** Record an edit (a new edit clears the redo history) */
+    const pushStepRef = useRef<(step: EditStep) => void>(() => {});
+    pushStepRef.current = (step) => {
+        undoStackRef.current.push(step);
+        if (undoStackRef.current.length > 100) undoStackRef.current.shift();
+        redoStackRef.current = [];
+        updateHistorySize();
+    };
+
+    /** Put a model at a placement (undefined = its automatic placement) */
+    const placeModel = (modelId: string, t?: SavedTransform) => {
+        const container = meshContainersRef.current.find(c => c.userData.modelId === modelId);
+        if (t) layoutRef.current.set(modelId, t);
+        else layoutRef.current.delete(modelId);
+        const target = t ?? container?.userData.autoTransform;
+        if (container && target) applyTransform(container, target);
+    };
+
+    const undoRef = useRef<() => void>(() => {});
+    undoRef.current = () => {
+        const step = undoStackRef.current.pop();
+        if (!step) return;
+        placeModel(step.modelId, step.before);
+        redoStackRef.current.push(step);
+        updateHistorySize();
+        reportLayoutRef.current();
+    };
+    const redoRef = useRef<() => void>(() => {});
+    redoRef.current = () => {
+        const step = redoStackRef.current.pop();
+        if (!step) return;
+        placeModel(step.modelId, step.after);
+        undoStackRef.current.push(step);
+        updateHistorySize();
+        reportLayoutRef.current();
+    };
+
+    // Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) in edit mode; Cmd on macOS
+    useEffect(() => {
+        if (!editMode) return;
+        const onKey = (e: KeyboardEvent) => {
+            const target = e.target as HTMLElement | null;
+            if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+            if (!(e.ctrlKey || e.metaKey)) return;
+            const key = e.key.toLowerCase();
+            if (key === 'z' && !e.shiftKey) { e.preventDefault(); undoRef.current(); }
+            else if (key === 'y' || (key === 'z' && e.shiftKey)) { e.preventDefault(); redoRef.current(); }
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [editMode]);
 
     // Store references for dynamic updates
     const sceneRef = useRef<{
@@ -380,7 +453,9 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 return model ? [{ id: model.id, label: model.label, box_2d: model.box_2d, ...transformOf(container) }] : [];
             }),
         };
-        download(new Blob([JSON.stringify(layout, null, 1)], { type: 'application/json' }), `${fileBase()}_layout_${fileStamp()}.json`);
+        // layout-edited: some models were placed by hand (or by a loaded layout)
+        const kind = layoutRef.current.size > 0 ? 'layout-edited' : 'layout';
+        download(new Blob([JSON.stringify(layout, null, 1)], { type: 'application/json' }), `${fileBase()}_${kind}_${fileStamp()}.json`);
     };
 
     /** Export the models as placed in the scene as one GLB file (for other 3D software; large) */
@@ -442,6 +517,10 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             return;
         }
         layoutRef.current = next;
+        // A loaded layout replaces all placements; edits before it cannot be undone one by one
+        undoStackRef.current = [];
+        redoStackRef.current = [];
+        updateHistorySize();
         transformControlsRef.current?.detach();
         setSelectedModelIndex(-1);
         if (layout.camera && isVec3(layout.camera.position) && isVec3(layout.camera.target) && typeof layout.camera.fov === 'number') {
@@ -651,14 +730,41 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 // Remember the placement set by hand, so that it survives scene rebuilds and is saved with Save
                 const edited = transformControls.object;
                 if (edited?.userData.modelId) {
-                    layoutRef.current.set(edited.userData.modelId, transformOf(edited));
-                    reportLayoutRef.current();
+                    const after = transformOf(edited);
+                    const start = dragStartRef.current;
+                    const before = start?.modelId === edited.userData.modelId ? start.before : undefined;
+                    const unchanged = sameTransform(before ?? edited.userData.autoTransform, after);
+                    if (!unchanged) {
+                        layoutRef.current.set(edited.userData.modelId, after);
+                        pushStepRef.current({ modelId: edited.userData.modelId, before, after });
+                        reportLayoutRef.current();
+                    }
                 }
+                dragStartRef.current = null;
                 // Dragging ended - keep isDraggingRef true for a short time to block click events
                 setTimeout(() => {
                     isDraggingRef.current = false;
                 }, 200);
             }
+        });
+        // Uniform scale: dragging the handle of one axis scales all three axes by the
+        // same factor, relative to the scale when the drag started
+        let scaleAtDragStart: THREE.Vector3 | null = null;
+        transformControls.addEventListener('mouseDown', () => {
+            const obj = transformControls.object;
+            scaleAtDragStart = obj ? obj.scale.clone() : null;
+            // For Undo: the placement before this drag (a manual one, or none = automatic)
+            const id = obj?.userData.modelId as string | undefined;
+            dragStartRef.current = id ? { modelId: id, before: layoutRef.current.get(id) } : null;
+        });
+        transformControls.addEventListener('objectChange', () => {
+            const obj = transformControls.object;
+            const axis = transformControls.axis;
+            if (!uniformScaleRef.current || transformControls.getMode() !== 'scale' || !obj || !axis || !scaleAtDragStart) return;
+            const c = axis.includes('X') ? 'x' : axis.includes('Y') ? 'y' : 'z';
+            if (Math.abs(scaleAtDragStart[c]) < 1e-9) return;
+            const factor = obj.scale[c] / scaleAtDragStart[c];
+            obj.scale.copy(scaleAtDragStart).multiplyScalar(factor);
         });
         // Use getHelper() to get the gizmo object that can be added to scene
         // This fixes the issue with multiple Three.js instances
@@ -1443,6 +1549,36 @@ transformControlsRef.current.attach(meshContainer);
                                 >
                                     Scale
                                 </button>
+                                <button
+                                    onClick={() => undoRef.current()}
+                                    disabled={historySize.undo === 0}
+                                    className="px-2 py-1 text-xs rounded bg-slate-700 text-slate-300 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                                    title="Undo the last move, rotation, scale or reset (Ctrl+Z)"
+                                >
+                                    ↶ Undo
+                                </button>
+                                <button
+                                    onClick={() => redoRef.current()}
+                                    disabled={historySize.redo === 0}
+                                    className="px-2 py-1 text-xs rounded bg-slate-700 text-slate-300 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                                    title="Redo (Ctrl+Y or Ctrl+Shift+Z)"
+                                >
+                                    ↷ Redo
+                                </button>
+                                {transformMode === 'scale' && (
+                                    <label
+                                        className="flex items-center gap-1 text-xs text-slate-300 cursor-pointer"
+                                        title="On: any scale handle scales all axes by the same factor (keeps the proportions). Off: each handle scales only its own axis."
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            checked={uniformScale}
+                                            onChange={(e) => setUniformScale(e.target.checked)}
+                                            className="w-3 h-3 rounded border-slate-600 text-purple-500 bg-slate-700"
+                                        />
+                                        Uniform
+                                    </label>
+                                )}
                                 <span className="text-slate-600">|</span>
                             </>
                         )}
@@ -1476,8 +1612,11 @@ transformControlsRef.current.attach(meshContainer);
                                 onClick={() => {
                                     const meshContainer = meshContainersRef.current[selectedModelIndex];
                                     if (!meshContainer) return;
+                                    const modelId = meshContainer.userData.modelId as string;
+                                    const before = layoutRef.current.get(modelId);
                                     applyTransform(meshContainer, meshContainer.userData.autoTransform);
-                                    layoutRef.current.delete(meshContainer.userData.modelId);
+                                    layoutRef.current.delete(modelId);
+                                    if (before) pushStepRef.current({ modelId, before, after: undefined });
                                     reportLayoutRef.current();
                                 }}
                                 className="px-2 py-1 text-xs rounded bg-orange-600 text-white hover:bg-orange-500"
