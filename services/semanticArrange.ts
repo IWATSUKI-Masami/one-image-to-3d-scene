@@ -499,7 +499,10 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
     });
 
     let rounds = 0, nudged = false;
-    for (let turn = 0; turn < maxRounds + 3; turn++) {
+    // Turns: one per round, a few for finishing and refused rounds, and one more for each
+    // request to continue after an answer without a tool call (those do not use up rounds)
+    let nudges = 0;
+    for (let turn = 0; turn < maxRounds + 3 + nudges; turn++) {
         onProgress?.(rounds === 0 ? `${name} is looking at the photo and the scene…` : `${name} is checking round ${rounds}…`);
         const t0 = now(), startMs = Date.now() - startedAt;
         const { texts, calls, usage, model: answeredBy } = await chat.next();
@@ -512,6 +515,7 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
             // request); a second such answer in a row ends the run
             if (!nudged) {
                 nudged = true;
+                nudges++;
                 texts.forEach(t => onProgress?.(t));
                 onProgress?.(`${name} answered without a tool call; asking it to continue…`);
                 chat.addText('You answered without calling a tool. Check the latest renderings, object list and warnings: call update_placements for another round, or finish with a summary if the scene matches the photo.');
@@ -574,5 +578,5 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
         }
         chat.addToolResults(results);
     }
-    return { rounds, summary: 'Stopped after the maximum number of rounds.', ...end() };
+    return { rounds, summary: rounds >= maxRounds ? 'Stopped after the maximum number of rounds.' : 'Stopped: the model did not finish within the allowed number of turns.', ...end() };
 };
