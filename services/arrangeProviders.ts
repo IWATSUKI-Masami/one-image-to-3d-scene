@@ -67,6 +67,15 @@ export interface ChatOptions {
     signal?: AbortSignal;
 }
 
+/** Longest wait for one API call; a call that hangs (seen with Gemini) then fails instead of waiting forever */
+export const ARRANGE_CALL_TIMEOUT_MS = 5 * 60 * 1000;
+
+/** The run's signal (Cancel) combined with the per-call timeout */
+const callSignal = (signal?: AbortSignal): AbortSignal => {
+    const timeout = AbortSignal.timeout(ARRANGE_CALL_TIMEOUT_MS);
+    return signal ? AbortSignal.any([signal, timeout]) : timeout;
+};
+
 // ---------------------------------------------------------------------------
 // Claude (Anthropic Messages API)
 // ---------------------------------------------------------------------------
@@ -97,7 +106,7 @@ const claudeChat = (o: ChatOptions): ArrangeChat => {
                 messages,
                 output_config: { effort: 'high' },
                 ...(useFallbacks ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const } : {}),
-            }, { signal: o.signal });
+            }, { signal: callSignal(o.signal) });
             if (response.stop_reason === 'refusal') {
                 throw new Error(`Claude declined to arrange the scene${response.stop_details?.explanation ? `: ${response.stop_details.explanation}` : ''}.`);
             }
@@ -161,7 +170,7 @@ const openaiChat = (o: ChatOptions): ArrangeChat => {
                 input,
                 tools,
                 reasoning: { effort: 'high' },
-            }, { signal: o.signal });
+            }, { signal: callSignal(o.signal) });
             if (response.status === 'incomplete') {
                 throw new Error(`OpenAI's answer was incomplete (${response.incomplete_details?.reason ?? 'unknown reason'}).`);
             }
@@ -216,6 +225,9 @@ const openaiChat = (o: ChatOptions): ArrangeChat => {
 const geminiParts = (blocks: Block[]): Part[] =>
     blocks.map(b => b.type === 'text' ? { text: b.text } : { inlineData: { mimeType: 'image/jpeg', data: b.base64 } });
 
+/** Output limit per Gemini call (thinking included); its longest useful answers were about 21000 tokens */
+const GEMINI_MAX_OUTPUT_TOKENS = 32768;
+
 const geminiChat = (o: ChatOptions): ArrangeChat => {
     const ai = new GoogleGenAI({ apiKey: o.apiKey, apiVersion: 'v1beta' });
     const contents: Content[] = [{ role: 'user', parts: geminiParts(o.first) }];
@@ -228,10 +240,28 @@ const geminiChat = (o: ChatOptions): ArrangeChat => {
                 config: {
                     systemInstruction: o.system,
                     tools: [{ functionDeclarations: o.tools.map(t => ({ name: t.name, description: t.description, parametersJsonSchema: t.schema })) }],
-                    abortSignal: o.signal,
+                    abortSignal: callSignal(o.signal),
+                    // Gemini sometimes falls into repeating the same text until the output
+                    // limit (65536 tokens, over 5 minutes); a lower limit ends that sooner
+                    maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
                 },
             });
             const candidate = response.candidates?.[0];
+            const u0 = response.usageMetadata;
+            if (String(candidate?.finishReason) === 'MAX_TOKENS' && !candidate?.content?.parts?.some(p => p.functionCall)) {
+                // Cut off without a tool call (usually repeated text): keep only a short note
+                // in the conversation, so that the next request starts clean
+                contents.push({ role: 'model', parts: [{ text: '(My previous answer was cut off at the output limit.)' }] });
+                return {
+                    texts: [`(answer cut off at the output limit of ${GEMINI_MAX_OUTPUT_TOKENS} tokens, without a tool call)`], calls: [], model: response.modelVersion,
+                    usage: {
+                        input: u0?.promptTokenCount ?? 0,
+                        output: (u0?.candidatesTokenCount ?? 0) + (u0?.thoughtsTokenCount ?? 0),
+                        reasoning: u0?.thoughtsTokenCount ?? 0,
+                        cacheRead: u0?.cachedContentTokenCount ?? 0,
+                    },
+                };
+            }
             if (!candidate?.content) {
                 const reason = candidate?.finishReason ?? response.promptFeedback?.blockReason ?? 'no answer';
                 throw new Error(`Gemini returned no answer (${reason}).`);

@@ -12,7 +12,7 @@ import { ArrangeRun, DetectedObject, Model3D, ReferenceAnalysis, SceneLayout } f
 import type { SceneAnalysis } from '../services/sceneAnalysis';
 import { APP_VERSION, ARRANGE_EFFORT, ARRANGE_PROMPT_VERSION, ArrangeObject, ArrangeRecord, ArrangeScene, ArrangeView, PlacementEdit, arrangeScene } from '../services/semanticArrange';
 import { buildArrangeImageSheet, buildArrangeReport } from '../services/arrangeReport';
-import { ARRANGE_PROVIDER_FILE_NAMES, ARRANGE_PROVIDER_LABELS, ArrangeProvider, sceneEditState } from '../services/arrangeProviders';
+import { ARRANGE_CALL_TIMEOUT_MS, ARRANGE_PROVIDER_FILE_NAMES, ARRANGE_PROVIDER_LABELS, ArrangeProvider, sceneEditState } from '../services/arrangeProviders';
 import { Box2D, DepthRange, ObjectMask, depthFromBrightness, loadObjectMask, medianDepthInBox, sameBox } from './depthSampling';
 
 const boxKey = (box: Box2D): string => box.map(v => v.toFixed(6)).join(',');
@@ -735,7 +735,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             log(`Done (${result.rounds} round${result.rounds === 1 ? '' : 's'}). ${result.summary}${iou}\nPhysical issues (floating, sunk, inside another model): ${result.issuesBefore} → ${result.issuesAfter}${result.relationIssuesBefore !== undefined ? `\nRelation issues (scene analysis): ${result.relationIssuesBefore} → ${result.relationIssuesAfter}` : ''}${result.refRelationIssuesBefore !== undefined ? `\nRelation issues (reference analysis): ${result.refRelationIssuesBefore} → ${result.refRelationIssuesAfter}` : ''}`);
         } catch (e: any) {
             outcome = controller.signal.aborted ? 'cancelled' : 'failed';
-            log(controller.signal.aborted ? 'Cancelled.' : `Failed: ${e?.message || e}`);
+            log(controller.signal.aborted ? 'Cancelled.' : `Failed: ${e?.name === 'TimeoutError' || /timed? ?out/i.test(String(e?.message)) ? `an API call took longer than ${ARRANGE_CALL_TIMEOUT_MS / 60000} minutes (${e?.message || e})` : e?.message || e}`);
             console.error('Arrange failed:', e);
         } finally {
             window.clearInterval(timer);
@@ -750,9 +750,22 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             // Report: settings, times, tokens and cost, rounds with their edits and metrics,
             // photo match and warnings per object, and the full log (also for a failed run)
             const endedAt = Date.now();
+            // A failed or cancelled run has no result: take the objects before from the record
+            // and measure the scene as it is now, so the CSV still has a row per object
+            let objectsBefore = result?.objectsBefore, objectsAfter = result?.objectsAfter;
+            if (!result && record.initial) {
+                try {
+                    objectsAfter = arrangeSceneApi.objects();
+                    objectsBefore = record.initial.objects.map(o => ({
+                        id: o.id, label: o.label, center: [0, 0, 0], size: [0, 0, 0], rotationYDeg: 0,
+                        ...(o.iou !== undefined ? { photoMatch: { iou: o.iou, areaRatio: o.areaRatio ?? NaN, offset: [NaN, NaN] as [number, number] } } : {}),
+                        warnings: o.warnings, relationWarnings: o.relationWarnings, proportionChange: o.proportionChange,
+                    }));
+                } catch { /* keep the report without per-object rows */ }
+            }
             const built = buildArrangeReport({
                 record, sceneName, outcome, endedAt, summary: result?.summary,
-                objectsBefore: result?.objectsBefore, objectsAfter: result?.objectsAfter, log: fullLog,
+                objectsBefore, objectsAfter, log: fullLog,
             });
             const report = built.text;
             setArrangeReport({ text: report, csv: built.objectsCsv, roundsCsv: built.roundsCsv, record, name: `arrange-${ARRANGE_PROVIDER_FILE_NAMES[arrange.provider]}` });
