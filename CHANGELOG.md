@@ -44,6 +44,7 @@ User interface and documentation:
 - `CITATION.cff` with the paper as the preferred citation, so GitHub shows **Cite this repository** (APA and BibTeX).
 - A second sample photo, `samples/cafe-couple.webp` (generated with Gemini), and its automatic result, seen from the photo's camera, at the top of the README (`docs/images/scene-hero.webp`). The walkthrough still uses the paper's sample.
 - A demo near the top of the README: an animation of the paper's sample turned around in the app (`docs/images/demo-rotate.gif`, automatic placement) and videos of the whole process (`docs/videos/demo.mp4`, 33 s, English captions; `docs/videos/demo-ja.mp4`, 24 s, square, Japanese captions).
+- The two test photos of the paper, `samples/office-desk.webp` (a desk without people; objects cut off at the border or hidden behind the desk, a laptop seen from the back of its screen) and `samples/woman-at-desk.webp` (a person seen from the side at an L-shaped desk), described in the README, so that all photos of the paper can be tried.
 - A link to the article on Qiita (in Japanese) that explains the method and its implementation, near the top of the README.
 - A new image of the paper's sample edited by hand (table and chairs moved and scaled; `docs/images/scene-edited.webp`) in the README walkthrough.
 
