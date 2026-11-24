@@ -66,6 +66,8 @@ const App: React.FC = () => {
 
   // Depth Map State
   const [depthMapUrl, setDepthMapUrl] = useState<string | null>(null);
+  // Delete Scene closes the 3D scene but keeps the depth map; Generate 3D Scene opens it again
+  const [sceneOpen, setSceneOpen] = useState(true);
   const [isGeneratingDepth, setIsGeneratingDepth] = useState(false);
 
   // 3D generation settings
@@ -363,6 +365,7 @@ const App: React.FC = () => {
     setCompletedImages([]);
     setModels3D([]);
     setDepthMapUrl(null);
+    setSceneOpen(true);
     setError(null);
 
     setIsAnalyzing(true);
@@ -401,6 +404,7 @@ const App: React.FC = () => {
   const handleGenerateDepthMap = async () => {
     if (!previewUrl) return;
 
+    setSceneOpen(true);
     // Skip if depth map already exists
     if (depthMapUrl) {
       setActiveTab('scene');
@@ -603,6 +607,7 @@ const App: React.FC = () => {
     setCompletedImages([]);
     setModels3D([]);
     setDepthMapUrl(null);
+    setSceneOpen(true);
     setError(null);
 
     setActiveTab('original');
@@ -1093,6 +1098,7 @@ const App: React.FC = () => {
     setCompletedImages([]);
     setModels3D([]);
     setDepthMapUrl(null);
+    setSceneOpen(true);
     setError(null);
 
     setActiveTab('original');
@@ -1253,6 +1259,7 @@ const App: React.FC = () => {
 
       if (archive.depthMapUrl) {
         setDepthMapUrl(await dataUrlToBlobUrl(archive.depthMapUrl));
+        setSceneOpen(true);
       }
 
       // Reset errors
@@ -1937,7 +1944,7 @@ const App: React.FC = () => {
                       </button>
 
                       {/* 3D Scene Tab - Available when depth map exists */}
-                      {previewUrl && depthMapUrl && (
+                      {previewUrl && depthMapUrl && sceneOpen && (
                         <button
                           onClick={() => setActiveTab('scene')}
                           className={`pb-2 text-sm font-medium transition-colors flex items-center gap-2 whitespace-nowrap ${activeTab === 'scene'
@@ -2268,7 +2275,7 @@ const App: React.FC = () => {
 
                     {/* 3D SCENE TAB - Using Depth-Based Positioning */}
                     {/* Keep mounted to preserve state, toggle visibility */}
-                    {previewUrl && depthMapUrl && (
+                    {previewUrl && depthMapUrl && sceneOpen && (
                       <div style={{ display: activeTab === 'scene' ? 'block' : 'none' }} className="bg-white rounded-xl border border-slate-200 p-6">
                         <div className="flex items-center justify-between mb-4">
                           <h3 className="font-semibold text-slate-700 flex items-center gap-2">
@@ -2277,10 +2284,12 @@ const App: React.FC = () => {
                           <div className="flex items-center gap-2">
                           <button
                             onClick={() => {
-                              if (depthMapUrl) URL.revokeObjectURL(depthMapUrl);
-                              setDepthMapUrl(null);
+                              // The depth map is kept (it costs a Space call and is shown on the left);
+                              // Generate 3D Scene builds the scene again from it
+                              setSceneOpen(false);
                               setActiveTab('3d');
                             }}
+                            title="Close the 3D scene (the depth map is kept). Generate 3D Scene in the 3D Models tab builds it again."
                             className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-red-600 border border-red-200 bg-white hover:bg-red-50 transition-colors"
                           >
                             <Trash2 size={14} />
