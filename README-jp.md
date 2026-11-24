@@ -19,7 +19,7 @@
   </tr>
 </table>
 
-サンプル画像はどちらも生成AIで作成したもので、アプリを試す際にお使いください。上の [`samples/cafe-couple.webp`](samples/cafe-couple.webp) は Gemini で作成しました。[`samples/two-people-at-table.webp`](samples/two-people-at-table.webp) は論文で入力として使ったもので、下の「処理の流れ（サンプル画像）」でも使っています。
+サンプル画像はどちらも生成AIで作成したもので、アプリを試す際にお使いください。上の [`samples/cafe-couple.webp`](samples/cafe-couple.webp) は Gemini で作成しました。[`samples/table-talk.webp`](samples/table-talk.webp) は論文で入力として使ったもので、下の「処理の流れ（サンプル画像）」でも使っています。
 
 上の3Dシーンは自動で配置した結果です。配置は、3D Scene タブの編集モード（**Edit ON**）で手で調整することもできます（下の「手で編集した結果」を参照）。
 
