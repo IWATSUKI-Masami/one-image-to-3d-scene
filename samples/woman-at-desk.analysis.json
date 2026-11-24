@@ -1,0 +1,181 @@
+{
+  "format": "one-image-to-3d-scene/reference-analysis",
+  "version": 1,
+  "photo": "woman-at-desk.webp",
+  "checked_by": "author",
+  "checked_at": "2026-11-24",
+  "scene": "A woman seen from the side sits on a black office chair at the corner of an L-shaped wooden desk, typing on a laptop; a mug and a potted plant stand on the desk, a floor lamp at the right and a black bookshelf at the left.",
+  "scale_reference": {
+    "ids": [
+      "o1"
+    ],
+    "reason": "seated adult"
+  },
+  "objects": [
+    {
+      "id": "o1",
+      "label": "woman in a gray cardigan",
+      "match": {
+        "label_prefix": "Woman In Gra"
+      },
+      "height_m": 1.25,
+      "width_m": 0.55,
+      "pose": "seated, typing, facing the laptop"
+    },
+    {
+      "id": "o2",
+      "label": "black office chair",
+      "match": {
+        "label_prefix": "Black Office"
+      },
+      "height_m": 0.9,
+      "width_m": 0.6,
+      "pose": "office chair under the woman"
+    },
+    {
+      "id": "o3",
+      "match": {
+        "label_prefix": "Wooden De",
+        "description_contains": [
+          "l-shaped"
+        ]
+      },
+      "height_m": 0.75,
+      "width_m": 1.5,
+      "pose": "L-shaped desk"
+    },
+    {
+      "id": "o4",
+      "label": "open laptop",
+      "match": {
+        "label_prefix": "Open Laptop"
+      },
+      "height_m": 0.22,
+      "width_m": 0.33,
+      "pose": "open laptop"
+    },
+    {
+      "id": "o5",
+      "label": "ceramic mug",
+      "match": {
+        "label_prefix": "Ceramic Mug"
+      },
+      "height_m": 0.1,
+      "width_m": 0.12,
+      "pose": "mug, upright"
+    },
+    {
+      "id": "o6",
+      "label": "potted plant",
+      "match": {
+        "label_prefix": "Potted Plant"
+      },
+      "height_m": 0.25,
+      "width_m": 0.2,
+      "pose": "potted plant, upright"
+    },
+    {
+      "id": "o7",
+      "match": {
+        "label_prefix": "Floor Lamp"
+      },
+      "height_m": 1.6,
+      "width_m": 0.4,
+      "pose": "floor lamp at the right"
+    },
+    {
+      "id": "o8",
+      "label": "black shelving unit",
+      "match": {
+        "label_prefix": "Black Shelvin"
+      },
+      "height_m": 1.8,
+      "width_m": 0.4,
+      "pose": "tall bookshelf at the left"
+    }
+  ],
+  "relations": [
+    {
+      "subject": "o4",
+      "relation": "on",
+      "object": "o3",
+      "contact_visible": true
+    },
+    {
+      "subject": "o5",
+      "relation": "on",
+      "object": "o3",
+      "contact_visible": true
+    },
+    {
+      "subject": "o6",
+      "relation": "on",
+      "object": "o3",
+      "contact_visible": true
+    },
+    {
+      "subject": "o3",
+      "relation": "on",
+      "object": "floor",
+      "contact_visible": false
+    },
+    {
+      "subject": "o2",
+      "relation": "on",
+      "object": "floor",
+      "contact_visible": false
+    },
+    {
+      "subject": "o7",
+      "relation": "on",
+      "object": "floor",
+      "contact_visible": false
+    },
+    {
+      "subject": "o8",
+      "relation": "on",
+      "object": "floor",
+      "contact_visible": false
+    },
+    {
+      "subject": "o1",
+      "relation": "sits_on",
+      "object": "o2",
+      "contact_visible": false
+    },
+    {
+      "subject": "o1",
+      "relation": "sits_at",
+      "object": "o3",
+      "contact_visible": false
+    },
+    {
+      "subject": "o1",
+      "relation": "faces",
+      "object": "o4",
+      "contact_visible": false
+    },
+    {
+      "subject": "o3",
+      "relation": "in_front_of",
+      "object": "o1",
+      "contact_visible": false
+    },
+    {
+      "subject": "o4",
+      "relation": "in_front_of",
+      "object": "o5",
+      "contact_visible": false
+    }
+  ],
+  "notes": "The desk is L-shaped and the woman sits in the corner of the L. The legs of the desk, chair, lamp and bookshelf are below the photo's lower edge. The mug's contact with the desk is barely visible. Objects are matched by the start of their label in the project (and words of the description).",
+  "part_relations": [
+    {
+      "subject": "o1",
+      "part": "seat position",
+      "relation": "at corner",
+      "object": "o3",
+      "object_part": "inner corner of the L"
+    }
+  ]
+}

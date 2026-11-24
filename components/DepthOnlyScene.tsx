@@ -796,10 +796,20 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             if (refA) {
                 const clean = (t: string) => t.replace(/\s*\(Completed\)\s*$/i, '').trim().toLowerCase();
                 const idMap = new Map<string, string>();
+                // Objects are matched by their exact label, else by a label prefix (e.g. a name cut
+                // off on a card) together with words of the description, else by id
+                const used = new Set<number>();
                 for (const o of refA.objects) {
-                    const byLabel = o.label ? entries.findIndex(e => clean(e.model.label) === clean(o.label!)) : -1;
-                    if (byLabel >= 0) idMap.set(o.id, `o${byLabel + 1}`);
-                    else if (byShort.has(o.id)) idMap.set(o.id, o.id);
+                    const m = o.match;
+                    let idx = o.label ? entries.findIndex((e, i) => !used.has(i) && clean(e.model.label) === clean(o.label!)) : -1;
+                    if (idx < 0 && m?.label_prefix) {
+                        const prefix = m.label_prefix.toLowerCase();
+                        const words = (m.description_contains ?? []).map(w => w.toLowerCase());
+                        idx = entries.findIndex((e, i) => !used.has(i) && clean(e.model.label).startsWith(prefix)
+                            && words.every(w => (describe(e.model) ?? '').toLowerCase().includes(w) || clean(e.model.label).includes(w)));
+                    }
+                    if (idx >= 0) { idMap.set(o.id, `o${idx + 1}`); used.add(idx); }
+                    else if (byShort.has(o.id) && !o.match) idMap.set(o.id, o.id);
                 }
                 const mapId = (id: string) => id === 'floor' || id === 'none' ? id : idMap.get(id);
                 reference = {

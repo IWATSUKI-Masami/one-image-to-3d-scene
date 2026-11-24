@@ -156,7 +156,7 @@ export interface ReferenceAnalysis {
   format?: string;
   scene: string;
   scale_reference: { ids: string[]; reason: string };
-  objects: { id: string; label?: string; height_m: number; width_m: number; pose: string }[];
+  objects: { id: string; label?: string; match?: { label_prefix: string; description_contains?: string[] }; height_m: number; width_m: number; pose: string }[];
   relations: { subject: string; relation: 'on' | 'sits_on' | 'sits_at' | 'faces' | 'in_front_of'; object: string; contact_visible: boolean; certain?: boolean; note?: string }[];
   notes: string;
   /** Contacts of body parts (not checked) */

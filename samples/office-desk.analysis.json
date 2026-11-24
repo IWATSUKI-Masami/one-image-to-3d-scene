@@ -1,0 +1,150 @@
+{
+  "format": "one-image-to-3d-scene/reference-analysis",
+  "version": 1,
+  "photo": "office-desk.webp",
+  "checked_by": "author",
+  "checked_at": "2026-11-24",
+  "scene": "An office desk in front of a plain wall, without people: a laptop, a desk lamp and a potted plant on the desk, an office chair behind it, a wooden chair at the right edge and a wastebasket at the left.",
+  "scale_reference": {
+    "ids": [
+      "o1",
+      "o7"
+    ],
+    "reason": "standard desk height and office chair size"
+  },
+  "objects": [
+    {
+      "id": "o1",
+      "label": "wooden office desk",
+      "match": {
+        "label_prefix": "Wooden Offic"
+      },
+      "height_m": 0.75,
+      "width_m": 1.2,
+      "pose": "desk, front panel facing the camera"
+    },
+    {
+      "id": "o2",
+      "label": "closed silver laptop",
+      "match": {
+        "label_prefix": "Closed Silver"
+      },
+      "height_m": 0.22,
+      "width_m": 0.33,
+      "pose": "open laptop seen from the back of its screen"
+    },
+    {
+      "id": "o3",
+      "label": "white desk lamp",
+      "match": {
+        "label_prefix": "White Desk L"
+      },
+      "height_m": 0.45,
+      "width_m": 0.25,
+      "pose": "desk lamp, upright"
+    },
+    {
+      "id": "o4",
+      "label": "potted green plant",
+      "match": {
+        "label_prefix": "Potted Green"
+      },
+      "height_m": 0.3,
+      "width_m": 0.2,
+      "pose": "potted plant, upright"
+    },
+    {
+      "id": "o5",
+      "label": "black office chair",
+      "match": {
+        "label_prefix": "Black Office"
+      },
+      "height_m": 1.2,
+      "width_m": 0.65,
+      "pose": "office chair behind the desk, facing the desk and the camera"
+    },
+    {
+      "id": "o6",
+      "match": {
+        "label_prefix": "Wooden Side"
+      },
+      "height_m": 0.9,
+      "width_m": 0.45,
+      "pose": "wooden chair at the right edge, cut off"
+    },
+    {
+      "id": "o7",
+      "label": "mesh wastebasket",
+      "match": {
+        "label_prefix": "Mesh Wasteb"
+      },
+      "height_m": 0.3,
+      "width_m": 0.28,
+      "pose": "wastebasket on the floor"
+    }
+  ],
+  "relations": [
+    {
+      "subject": "o2",
+      "relation": "on",
+      "object": "o1",
+      "contact_visible": true
+    },
+    {
+      "subject": "o3",
+      "relation": "on",
+      "object": "o1",
+      "contact_visible": true
+    },
+    {
+      "subject": "o4",
+      "relation": "on",
+      "object": "o1",
+      "contact_visible": true
+    },
+    {
+      "subject": "o1",
+      "relation": "on",
+      "object": "floor",
+      "contact_visible": false
+    },
+    {
+      "subject": "o5",
+      "relation": "on",
+      "object": "floor",
+      "contact_visible": true
+    },
+    {
+      "subject": "o6",
+      "relation": "on",
+      "object": "floor",
+      "contact_visible": true
+    },
+    {
+      "subject": "o7",
+      "relation": "on",
+      "object": "floor",
+      "contact_visible": true
+    },
+    {
+      "subject": "o1",
+      "relation": "in_front_of",
+      "object": "o5",
+      "contact_visible": false
+    },
+    {
+      "subject": "o2",
+      "relation": "in_front_of",
+      "object": "o5",
+      "contact_visible": false
+    },
+    {
+      "subject": "o5",
+      "relation": "faces",
+      "object": "o1",
+      "contact_visible": false
+    }
+  ],
+  "notes": "The laptop is open, with the back of its screen toward the camera (the generated model is a closed laptop, so its height differs). The desk's contact with the floor is not visible. Objects are matched by the start of their label in the project (and words of the description).",
+  "part_relations": []
+}
