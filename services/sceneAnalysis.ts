@@ -43,7 +43,14 @@ export interface RelationBox {
     size: [number, number, number];
     /** Oriented footprint (x, z); without it the axis-aligned box is used */
     footprint?: { center: [number, number]; half: [number, number]; yawDeg: number };
+    type?: 'person' | 'object';
+    /** Current turn about the vertical axis, and the one the front alignment found from the photo (degrees) */
+    rotationYDeg?: number;
+    alignedRotationYDeg?: number;
 }
+
+/** Turns further than this from the front alignment's orientation are reported */
+const ORIENTATION_TOLERANCE_DEG = 20;
 
 /** A point (x, z) in a box's footprint frame: offsets along its own axes, and its half extents */
 const local = (b: RelationBox, x: number, z: number) => {
@@ -215,6 +222,19 @@ export const checkRelations = (analysis: SceneAnalysis, boxes: RelationBox[], fl
         } else if (r.relation === 'in_front_of' && b) {
             if (Math.hypot(...a.center) > Math.hypot(...b.center) + tolerance) add(r.subject, `should be in front of ${r.object} (nearer to the camera) but is behind it`);
         }
+    }
+    // Orientation: a model turned away from the orientation the front alignment found in the
+    // photo (people: their facing; furniture with an elongated footprint, e.g. a table seen
+    // corner-on, modulo 180° since it looks the same turned around). Round or square objects
+    // look alike when turned, so they are not checked.
+    for (const b of boxes) {
+        if (b.rotationYDeg === undefined || b.alignedRotationYDeg === undefined) continue;
+        const elongated = b.footprint ? Math.max(...b.footprint.half) / Math.max(1e-6, Math.min(...b.footprint.half)) > 1.25 : false;
+        if (b.type !== 'person' && !elongated) continue;
+        const period = b.type === 'person' ? 360 : 180;
+        const d = ((b.rotationYDeg - b.alignedRotationYDeg) % period + period) % period;
+        const off = Math.min(d, period - d);
+        if (off > ORIENTATION_TOLERANCE_DEG) add(b.id, `is turned ${Math.round(off)}° away from its orientation in the photo (rotation_y_deg_from_photo ${Math.round(b.alignedRotationYDeg)})`);
     }
     if (upm) {
         for (const o of analysis.objects) {
