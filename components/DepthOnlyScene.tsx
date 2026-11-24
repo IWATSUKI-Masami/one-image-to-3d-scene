@@ -149,6 +149,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     // Arrange (Claude): render function set by the scene setup, progress log, cancel
     const arrangeRenderRef = useRef<((view: ArrangeView, labels: { text: string; center: THREE.Vector3 }[]) => string) | null>(null);
     const floorYRef = useRef(-1);
+    const gridRef = useRef<THREE.GridHelper | null>(null);
     const [arranging, setArranging] = useState(false);
     const [arrangeLog, setArrangeLog] = useState<string[]>([]);
     const arrangeAbortRef = useRef<AbortController | null>(null);
@@ -282,6 +283,12 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         const nameOf = (model: Model3D) => `${shortId.get(model.id)} ${model.label.replace(/\s*\(Completed\)\s*$/i, '')}`;
         const boxOf = (o: THREE.Object3D) => { o.updateMatrixWorld(true); return new THREE.Box3().setFromObject(o); };
         const before = new Map(entries.map(e => [e.model.id, layoutRef.current.get(e.model.id)]));
+        // Floor: the bottom of the point cloud is only the lower edge of the photo (often a
+        // table top or people's laps), so use the lowest model instead (completed people
+        // have their feet, furniture its legs)
+        const floorY = Math.min(...entries.map(e => boxOf(e.container).min.y));
+        floorYRef.current = floorY;
+        if (gridRef.current) gridRef.current.position.y = floorY;
 
         const arrangeScene: ArrangeScene = {
             objects: (): ArrangeObject[] => entries.map(({ model, container }) => {
@@ -298,7 +305,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     rotationYDeg: container.rotation.y * 180 / Math.PI,
                 };
             }),
-            floorY: () => floorYRef.current,
+            floorY: () => floorY,
             apply: (edits: PlacementEdit[]) => {
                 const problems: string[] = [];
                 const shiftCenterTo = (o: THREE.Object3D, target: THREE.Vector3) => {
@@ -311,6 +318,12 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     if (edit.scale !== undefined) {
                         const c = boxOf(o).getCenter(new THREE.Vector3());
                         o.scale.multiplyScalar(edit.scale);
+                        shiftCenterTo(o, c);
+                    }
+                    if (edit.scale_axes) {
+                        // Stretch along the model's own axes (e.g. a table generated too low)
+                        const c = boxOf(o).getCenter(new THREE.Vector3());
+                        o.scale.multiply(new THREE.Vector3(...edit.scale_axes));
                         shiftCenterTo(o, c);
                     }
                     if (edit.rotate_y_deg !== undefined) {
@@ -327,7 +340,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     if (edit.center) shiftCenterTo(o, new THREE.Vector3(...edit.center));
                     if (edit.rest_on !== undefined) {
                         let top: number | undefined;
-                        if (edit.rest_on === 'floor') top = floorYRef.current;
+                        if (edit.rest_on === 'floor') top = floorY;
                         else {
                             const support = byShort.get(edit.rest_on);
                             if (support && support !== entry) top = boxOf(support.container).max.y;
@@ -841,6 +854,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         gridHelper.position.y = -1; // Position below the scene
         scene.add(gridHelper);
         floorYRef.current = -1;
+        gridRef.current = gridHelper;
 
         // Bounding box group
         const boundingBoxGroup = new THREE.Group();

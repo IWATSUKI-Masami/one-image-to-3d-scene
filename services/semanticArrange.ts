@@ -35,6 +35,8 @@ export interface PlacementEdit {
     id: string;
     /** Multiply the size (uniform scale about the bounding-box center) */
     scale?: number;
+    /** Stretch along the model's own axes [x, y, z] (e.g. make a table taller) */
+    scale_axes?: [number, number, number];
     /** Turn about the vertical axis by this many degrees (positive = counterclockwise seen from above) */
     rotate_y_deg?: number;
     /** Move the center along the line of sight from the camera by this factor (keeps the object's place in the photo; scales it by the same factor) */
@@ -85,7 +87,7 @@ How the scene was built: every object in the photo was cut out, its hidden parts
 
 Conventions (world units are relative, not meters):
 - The photo's camera is at the origin and looks along -Z. +X is right, +Y is up. Objects farther away have more negative z.
-- The floor is the plane y = floorY (given in the object list).
+- The floor is the plane y = floorY (given in the object list). It is the bottom of the lowest model; the floor is usually not visible in the photo.
 - Each object is described by the center and size of its axis-aligned bounding box and its rotation about the vertical axis.
 - Images: "photo" is the original photo; "photo view" renders the scene from the photo's camera; "top view" renders it from above (up in the image = away from the camera, -Z; right = +X). Object names are drawn on the renderings.
 
@@ -93,7 +95,9 @@ Your task: make the scene physically and semantically consistent with the photo.
 - Keep every object where it is in the photo (its place in the photo view should stay close to the photo). To change an object's distance without changing its place in the photo, use along_ray, which moves it along the line of sight and scales it by the same factor.
 - Supports: objects standing on furniture rest on its top (cups and vases on a table: use rest_on with the table's id); furniture and standing people rest on the floor (rest_on "floor").
 - Seated people sit on their chairs: hips at the seat, feet on the floor, close to the table if they are at a table. rest_on uses the top of a bounding box, which for a chair is the backrest, so place seated people with center or move instead.
-- Relative sizes should be plausible (a cup next to a person's hand, a table that two seated people can use, a chair that fits a person).
+- Real-world sizes: decide how many world units make a meter from the people (an adult is about 1.65-1.75 m tall standing and about 1.3 m from the floor to the top of the head when seated on a chair), then make the other objects consistent: dining or cafe table top about 0.72-0.76 m above the floor, chair seat about 0.45 m, a coffee cup about 0.08-0.10 m tall, a small vase 0.15-0.25 m. Keep the objects' places in the photo; use along_ray to change size and distance together.
+- Seated people sit at chair height even when their chair is not in the scene (it may be hidden or missing): their feet on the floor, hips about 0.45 m up, the table top around the height of their lower chest or elbows. Never lower a seated person to the floor.
+- Generated models can have wrong proportions (e.g. a table that is too low or too thick); fix them with scale_axes (stretch along the model's own x, y, z) rather than by changing the whole object's size.
 - Orientation: people and chairs should face the way they face in the photo (e.g. two people talking face each other).
 - Avoid intersections, except where parts overlap in reality (legs under a table).
 - Do not change objects that are already right.
@@ -103,7 +107,7 @@ Work in rounds: call update_placements with the edits for one round (you can edi
 const TOOLS: Anthropic.Beta.BetaTool[] = [
     {
         name: 'update_placements',
-        description: 'Change the placement of one or more models. For each edit, the fields that are given are applied in this order: scale, rotate_y_deg, along_ray, move, center, rest_on. Returns the new object list and new renderings (photo view and top view).',
+        description: 'Change the placement of one or more models. For each edit, the fields that are given are applied in this order: scale, scale_axes, rotate_y_deg, along_ray, move, center, rest_on. Returns the new object list and new renderings (photo view and top view).',
         strict: true,
         input_schema: {
             type: 'object',
@@ -115,6 +119,7 @@ const TOOLS: Anthropic.Beta.BetaTool[] = [
                         properties: {
                             id: { type: 'string', description: 'Object id from the object list' },
                             scale: { type: 'number', description: 'Multiply the size by this factor (uniform, about the bounding-box center)' },
+                            scale_axes: { type: 'array', items: { type: 'number' }, description: 'Stretch along the model\'s own axes [sx, sy, sz] about the bounding-box center (e.g. [1, 1.4, 1] makes a table taller)' },
                             rotate_y_deg: { type: 'number', description: 'Turn about the vertical axis by this many degrees (positive = counterclockwise seen from above)' },
                             along_ray: { type: 'number', description: 'Move the center along the line of sight by this factor (>1 = farther); the size is scaled by the same factor, so the object keeps its place and size in the photo' },
                             move: { type: 'array', items: { type: 'number' }, description: 'Offset [dx, dy, dz] in world units' },
@@ -210,6 +215,10 @@ const validateEdits = (input: unknown): { edits: PlacementEdit[]; problems: stri
         if (e.rotate_y_deg !== undefined) {
             if (typeof e.rotate_y_deg === 'number' && Number.isFinite(e.rotate_y_deg)) edit.rotate_y_deg = e.rotate_y_deg;
             else problems.push(`${e.id}: rotate_y_deg must be a number`);
+        }
+        if (e.scale_axes !== undefined) {
+            if (isVec3(e.scale_axes) && (e.scale_axes as number[]).every(v => v > 0.1 && v < 10)) edit.scale_axes = e.scale_axes as [number, number, number];
+            else problems.push(`${e.id}: scale_axes must be [sx, sy, sz] with factors between 0.1 and 10`);
         }
         for (const k of ['move', 'center'] as const) {
             if (e[k] === undefined) continue;
