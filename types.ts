@@ -125,6 +125,8 @@ export interface ArrangeRun {
   /** Mean photo IoU before and after */
   photoIoUBefore?: number;
   photoIoUAfter?: number;
+  /** The run's report (settings, photo match per object before and after, and the log) as text */
+  report?: string;
 }
 
 /** Scene settings, camera and model placements (in a project: only the placements set by hand) */

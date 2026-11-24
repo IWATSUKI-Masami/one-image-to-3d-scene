@@ -9,7 +9,7 @@ import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { Spinner } from './Spinner';
 import { ArrangeRun, DetectedObject, Model3D, SceneLayout } from '../types';
 import { ArrangeObject, ArrangeScene, ArrangeView, PlacementEdit, arrangeScene } from '../services/semanticArrange';
-import { ARRANGE_PROVIDER_LABELS, ArrangeProvider, sceneEditState } from '../services/arrangeProviders';
+import { ARRANGE_PROVIDER_FILE_NAMES, ARRANGE_PROVIDER_LABELS, ArrangeProvider, sceneEditState } from '../services/arrangeProviders';
 import { Box2D, DepthRange, ObjectMask, depthFromBrightness, loadObjectMask, medianDepthInBox, sameBox } from './depthSampling';
 
 const boxKey = (box: Box2D): string => box.map(v => v.toFixed(6)).join(',');
@@ -190,9 +190,16 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     const floorYRef = useRef(-1);
     const gridRef = useRef<THREE.GridHelper | null>(null);
     const [arranging, setArranging] = useState(false);
-    const [arrangeLog, setArrangeLog] = useState<string[]>([]);
+    // The report of the last run saved with the project (if any) is available again after loading
+    const savedRun = initialLayout?.arrangeRuns?.[initialLayout.arrangeRuns.length - 1];
+    const [arrangeLog, setArrangeLog] = useState<string[]>(() => savedRun?.report ? savedRun.report.split('\n') : []);
+    // The panel can be closed and opened again (📋 Log); the log stays until the next run
+    const [showArrangeLog, setShowArrangeLog] = useState(false);
+    // Report of the last run (text) and its photo match per object (CSV), for saving
+    const [arrangeReport, setArrangeReport] = useState<{ text: string; csv?: string; name: string } | null>(() =>
+        savedRun?.report ? { text: savedRun.report, name: `arrange-${ARRANGE_PROVIDER_FILE_NAMES[savedRun.provider]}` } : null);
     // How the last Arrange run ended, and how long it has been running (seconds)
-    const [arrangeStatus, setArrangeStatus] = useState<'running' | 'done' | 'failed' | 'cancelled' | null>(null);
+    const [arrangeStatus, setArrangeStatus] = useState<'running' | 'done' | 'failed' | 'cancelled' | null>(savedRun?.report ? savedRun.outcome : null);
     const [arrangeElapsed, setArrangeElapsed] = useState(0);
     const arrangeAbortRef = useRef<AbortController | null>(null);
     // Edit history (Undo / Redo) of placements set by hand
@@ -605,10 +612,18 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         setArranging(true);
         setArrangeStatus('running');
         setArrangeLog(['Starting…']);
+        setShowArrangeLog(true);
+        setArrangeReport(null);
         const startedAt = Date.now();
         setArrangeElapsed(0);
         const timer = window.setInterval(() => setArrangeElapsed(Math.round((Date.now() - startedAt) / 1000)), 1000);
-        const log = (m: string) => setArrangeLog(prev => [...prev.slice(-30), m]);
+        // Full log with times since the start, for the report
+        const mmss = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.round(sec) % 60).padStart(2, '0')}`;
+        const fullLog: string[] = [`[0:00] Starting…`];
+        const log = (m: string) => {
+            fullLog.push(`[${mmss((Date.now() - startedAt) / 1000)}] ${m}`);
+            setArrangeLog(prev => [...prev, m]);
+        };
         let outcome: 'done' | 'failed' | 'cancelled' = 'done';
         let result: Awaited<ReturnType<typeof arrangeScene>> | undefined;
         try {
@@ -638,6 +653,41 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 const prev = before.get(model.id);
                 return sameTransform(prev ?? container.userData.autoTransform, after) ? [] : [{ modelId: model.id, before: prev, after }];
             });
+            // Report: settings, photo match per object before and after, and the full log
+            const providerName = `${ARRANGE_PROVIDER_LABELS[arrange.provider]} (${arrange.model})`;
+            const elapsed = (Date.now() - startedAt) / 1000;
+            const objectsBefore = new Map((result?.objectsBefore ?? []).map(o => [o.id, o]));
+            const objectRows = (result?.objectsAfter ?? []).map(o => ({ id: o.id, label: o.label, before: objectsBefore.get(o.id)?.photoMatch, after: o.photoMatch }));
+            const f = (v: number | undefined) => v === undefined ? '-' : v.toFixed(3);
+            const report = [
+                'Arrange report',
+                `Scene: ${sceneName ?? ''}`,
+                `Provider: ${providerName}`,
+                `Started: ${new Date(startedAt).toISOString()}`,
+                `Ended: ${new Date().toISOString()} (elapsed ${mmss(elapsed)})`,
+                `Outcome: ${outcome}, rounds: ${result?.rounds ?? 0}`,
+                `Photo match (mean IoU with the photo masks): ${f(result?.photoIoUBefore)} -> ${f(result?.photoIoUAfter)}`,
+                '',
+                'Photo match per object (IoU before -> after; area ratio before -> after):',
+                ...objectRows.map(r => `  ${r.id} ${r.label}: ${f(r.before?.iou)} -> ${f(r.after?.iou)}; ${f(r.before?.areaRatio)} -> ${f(r.after?.areaRatio)}`),
+                '',
+                'Log:',
+                ...fullLog,
+            ].join('\n');
+            const csv = [
+                `scene,"${(sceneName ?? '').replace(/"/g, '""')}"`,
+                `provider,${providerName}`,
+                `outcome,${outcome}`,
+                `rounds,${result?.rounds ?? 0}`,
+                `elapsed_s,${Math.round(elapsed)}`,
+                '',
+                'object,iou_before,iou_after,area_ratio_before,area_ratio_after,offset_x_before,offset_y_before,offset_x_after,offset_y_after',
+                ...objectRows.map(r => [`"${r.label.replace(/"/g, '""')}"`, f(r.before?.iou), f(r.after?.iou), f(r.before?.areaRatio), f(r.after?.areaRatio),
+                    f(r.before?.offset[0]), f(r.before?.offset[1]), f(r.after?.offset[0]), f(r.after?.offset[1])].join(',')),
+                `mean,${f(result?.photoIoUBefore)},${f(result?.photoIoUAfter)},,,,,,`,
+            ].join('\n');
+            setArrangeReport({ text: report, csv, name: `arrange-${ARRANGE_PROVIDER_FILE_NAMES[arrange.provider]}` });
+
             // Record the run with its changes (Undo removes it again), so files say "arranged-<provider>"
             let run: ArrangeRun | undefined;
             if (steps.length > 0) {
@@ -649,6 +699,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     outcome,
                     ...(result?.photoIoUBefore !== undefined ? { photoIoUBefore: result.photoIoUBefore } : {}),
                     ...(result?.photoIoUAfter !== undefined ? { photoIoUAfter: result.photoIoUAfter } : {}),
+                    report,
                 };
                 arrangeRunsRef.current = [...arrangeRunsRef.current, run];
             }
@@ -1946,8 +1997,8 @@ transformControlsRef.current.attach(meshContainer);
             )}
 
             {/* Arrange progress: bottom left, in place of the info panel (the page's Processing Times panel can cover the bottom right) */}
-            {arrangeLog.length > 0 && (
-                <div className={`absolute bottom-4 left-4 z-20 w-80 max-h-64 flex flex-col bg-slate-900/95 border-2 rounded-lg shadow-lg text-xs text-slate-200 ${
+            {showArrangeLog && arrangeLog.length > 0 && (
+                <div className={`absolute bottom-4 left-4 z-20 w-96 max-h-72 flex flex-col bg-slate-900/95 border-2 rounded-lg shadow-lg text-xs text-slate-200 ${
                     arrangeStatus === 'done' ? 'border-emerald-500' : arrangeStatus === 'failed' ? 'border-red-500' : 'border-violet-500/60'}`}>
                     <div className={`flex items-center justify-between px-3 py-2 border-b border-slate-700 ${
                         arrangeStatus === 'done' ? 'bg-emerald-600/30' : arrangeStatus === 'failed' ? 'bg-red-600/30' : ''}`}>
@@ -1960,7 +2011,27 @@ transformControlsRef.current.attach(meshContainer);
                         {arranging ? (
                             <button onClick={() => arrangeAbortRef.current?.abort()} className="px-2 py-0.5 rounded bg-red-600 hover:bg-red-500 text-white">Cancel</button>
                         ) : (
-                            <button onClick={() => setArrangeLog([])} className="text-slate-400 hover:text-white" title="Close">×</button>
+                            <span className="flex items-center gap-1.5">
+                                {arrangeReport && (
+                                    <>
+                                        <button
+                                            onClick={() => download(new Blob(['\uFEFF' + arrangeReport.text], { type: 'text/plain' }), `${fileBase()}_${arrangeReport.name}_${fileStamp()}.txt`)}
+                                            className="px-1.5 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-200"
+                                            title="Save the report: provider, times, photo match per object before and after, and the full log (text)"
+                                        >
+                                            Save log
+                                        </button>
+                                        {arrangeReport.csv && <button
+                                            onClick={() => download(new Blob(['\uFEFF' + arrangeReport.csv!], { type: 'text/csv' }), `${fileBase()}_${arrangeReport.name}_${fileStamp()}.csv`)}
+                                            className="px-1.5 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-200"
+                                            title="Save the photo match per object before and after (CSV)"
+                                        >
+                                            Save CSV
+                                        </button>}
+                                    </>
+                                )}
+                                <button onClick={() => setShowArrangeLog(false)} className="text-slate-400 hover:text-white text-sm leading-none" title="Close (📋 Log opens it again)">×</button>
+                            </span>
                         )}
                     </div>
                     <div className="overflow-y-auto px-3 py-2 space-y-1 whitespace-pre-wrap">
@@ -2281,6 +2352,15 @@ transformControlsRef.current.attach(meshContainer);
                         >
                             📏 Match
                         </button>
+                        {arrangeLog.length > 0 && !showArrangeLog && (
+                            <button
+                                onClick={() => setShowArrangeLog(true)}
+                                className="px-2 py-1 text-xs rounded bg-slate-600 text-slate-200 hover:bg-slate-500"
+                                title="Show the log of the last Arrange run again"
+                            >
+                                📋 Log
+                            </button>
+                        )}
                         {/* Edit Mode Toggle - on right */}
                         <button
                             onClick={() => setEditMode(!editMode)}
@@ -2300,7 +2380,7 @@ transformControlsRef.current.attach(meshContainer);
                 </div>
             )}
 
-            {arrangeLog.length > 0 ? null : showInfo ? (
+            {showArrangeLog && arrangeLog.length > 0 ? null : showInfo ? (
             <div className="absolute bottom-4 left-4 bg-slate-900/90 backdrop-blur px-3 py-2 rounded-lg text-xs text-slate-400 shadow-sm border border-slate-700">
                 <div className="flex items-start justify-between gap-3 mb-1">
                     <p className="font-bold text-slate-300">Depth-Only 3D Scene</p>

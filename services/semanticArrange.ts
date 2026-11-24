@@ -91,6 +91,9 @@ export interface ArrangeResult {
     /** Mean photo IoU of the objects with a mask, before and after (undefined without masks) */
     photoIoUBefore?: number;
     photoIoUAfter?: number;
+    /** The objects (with their photo match) before and after */
+    objectsBefore: ArrangeObject[];
+    objectsAfter: ArrangeObject[];
 }
 
 /** Mean photo IoU over the objects that have a mask */
@@ -286,8 +289,9 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
     const name = ARRANGE_PROVIDER_LABELS[provider];
 
     onProgress?.('Rendering the scene…');
-    const photoIoUBefore = meanPhotoIoU(scene.objects());
-    const finalIoU = () => meanPhotoIoU(scene.objects());
+    const objectsBefore = scene.objects();
+    const photoIoUBefore = meanPhotoIoU(objectsBefore);
+    const end = () => { const objectsAfter = scene.objects(); return { photoIoUBefore, photoIoUAfter: meanPhotoIoU(objectsAfter), objectsBefore, objectsAfter }; };
     const [photo, photoView, topView, obliqueView] = await Promise.all([photoToJpeg(photoUrl), scene.render('photo'), scene.render('top'), scene.render('oblique')]);
 
     const chat = createArrangeChat({
@@ -314,7 +318,7 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
 
         if (calls.length === 0) {
             // A final answer without tools becomes the summary
-            return { rounds, summary: texts.join('\n') || `${name} ended without calling finish.`, photoIoUBefore, photoIoUAfter: finalIoU() };
+            return { rounds, summary: texts.join('\n') || `${name} ended without calling finish.`, ...end() };
         }
         // Comments between rounds
         texts.forEach(t => onProgress?.(t));
@@ -322,7 +326,7 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
         const finish = calls.find(t => t.name === 'finish');
         if (finish) {
             const summary = String((finish.input as { summary?: unknown })?.summary ?? '').trim();
-            return { rounds, summary: summary || 'Done.', photoIoUBefore, photoIoUAfter: finalIoU() };
+            return { rounds, summary: summary || 'Done.', ...end() };
         }
 
         // All tool results of this turn go back together
@@ -357,5 +361,5 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
         }
         chat.addToolResults(results);
     }
-    return { rounds, summary: 'Stopped after the maximum number of rounds.', photoIoUBefore, photoIoUAfter: finalIoU() };
+    return { rounds, summary: 'Stopped after the maximum number of rounds.', ...end() };
 };
