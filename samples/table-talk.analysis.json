@@ -1,0 +1,232 @@
+{
+  "format": "one-image-to-3d-scene/reference-analysis",
+  "version": 1,
+  "photo": "table-talk.webp",
+  "checked_by": "author",
+  "checked_at": "2026-11-24",
+  "scene": "A woman and a man sit on wooden chairs on either side of a corner of a rectangular wooden table, facing each other and talking over coffee; a white vase with flowers stands between them.",
+  "scale_reference": {
+    "ids": [
+      "o1",
+      "o2"
+    ],
+    "reason": "seated adults"
+  },
+  "objects": [
+    {
+      "id": "o1",
+      "label": "woman in yellow sweater",
+      "height_m": 1.28,
+      "width_m": 0.55,
+      "pose": "seated, forearms on the table, facing o2"
+    },
+    {
+      "id": "o2",
+      "label": "man in navy blazer",
+      "height_m": 1.38,
+      "width_m": 0.6,
+      "pose": "seated, forearms on the table, gesturing, facing o1"
+    },
+    {
+      "id": "o3",
+      "label": "flowers in white vase",
+      "height_m": 0.42,
+      "width_m": 0.14,
+      "pose": "vase with flowers, upright"
+    },
+    {
+      "id": "o4",
+      "label": "left coffee cup and saucer",
+      "height_m": 0.08,
+      "width_m": 0.16,
+      "pose": "cup on saucer, upright"
+    },
+    {
+      "id": "o5",
+      "label": "right coffee cup and saucer",
+      "height_m": 0.08,
+      "width_m": 0.16,
+      "pose": "cup on saucer, upright"
+    },
+    {
+      "id": "o6",
+      "label": "wooden table",
+      "height_m": 0.75,
+      "width_m": 1.4,
+      "pose": "rectangular table"
+    },
+    {
+      "id": "o7",
+      "label": "left wooden chair",
+      "height_m": 0.9,
+      "width_m": 0.45,
+      "pose": "chair, mostly hidden behind o1"
+    },
+    {
+      "id": "o8",
+      "label": "right wooden chair",
+      "height_m": 0.9,
+      "width_m": 0.45,
+      "pose": "chair, mostly hidden behind o2"
+    }
+  ],
+  "relations": [
+    {
+      "subject": "o3",
+      "relation": "on",
+      "object": "o6",
+      "contact_visible": true
+    },
+    {
+      "subject": "o4",
+      "relation": "on",
+      "object": "o6",
+      "contact_visible": true
+    },
+    {
+      "subject": "o5",
+      "relation": "on",
+      "object": "o6",
+      "contact_visible": true
+    },
+    {
+      "subject": "o6",
+      "relation": "on",
+      "object": "floor",
+      "contact_visible": false
+    },
+    {
+      "subject": "o7",
+      "relation": "on",
+      "object": "floor",
+      "contact_visible": false
+    },
+    {
+      "subject": "o8",
+      "relation": "on",
+      "object": "floor",
+      "contact_visible": false
+    },
+    {
+      "subject": "o1",
+      "relation": "sits_on",
+      "object": "o7",
+      "contact_visible": false
+    },
+    {
+      "subject": "o2",
+      "relation": "sits_on",
+      "object": "o8",
+      "contact_visible": false
+    },
+    {
+      "subject": "o1",
+      "relation": "sits_at",
+      "object": "o6",
+      "contact_visible": false
+    },
+    {
+      "subject": "o2",
+      "relation": "sits_at",
+      "object": "o6",
+      "contact_visible": false
+    },
+    {
+      "subject": "o1",
+      "relation": "faces",
+      "object": "o2",
+      "contact_visible": false
+    },
+    {
+      "subject": "o2",
+      "relation": "faces",
+      "object": "o1",
+      "contact_visible": false
+    },
+    {
+      "subject": "o6",
+      "relation": "in_front_of",
+      "object": "o1",
+      "contact_visible": false
+    },
+    {
+      "subject": "o6",
+      "relation": "in_front_of",
+      "object": "o2",
+      "contact_visible": false
+    },
+    {
+      "subject": "o1",
+      "relation": "in_front_of",
+      "object": "o7",
+      "contact_visible": false
+    },
+    {
+      "subject": "o2",
+      "relation": "in_front_of",
+      "object": "o8",
+      "contact_visible": false
+    },
+    {
+      "subject": "o4",
+      "relation": "in_front_of",
+      "object": "o1",
+      "contact_visible": false
+    },
+    {
+      "subject": "o5",
+      "relation": "in_front_of",
+      "object": "o2",
+      "contact_visible": false
+    },
+    {
+      "subject": "o3",
+      "relation": "in_front_of",
+      "object": "o2",
+      "contact_visible": false
+    },
+    {
+      "subject": "o4",
+      "relation": "in_front_of",
+      "object": "o3",
+      "contact_visible": false
+    },
+    {
+      "subject": "o5",
+      "relation": "in_front_of",
+      "object": "o3",
+      "contact_visible": false
+    }
+  ],
+  "notes": "The two sit on either side of a corner of the rectangular table (not side by side along one edge). Contacts of body parts that the relation types do not cover are listed in part_relations (not checked yet). The table legs, floor and most of the chairs are hidden or outside the photo. Ids are those of the project's object list; labels are given to match objects if the ids change.",
+  "part_relations": [
+    {
+      "subject": "o1",
+      "part": "forearms",
+      "relation": "on",
+      "object": "o6",
+      "object_part": "top"
+    },
+    {
+      "subject": "o2",
+      "part": "forearms",
+      "relation": "on",
+      "object": "o6",
+      "object_part": "top"
+    },
+    {
+      "subject": "o1",
+      "part": "seat position",
+      "relation": "at corner",
+      "object": "o6",
+      "object_part": "corner, one side"
+    },
+    {
+      "subject": "o2",
+      "part": "seat position",
+      "relation": "at corner",
+      "object": "o6",
+      "object_part": "corner, other side"
+    }
+  ]
+}
