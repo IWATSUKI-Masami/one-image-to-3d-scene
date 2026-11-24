@@ -25,9 +25,9 @@
     },
     {
       "id": "o2",
-      "label": "closed silver laptop",
+      "label": "open silver laptop",
       "match": {
-        "label_prefix": "Closed Silver"
+        "label_prefix": "Open Silver"
       },
       "height_m": 0.22,
       "width_m": 0.33,
@@ -145,6 +145,6 @@
       "contact_visible": false
     }
   ],
-  "notes": "The laptop is open, with the back of its screen toward the camera (the generated model is a closed laptop, so its height differs). The desk's contact with the floor is not visible. Objects are matched by the start of their label in the project (and words of the description).",
+  "notes": "The laptop is open, with the back of its screen toward the camera (the model was regenerated from the annotation 'open silver laptop'). The desk's contact with the floor is not visible. Objects are matched by the start of their label in the project (and words of the description).",
   "part_relations": []
 }

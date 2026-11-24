@@ -34,11 +34,9 @@
     },
     {
       "id": "o3",
+      "label": "L-shaped wooden desk",
       "match": {
-        "label_prefix": "Wooden De",
-        "description_contains": [
-          "l-shaped"
-        ]
+        "label_prefix": "L-shaped Wooden"
       },
       "height_m": 0.75,
       "width_m": 1.5,
