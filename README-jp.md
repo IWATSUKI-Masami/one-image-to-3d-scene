@@ -19,7 +19,7 @@
   </tr>
 </table>
 
-サンプル画像はどちらも生成AIで作成したもので、アプリを試す際にお使いください。上の [`samples/cafe-couple.webp`](samples/cafe-couple.webp) は Gemini で作成しました。[`samples/table-talk.webp`](samples/table-talk.webp) は論文で入力として使ったもので、下の「処理の流れ（サンプル画像）」でも使っています。
+サンプル画像はすべて生成AIで作成したもので、アプリを試す際にお使いください。上の [`samples/cafe-couple.webp`](samples/cafe-couple.webp) は Gemini で作成しました。[`samples/table-talk.webp`](samples/table-talk.webp) は論文で入力として使ったもので、下の「処理の流れ（サンプル画像）」でも使っています。ほかの場面での試験には、次の2枚を使いました。[`samples/office-desk.webp`](samples/office-desk.webp) は人物のいない机の写真で、右端で切れた椅子、机に隠れたオフィスチェア、画面の背面側から見たノートPCを含みます。[`samples/woman-at-desk.webp`](samples/woman-at-desk.webp) はL字型の机に横向きで座る人物の写真で、本棚とフロアランプが画像の端で切れています（VLM が机を長方形と記述した場合は、注釈を「L字型」に直してください）。
 
 上の3Dシーンは自動で配置した結果です。配置は、3D Scene タブの編集モード（**Edit ON**）で手で調整することもできます（下の「手で編集した結果」を参照）。
 

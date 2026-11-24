@@ -19,7 +19,7 @@ This is the reference implementation of the paper listed in [Citation](#citation
   </tr>
 </table>
 
-Both sample photos are AI-generated, and you can use them to try the app: [`samples/cafe-couple.webp`](samples/cafe-couple.webp) (above, generated with Gemini) and [`samples/table-talk.webp`](samples/table-talk.webp), the input used in the paper and in the walkthrough below.
+All sample photos are AI-generated, and you can use them to try the app: [`samples/cafe-couple.webp`](samples/cafe-couple.webp) (above, generated with Gemini) and [`samples/table-talk.webp`](samples/table-talk.webp), the input used in the paper and in the walkthrough below. Two more photos were used to test the method on other scenes: [`samples/office-desk.webp`](samples/office-desk.webp) (a desk without people, with a chair cut off at the right border, an office chair hidden behind the desk and a laptop seen from the back of its screen) and [`samples/woman-at-desk.webp`](samples/woman-at-desk.webp) (a person seen from the side at an L-shaped desk, with a bookcase and a floor lamp cut off at the borders; correct the desk's annotation to "L-shaped" if the VLM describes it as rectangular).
 
 The scene above is the automatic result. The placement can also be adjusted by hand in edit mode (**Edit ON** in the 3D Scene tab); see *Edited by hand* in the walkthrough below.
 
