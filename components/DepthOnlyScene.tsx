@@ -375,14 +375,15 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     }
                     if (edit.move) o.position.add(new THREE.Vector3(...edit.move));
                     if (edit.center) shiftCenterTo(o, new THREE.Vector3(...edit.center));
+                    const supportTop = (name: string): number | undefined => {
+                        if (name === 'floor') return floorY;
+                        const support = byShort.get(name);
+                        if (support && support !== entry) return boxOf(support.container).max.y;
+                        problems.push(`${edit.id}: unknown support ${name}`);
+                        return undefined;
+                    };
                     if (edit.rest_on !== undefined) {
-                        let top: number | undefined;
-                        if (edit.rest_on === 'floor') top = floorY;
-                        else {
-                            const support = byShort.get(edit.rest_on);
-                            if (support && support !== entry) top = boxOf(support.container).max.y;
-                            else problems.push(`${edit.id}: unknown support ${edit.rest_on}`);
-                        }
+                        const top = supportTop(edit.rest_on);
                         if (top !== undefined) {
                             // Slide the object along the line of sight until its bottom touches the
                             // support (scaling it with the distance), so that it keeps its place in
@@ -402,6 +403,11 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                                 problems.push(`${edit.id}: the line of sight does not reach the support, so it was moved vertically (its place in the photo changed)`);
                             }
                         }
+                    }
+                    if (edit.drop_on !== undefined) {
+                        // Straight down (or up) onto the support, keeping distance and size
+                        const top = supportTop(edit.drop_on);
+                        if (top !== undefined) o.position.y += top - boxOf(o).min.y;
                     }
                     o.updateMatrixWorld(true);
                     layoutRef.current.set(entry.model.id, transformOf(o));

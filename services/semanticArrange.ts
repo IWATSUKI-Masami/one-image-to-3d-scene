@@ -47,6 +47,8 @@ export interface PlacementEdit {
     center?: [number, number, number];
     /** Put the bottom of the model on the floor ("floor") or on top of another model's bounding box (its id), moving it along the line of sight so that it keeps its place in the photo */
     rest_on?: string;
+    /** Put the bottom of the model on the floor or on another model's top by moving it straight down or up (keeps its distance and size) */
+    drop_on?: string;
 }
 
 export type ArrangeView = 'photo' | 'top' | 'oblique';
@@ -93,7 +95,10 @@ Conventions (world units are relative, not meters):
 
 Your task: make the scene physically and semantically consistent with the photo.
 - Keep every object where it is in the photo (its place in the photo view should stay close to the photo). To change an object's distance without changing its place in the photo, use along_ray, which moves it along the line of sight and scales it by the same factor.
-- Supports: objects standing on furniture rest on its top (cups and vases on a table: use rest_on with the table's id); furniture and standing people rest on the floor (rest_on "floor"). rest_on slides the object along the line of sight until it touches the support, so it keeps its place in the photo and gets the distance (and size) that the support implies; this is usually better than the depth estimate. Apply rest_on after the support itself is in its final place (edits run in the order given), and to drop an object straight down instead, use move.
+- Supports: objects standing on furniture rest on its top (cups and vases on a table); furniture and standing people rest on the floor. Two ways:
+  - rest_on slides the object along the line of sight until its bottom touches the support, so it keeps its place in the photo and gets the distance (and size) that the support implies. Use it when the object's contact with the support is visible in the photo (a cup on a table top): this is usually better than the depth estimate.
+  - drop_on moves the object straight down or up onto the support and keeps its distance and size. Use it when the contact is not visible (table legs and chair legs below the photo's lower edge, a person's feet hidden by a table): there the bottom's place in the photo says nothing, and rest_on would make the object much too large or too far.
+  Apply them after the support itself is in its final place (edits run in the order given).
 - Seated people sit on their chairs: hips at the seat, feet on the floor, close to the table if they are at a table. rest_on uses the top of a bounding box, which for a chair is the backrest, so place seated people with center or move instead.
 - Real-world sizes: decide how many world units make a meter from the people (an adult is about 1.65-1.75 m tall standing and about 1.3 m from the floor to the top of the head when seated on a chair), then make the other objects consistent: dining or cafe table top about 0.72-0.76 m above the floor, chair seat about 0.45 m, a coffee cup about 0.08-0.10 m tall, a small vase 0.15-0.25 m. Keep the objects' places in the photo; use along_ray to change size and distance together.
 - Seated people sit at chair height even when their chair is not in the scene (it may be hidden or missing): their feet on the floor, hips about 0.45 m up, the table top around the height of their lower chest or elbows. Never lower a seated person to the floor.
@@ -111,7 +116,7 @@ Work in rounds: call update_placements with the edits for one round (you can edi
 const TOOLS: Anthropic.Beta.BetaTool[] = [
     {
         name: 'update_placements',
-        description: 'Change the placement of one or more models. For each edit, the fields that are given are applied in this order: scale, scale_axes, rotate_y_deg, along_ray, move, center, rest_on. Returns the new object list and new renderings (photo view, top view and oblique view).',
+        description: 'Change the placement of one or more models. For each edit, the fields that are given are applied in this order: scale, scale_axes, rotate_y_deg, along_ray, move, center, rest_on, drop_on. Returns the new object list and new renderings (photo view, top view and oblique view).',
         strict: true,
         input_schema: {
             type: 'object',
@@ -129,6 +134,7 @@ const TOOLS: Anthropic.Beta.BetaTool[] = [
                             move: { type: 'array', items: { type: 'number' }, description: 'Offset [dx, dy, dz] in world units' },
                             center: { type: 'array', items: { type: 'number' }, description: 'New bounding-box center [x, y, z] in world units' },
                             rest_on: { type: 'string', description: '"floor", or the id of the object whose bounding-box top this object should stand on; the object slides along the line of sight until it touches it (keeps its place in the photo)' },
+                            drop_on: { type: 'string', description: '"floor", or the id of the object whose bounding-box top this object should stand on; moves straight down or up and keeps distance and size (use when the contact is not visible in the photo)' },
                         },
                         required: ['id'],
                         additionalProperties: false,
@@ -233,6 +239,10 @@ const validateEdits = (input: unknown): { edits: PlacementEdit[]; problems: stri
             if (typeof e.rest_on === 'string') edit.rest_on = e.rest_on;
             else problems.push(`${e.id}: rest_on must be a string`);
         }
+        if (e.drop_on !== undefined) {
+            if (typeof e.drop_on === 'string') edit.drop_on = e.drop_on;
+            else problems.push(`${e.id}: drop_on must be a string`);
+        }
         edits.push(edit);
     }
     return { edits, problems };
@@ -288,10 +298,13 @@ export const arrangeSceneWithClaude = async (scene: ArrangeScene, options: Arran
         // Keep the whole assistant turn (thinking blocks included) unchanged
         messages.push({ role: 'assistant', content: response.content });
 
-        for (const block of response.content) {
-            if (block.type === 'text' && block.text.trim()) onProgress?.(block.text.trim());
-        }
         const toolUses = response.content.filter((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === 'tool_use');
+        // Comments between rounds (a final answer without tools becomes the summary instead)
+        if (toolUses.length > 0) {
+            for (const block of response.content) {
+                if (block.type === 'text' && block.text.trim()) onProgress?.(block.text.trim());
+            }
+        }
         if (toolUses.length === 0) {
             const text = response.content.filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === 'text').map(b => b.text).join('\n');
             return { rounds, summary: text.trim() || 'Claude ended without calling finish.' };
