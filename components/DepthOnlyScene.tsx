@@ -7,6 +7,7 @@ import { removeStrayFragments } from './meshCleanup';
 import { alignmentYawDeg, ASSUMED_HFOV_DEG, MIN_ALIGNMENT_SCORE, viewAngleDeg } from '../services/frontAlignment';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { Spinner } from './Spinner';
+import { checkPhysics } from './physicsChecks';
 import { ArrangeRun, DetectedObject, Model3D, SceneLayout } from '../types';
 import { ArrangeObject, ArrangeScene, ArrangeView, PlacementEdit, arrangeScene } from '../services/semanticArrange';
 import { ARRANGE_PROVIDER_FILE_NAMES, ARRANGE_PROVIDER_LABELS, ArrangeProvider, sceneEditState } from '../services/arrangeProviders';
@@ -369,7 +370,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
      * object's mask, red = mask only (the model is missing there), blue = model only;
      * object names with their IoU, and the mean IoU. Also a CSV of the values.
      */
-    const [photoMatchView, setPhotoMatchView] = useState<{ png: string; csv: string; mean: number | undefined; kind: string } | null>(null);
+    const [photoMatchView, setPhotoMatchView] = useState<{ png: string; csv: string; mean: number | undefined; issues: number; kind: string } | null>(null);
     const handlePhotoMatch = async () => {
         const idRender = idRenderRef.current;
         if (!idRender) return;
@@ -386,6 +387,10 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         }
         const ids = idRender(entries.map(e => e.container), W, H);
         const stats = photoMatchStats(ids, masks, W, H);
+        // Physical checks (floor: the lowest model, as in Arrange)
+        const boxes = entries.map(e => { e.container.updateMatrixWorld(true); return new THREE.Box3().setFromObject(e.container); });
+        const physics = checkPhysics(entries.map(e => e.container), Math.min(...boxes.map(b => b.min.y)),
+            0.015 * Math.max(...boxes.map(b => b.max.y - b.min.y)));
         // State of the placements (file name and CSV header), so before/after files can be told apart
         const state = editState();
         const lastRun = arrangeRunsRef.current[arrangeRunsRef.current.length - 1];
@@ -438,17 +443,23 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             ctx.fillStyle = color; ctx.fillRect(lx, H + 13, 14, 14); lx += 20;
             ctx.fillStyle = '#222'; ctx.fillText(label, lx, H + 20); lx += ctx.measureText(label).width + 22;
         }
-        if (mean !== undefined) ctx.fillText(`mean IoU ${mean.toFixed(3)} (${valid.length} objects)${state ? `, ${state.replace('-', ' ')}` : ', automatic placement'}`, lx + 10, H + 20);
+        if (mean !== undefined) ctx.fillText(`mean IoU ${mean.toFixed(3)} (${valid.length} objects), physical issues ${physics.count}${state ? `, ${state.replace('-', ' ')}` : ', automatic placement'}`, lx + 10, H + 20);
         const csv = [
             `scene,"${(sceneName ?? '').replace(/"/g, '""')}"`,
             `placement,${state ? (lastRun ? 'arranged' : 'edited by hand') : 'automatic'}`,
             ...(lastRun ? [`arranged_by,${ARRANGE_PROVIDER_LABELS[lastRun.provider]} (${lastRun.model})`, `arranged_at,${lastRun.at}`] : []),
             `computed_at,${new Date().toISOString()}`,
+            `physical_issues,${physics.count}`,
             '',
-            'object,iou,area_ratio,offset_x,offset_y',
-            ...stats.flatMap((st, i) => st ? [`"${names[i].replace(/"/g, '""')}",${st.iou.toFixed(4)},${st.areaRatio.toFixed(4)},${st.offset[0].toFixed(4)},${st.offset[1].toFixed(4)}`] : []),
-            ...(mean !== undefined ? [`mean,${mean.toFixed(4)},,,`] : [])].join('\n');
-        setPhotoMatchView({ png: c.toDataURL('image/png'), csv, mean, kind: state ? `photo-match-${state}` : 'photo-match' });
+            'object,iou,area_ratio,offset_x,offset_y,physical_warnings',
+            ...stats.flatMap((st, i) => {
+                const w = physics.issues[i].map(x => x.kind === 'penetration'
+                    ? `${Math.round(x.amount * 100)}% inside ${names[x.other]}`
+                    : `${x.kind} ${x.amount.toFixed(3)}${x.other >= 0 ? ` (${names[x.other]})` : ' (floor)'}`).join('; ');
+                return st ? [`"${names[i].replace(/"/g, '""')}",${st.iou.toFixed(4)},${st.areaRatio.toFixed(4)},${st.offset[0].toFixed(4)},${st.offset[1].toFixed(4)},"${w}"`] : [];
+            }),
+            ...(mean !== undefined ? [`mean,${mean.toFixed(4)},,,,`] : [])].join('\n');
+        setPhotoMatchView({ png: c.toDataURL('image/png'), csv, mean, issues: physics.count, kind: state ? `photo-match-${state}` : 'photo-match' });
     };
 
     const handleArrange = async () => {
@@ -497,14 +508,31 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             return photoMatchStats(ids, masks, MW, MH).map(m => m && { iou: m.iou, areaRatio: m.areaRatio, offset: m.offset });
         };
 
+        // Physical checks: contact tolerance from the size of the scene (1.5% of the tallest model)
+        const tolerance = 0.015 * Math.max(...entries.map(e => boxOf(e.container).getSize(new THREE.Vector3()).y));
+        let lastIssueCount = 0;
+        const physicsWarnings = (): string[][] => {
+            const result = checkPhysics(entries.map(e => e.container), floorY, tolerance);
+            lastIssueCount = result.count;
+            const other = (j: number) => j < 0 ? 'the floor' : nameOf(entries[j].model);
+            const r3 = (v: number) => Math.round(v * 1000) / 1000;
+            return result.issues.map(list => list.map(x =>
+                x.kind === 'floating' ? `floating ${r3(x.amount)} above ${other(x.other)}`
+                    : x.kind === 'sunk' ? `${r3(x.amount)} below the ${x.other < 0 ? 'floor' : `top of ${other(x.other)}`}`
+                        : `${Math.round(x.amount * 100)}% of its surface is inside ${other(x.other)}`));
+        };
+
         const arrangeSceneApi: ArrangeScene = {
+            issueCount: () => lastIssueCount,
             objects: (): ArrangeObject[] => {
               const matches = photoMatches();
+              const warnings = physicsWarnings();
               return entries.map(({ model, container }, i) => {
                 const b = boxOf(container);
                 const c = b.getCenter(new THREE.Vector3()), sz = b.getSize(new THREE.Vector3());
                 return {
                     photoMatch: matches[i],
+                    warnings: warnings[i],
                     id: shortId.get(model.id)!,
                     label: model.label.replace(/\s*\(Completed\)\s*$/i, ''),
                     description: describe(model),
@@ -622,7 +650,10 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         const fullLog: string[] = [`[0:00] Starting…`];
         const log = (m: string) => {
             fullLog.push(`[${mmss((Date.now() - startedAt) / 1000)}] ${m}`);
-            setArrangeLog(prev => [...prev, m]);
+            // Long comments (e.g. Gemini returns its reasoning as text) are shortened in the
+            // panel; the report (Save log) keeps them in full
+            const short = m.length > 400 && !m.startsWith('Done') ? `${m.slice(0, 400).trimEnd()}… (full text in Save log)` : m;
+            setArrangeLog(prev => [...prev, short]);
         };
         let outcome: 'done' | 'failed' | 'cancelled' = 'done';
         let result: Awaited<ReturnType<typeof arrangeScene>> | undefined;
@@ -638,7 +669,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             const iou = result.photoIoUBefore !== undefined && result.photoIoUAfter !== undefined
                 ? `\nPhoto match (mean IoU with the photo masks): ${result.photoIoUBefore.toFixed(2)} → ${result.photoIoUAfter.toFixed(2)}`
                 : '';
-            log(`Done (${result.rounds} round${result.rounds === 1 ? '' : 's'}). ${result.summary}${iou}`);
+            log(`Done (${result.rounds} round${result.rounds === 1 ? '' : 's'}). ${result.summary}${iou}\nPhysical issues (floating, sunk, inside another model): ${result.issuesBefore} → ${result.issuesAfter}`);
         } catch (e: any) {
             outcome = controller.signal.aborted ? 'cancelled' : 'failed';
             log(controller.signal.aborted ? 'Cancelled.' : `Failed: ${e?.message || e}`);
@@ -657,7 +688,10 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             const providerName = `${ARRANGE_PROVIDER_LABELS[arrange.provider]} (${arrange.model})`;
             const elapsed = (Date.now() - startedAt) / 1000;
             const objectsBefore = new Map((result?.objectsBefore ?? []).map(o => [o.id, o]));
-            const objectRows = (result?.objectsAfter ?? []).map(o => ({ id: o.id, label: o.label, before: objectsBefore.get(o.id)?.photoMatch, after: o.photoMatch }));
+            const objectRows = (result?.objectsAfter ?? []).map(o => ({
+                id: o.id, label: o.label, before: objectsBefore.get(o.id)?.photoMatch, after: o.photoMatch,
+                warningsBefore: objectsBefore.get(o.id)?.warnings ?? [], warningsAfter: o.warnings ?? [],
+            }));
             const f = (v: number | undefined) => v === undefined ? '-' : v.toFixed(3);
             const report = [
                 'Arrange report',
@@ -667,9 +701,13 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 `Ended: ${new Date().toISOString()} (elapsed ${mmss(elapsed)})`,
                 `Outcome: ${outcome}, rounds: ${result?.rounds ?? 0}`,
                 `Photo match (mean IoU with the photo masks): ${f(result?.photoIoUBefore)} -> ${f(result?.photoIoUAfter)}`,
+                `Physical issues (floating, sunk, inside another model): ${result?.issuesBefore ?? '-'} -> ${result?.issuesAfter ?? '-'}`,
                 '',
                 'Photo match per object (IoU before -> after; area ratio before -> after):',
                 ...objectRows.map(r => `  ${r.id} ${r.label}: ${f(r.before?.iou)} -> ${f(r.after?.iou)}; ${f(r.before?.areaRatio)} -> ${f(r.after?.areaRatio)}`),
+                '',
+                'Physical warnings per object (before -> after):',
+                ...objectRows.map(r => `  ${r.id} ${r.label}: ${r.warningsBefore.join('; ') || 'none'} -> ${r.warningsAfter.join('; ') || 'none'}`),
                 '',
                 'Log:',
                 ...fullLog,
@@ -680,10 +718,12 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 `outcome,${outcome}`,
                 `rounds,${result?.rounds ?? 0}`,
                 `elapsed_s,${Math.round(elapsed)}`,
+                `physical_issues,${result?.issuesBefore ?? ''},${result?.issuesAfter ?? ''}`,
                 '',
-                'object,iou_before,iou_after,area_ratio_before,area_ratio_after,offset_x_before,offset_y_before,offset_x_after,offset_y_after',
+                'object,iou_before,iou_after,area_ratio_before,area_ratio_after,offset_x_before,offset_y_before,offset_x_after,offset_y_after,warnings_before,warnings_after',
                 ...objectRows.map(r => [`"${r.label.replace(/"/g, '""')}"`, f(r.before?.iou), f(r.after?.iou), f(r.before?.areaRatio), f(r.after?.areaRatio),
-                    f(r.before?.offset[0]), f(r.before?.offset[1]), f(r.after?.offset[0]), f(r.after?.offset[1])].join(',')),
+                    f(r.before?.offset[0]), f(r.before?.offset[1]), f(r.after?.offset[0]), f(r.after?.offset[1]),
+                    `"${r.warningsBefore.join('; ')}"`, `"${r.warningsAfter.join('; ')}"`].join(',')),
                 `mean,${f(result?.photoIoUBefore)},${f(result?.photoIoUAfter)},,,,,,`,
             ].join('\n');
             setArrangeReport({ text: report, csv, name: `arrange-${ARRANGE_PROVIDER_FILE_NAMES[arrange.provider]}` });
@@ -699,6 +739,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     outcome,
                     ...(result?.photoIoUBefore !== undefined ? { photoIoUBefore: result.photoIoUBefore } : {}),
                     ...(result?.photoIoUAfter !== undefined ? { photoIoUAfter: result.photoIoUAfter } : {}),
+                    ...(result ? { issuesBefore: result.issuesBefore, issuesAfter: result.issuesAfter } : {}),
                     report,
                 };
                 arrangeRunsRef.current = [...arrangeRunsRef.current, run];
@@ -1973,7 +2014,7 @@ transformControlsRef.current.attach(meshContainer);
                     <div className="bg-white rounded-lg shadow-xl max-w-full max-h-full overflow-auto p-3" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center justify-between gap-3 mb-2">
                             <span className="text-sm font-semibold text-slate-700">
-                                📏 Photo match{photoMatchView.mean !== undefined && ` — mean IoU ${photoMatchView.mean.toFixed(3)}`}
+                                📏 Photo match{photoMatchView.mean !== undefined && ` — mean IoU ${photoMatchView.mean.toFixed(3)}`}, physical issues {photoMatchView.issues}
                             </span>
                             <div className="flex items-center gap-2">
                                 <button

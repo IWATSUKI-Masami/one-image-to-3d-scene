@@ -35,6 +35,8 @@ export interface ArrangeObject {
      * the image width and height; + = right / down). Missing when the object has no mask.
      */
     photoMatch?: { iou: number; areaRatio: number; offset: [number, number] };
+    /** Physical problems found by the checks (floating, sunk, inside another model) */
+    warnings?: string[];
 }
 
 /** One change requested by Claude; every field is optional and applied in this order */
@@ -67,6 +69,8 @@ export interface ArrangeScene {
     objects(): ArrangeObject[];
     /** Height of the floor (y) */
     floorY(): number;
+    /** Number of physical issues found by the last call of objects() */
+    issueCount(): number;
     /** Apply edits; returns problems (unknown ids etc.) */
     apply(edits: PlacementEdit[]): string[];
     /** Render a view with the object labels drawn on it; base64 JPEG without the data: prefix */
@@ -91,6 +95,9 @@ export interface ArrangeResult {
     /** Mean photo IoU of the objects with a mask, before and after (undefined without masks) */
     photoIoUBefore?: number;
     photoIoUAfter?: number;
+    /** Number of physical issues (floating, sunk, penetrating pairs) before and after */
+    issuesBefore: number;
+    issuesAfter: number;
     /** The objects (with their photo match) before and after */
     objectsBefore: ArrangeObject[];
     objectsAfter: ArrangeObject[];
@@ -130,6 +137,8 @@ Your task: make the scene physically and semantically consistent with the photo.
 Contacts: people at a table sit close to it, with their forearms or hands on the table top when the photo shows that; a table that people sit at is between or beside them as in the photo, not a wall in front of them. Use the top and oblique views to check who sits where around the table.
 
 Photo match: for objects with a mask in the photo, photo_match compares the model's visible part rendered from the photo's camera (hidden parts behind other models excluded) with the object's mask in the photo: iou (1 = perfect), area_ratio (rendered / photo; > 1 = too large or too near), and offset_xy (where the rendering is relative to the photo, as fractions of the image; + = right / down). Use it to check that your changes keep each object where and as large as it is in the photo, and to find objects that are off (e.g. area_ratio 1.6 and offset_xy [0.05, 0] means too large and too far right). It cannot be perfect: the models' shapes and poses differ from the photo, and objects hidden in the photo by things that are not in the scene lower it. Do not trade physical plausibility for a small gain in it, but avoid changes that lower it clearly.
+
+Physical checks: "warnings" lists problems measured on the meshes: floating (the bottom is above the floor or the surface below it, e.g. a person's feet in the air), sunk (the bottom is below the top of the object it stands on, or below the floor), and inside (part of the object's surface is inside another object). "physical issues" is their number in the scene. Fix them, except contacts that are real (e.g. a seated person slightly sinking into a cushion); a scene with no warnings is not necessarily right, so still compare it with the photo.
 
 Check the top view as well as the photo view: an object can look right from the camera but be at the wrong distance (e.g. a cup on the far side of the table instead of the near side). Compare where objects are on the table in the photo (near or far edge, left or right) with the top view.
 
@@ -199,6 +208,7 @@ const describeObjects = (scene: ArrangeScene): string => {
         bottom_y: round3(o.center[1] - o.size[1] / 2),
         top_y: round3(o.center[1] + o.size[1] / 2),
         rotation_y_deg: Math.round(o.rotationYDeg),
+        ...(o.warnings?.length ? { warnings: o.warnings } : {}),
         ...(o.photoMatch ? {
             photo_match: {
                 iou: round3(o.photoMatch.iou),
@@ -207,7 +217,7 @@ const describeObjects = (scene: ArrangeScene): string => {
             },
         } : {}),
     }));
-    return `floorY = ${round3(scene.floorY())}${mean !== undefined ? `\nmean photo_match iou = ${round3(mean)}` : ''}\nObjects:\n${lines.join('\n')}`;
+    return `floorY = ${round3(scene.floorY())}${mean !== undefined ? `\nmean photo_match iou = ${round3(mean)}` : ''}\nphysical issues = ${scene.issueCount()}\nObjects:\n${lines.join('\n')}`;
 };
 
 const imageBlock = (base64: string): Block => ({ type: 'image', base64 });
@@ -291,7 +301,11 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
     onProgress?.('Rendering the scene…');
     const objectsBefore = scene.objects();
     const photoIoUBefore = meanPhotoIoU(objectsBefore);
-    const end = () => { const objectsAfter = scene.objects(); return { photoIoUBefore, photoIoUAfter: meanPhotoIoU(objectsAfter), objectsBefore, objectsAfter }; };
+    const issuesBefore = scene.issueCount();
+    const end = () => {
+        const objectsAfter = scene.objects();
+        return { photoIoUBefore, photoIoUAfter: meanPhotoIoU(objectsAfter), issuesBefore, issuesAfter: scene.issueCount(), objectsBefore, objectsAfter };
+    };
     const [photo, photoView, topView, obliqueView] = await Promise.all([photoToJpeg(photoUrl), scene.render('photo'), scene.render('top'), scene.render('oblique')]);
 
     const chat = createArrangeChat({
