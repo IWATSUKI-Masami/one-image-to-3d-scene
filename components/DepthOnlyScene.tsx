@@ -216,7 +216,15 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     // Arrange runs whose changes are in the current placements (saved with the layout and the project)
     const arrangeRunsRef = useRef<ArrangeRun[]>(initialLayout?.arrangeRuns ?? []);
     // Reference analysis checked by a person, for evaluating Arrange (never shown to the model)
-    const [referenceAnalysis, setReferenceAnalysis] = useState<ReferenceAnalysis | undefined>(initialLayout?.referenceAnalysis);
+    // (also kept in the browser per photo, so that it survives reloading a project saved without it)
+    const referenceKey = `one-image-to-3d-scene:reference:${sceneName ?? ''}`;
+    const [referenceAnalysis, setReferenceAnalysis] = useState<ReferenceAnalysis | undefined>(() => {
+        if (initialLayout?.referenceAnalysis) return initialLayout.referenceAnalysis;
+        try { const t = sceneName ? localStorage.getItem(referenceKey) : null; return t ? JSON.parse(t) : undefined; } catch { return undefined; }
+    });
+    const keepReference = (ref: ReferenceAnalysis | undefined) => {
+        try { if (!sceneName) return; if (ref) localStorage.setItem(referenceKey, JSON.stringify(ref)); else localStorage.removeItem(referenceKey); } catch { /* storage unavailable */ }
+    };
     const referenceRef = useRef(referenceAnalysis);
     referenceRef.current = referenceAnalysis;
     const referenceInputRef = useRef<HTMLInputElement>(null);
@@ -980,6 +988,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             };
             setReferenceAnalysis(ref);
             referenceRef.current = ref;
+            keepReference(ref);
             reportLayoutRef.current();
         } catch (e: any) {
             alert(`Could not read the reference analysis: ${e?.message || e}`);
@@ -2480,7 +2489,7 @@ transformControlsRef.current.attach(meshContainer);
                         </button>
                         {referenceAnalysis && (
                             <button
-                                onClick={() => { setReferenceAnalysis(undefined); referenceRef.current = undefined; reportLayoutRef.current(); }}
+                                onClick={() => { setReferenceAnalysis(undefined); referenceRef.current = undefined; keepReference(undefined); reportLayoutRef.current(); }}
                                 disabled={arranging}
                                 className="px-1.5 py-1 text-xs rounded bg-slate-600 text-slate-200 hover:bg-slate-500 disabled:opacity-50"
                                 title="Remove the reference analysis"

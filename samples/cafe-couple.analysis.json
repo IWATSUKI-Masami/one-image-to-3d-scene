@@ -152,6 +152,12 @@
       "contact_visible": false
     },
     {
+      "subject": "o3",
+      "relation": "in_front_of",
+      "object": "o4",
+      "contact_visible": false
+    },
+    {
       "subject": "o2",
       "relation": "in_front_of",
       "object": "o1",
