@@ -655,6 +655,16 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 }
                 return problems;
             },
+            snapshot: () => entries.map(({ model, container }) => ({ id: model.id, t: transformOf(container), set: layoutRef.current.get(model.id) })),
+            restore: (snap) => {
+                for (const { id, t, set } of snap as { id: string; t: SavedTransform; set?: SavedTransform }[]) {
+                    const entry = entries.find(e => e.model.id === id);
+                    if (!entry) continue;
+                    applyTransform(entry.container, t);
+                    entry.container.updateMatrixWorld(true);
+                    if (set) layoutRef.current.set(id, set); else layoutRef.current.delete(id);
+                }
+            },
             render: async (view) => render(view, entries.map(({ model, container }) => ({
                 text: nameOf(model),
                 center: boxOf(container).getCenter(new THREE.Vector3()),

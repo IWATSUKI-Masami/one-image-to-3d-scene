@@ -196,6 +196,12 @@
       "relation": "in_front_of",
       "object": "o3",
       "contact_visible": false
+    },
+    {
+      "subject": "o3",
+      "relation": "in_front_of",
+      "object": "o1",
+      "contact_visible": false
     }
   ],
   "notes": "The two sit on either side of a corner of the rectangular table (not side by side along one edge). Contacts of body parts that the relation types do not cover are listed in part_relations (not checked yet). The table legs, floor and most of the chairs are hidden or outside the photo. Ids are those of the project's object list; labels are given to match objects if the ids change.",

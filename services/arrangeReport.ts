@@ -74,7 +74,9 @@ export const buildArrangeReport = (r: ArrangeReportInput) => {
     const providerName = `${ARRANGE_PROVIDER_LABELS[s.provider]} (${s.model})`;
     const lastRound = record.rounds[record.rounds.length - 1];
     const before = record.initial;
-    const after = lastRound ?? before;
+    // The state kept at the end: the last round, or an earlier one that scored better
+    const kept = record.kept;
+    const after = kept ? (kept.round === 0 ? before : record.rounds.find(rd => rd.round === kept.round) ?? lastRound) : lastRound ?? before;
     const objBefore = new Map((r.objectsBefore ?? []).map(o => [o.id, o]));
     const objectsAfter = r.objectsAfter ?? [];
     const rows = objectsAfter.map(o => ({
@@ -97,7 +99,7 @@ export const buildArrangeReport = (r: ArrangeReportInput) => {
         `Settings: effort ${s.effort}, at most ${s.maxRounds} rounds, prompt version ${s.promptVersion}, app ${s.appVersion}`,
         `Started: ${new Date(record.startedAt).toISOString()}`,
         `Ended: ${new Date(endedAt).toISOString()} (elapsed ${mmss(totals.elapsedS)})`,
-        `Outcome: ${outcome}, rounds: ${record.rounds.length}`,
+        `Outcome: ${outcome}, rounds: ${record.rounds.length}${kept ? `; kept ${kept.round === 0 ? 'the scene as before the run' : `round ${kept.round}`} (score ${kept.score.toFixed(3)}), which scored better than round ${kept.lastRound} (${kept.lastScore.toFixed(3)})` : ''}`,
         `Photo match (mean IoU with the photo masks): ${f(before?.meanIoU)} -> ${f(after?.meanIoU)}`,
         `Physical issues (floating, sunk, inside another model): ${before?.issues ?? '-'} -> ${after?.issues ?? '-'}`,
         `Relation issues (relations and sizes of the scene analysis not satisfied): ${rel(before?.relationIssues)} -> ${rel(after?.relationIssues)}`,
@@ -171,6 +173,7 @@ export const buildArrangeReport = (r: ArrangeReportInput) => {
         `started_at,${new Date(record.startedAt).toISOString()}`,
         `outcome,${outcome}`,
         `rounds,${record.rounds.length}`,
+        `kept_round,${kept ? kept.round : record.rounds.length}`,
         `elapsed_s,${f(totals.elapsedS, 1)}`,
         `api_s,${f(totals.apiS, 1)}`,
         `local_s,${f(totals.localS, 1)}`,
@@ -244,8 +247,8 @@ export const buildArrangeImageSheet = async (record: ArrangeRecord, title: strin
     const before = record.initial;
     if (!before) return undefined;
     const rows = [
-        { label: `Round 0 (before): IoU ${f(before.meanIoU)}, issues ${before.issues}${before.relationIssues !== undefined ? `, relations ${before.relationIssues}` : ''}`, images: before.images },
-        ...record.rounds.map(rd => ({ label: `Round ${rd.round}: IoU ${f(rd.meanIoU)}, issues ${rd.issues}${rd.relationIssues !== undefined ? `, relations ${rd.relationIssues}` : ''}`, images: rd.images })),
+        { label: `Round 0 (before): IoU ${f(before.meanIoU)}, issues ${before.issues}${before.relationIssues !== undefined ? `, relations ${before.relationIssues}` : ''}${record.kept?.round === 0 ? ' (kept: the run made it worse)' : ''}`, images: before.images },
+        ...record.rounds.map(rd => ({ label: `Round ${rd.round}: IoU ${f(rd.meanIoU)}, issues ${rd.issues}${rd.relationIssues !== undefined ? `, relations ${rd.relationIssues}` : ''}${record.kept?.round === rd.round ? ' (kept: best score)' : ''}`, images: rd.images })),
     ];
     const jpg = (b64: string) => `data:image/jpeg;base64,${b64}`;
     const photo = record.photo ? await loadImage(jpg(record.photo)) : undefined;

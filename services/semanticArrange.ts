@@ -80,6 +80,10 @@ export interface ArrangeScene {
     apply(edits: PlacementEdit[]): string[];
     /** Render a view with the object labels drawn on it; base64 JPEG without the data: prefix */
     render(view: ArrangeView): Promise<string>;
+    /** The placements of all models, to go back to later */
+    snapshot(): unknown;
+    /** Put the models back where a snapshot had them */
+    restore(snapshot: unknown): void;
 }
 
 export interface ArrangeOptions {
@@ -148,6 +152,8 @@ export interface ArrangeRecord {
     analysisRaw?: unknown;
     /** Reference analysis used for the evaluation */
     reference?: SceneAnalysis;
+    /** Set when the scene was set back to an earlier, better state at the end (0 = as before the run) */
+    kept?: { round: number; score: number; lastRound: number; lastScore: number };
     calls: ArrangeCallRecord[];
     rounds: ArrangeRoundRecord[];
 }
@@ -174,6 +180,8 @@ export interface ArrangeResult {
     /** The same against the reference analysis (evaluation only) */
     refRelationIssuesBefore?: number;
     refRelationIssuesAfter?: number;
+    /** Round whose state was kept, when it is not the last one (0 = the scene as before the run) */
+    keptRound?: number;
     /** The objects (with their photo match) before and after */
     objectsBefore: ArrangeObject[];
     objectsAfter: ArrangeObject[];
@@ -184,6 +192,16 @@ export const meanPhotoIoU = (objects: ArrangeObject[]): number | undefined => {
     const v = objects.flatMap(o => o.photoMatch ? [o.photoMatch.iou] : []);
     return v.length ? v.reduce((a, b) => a + b, 0) / v.length : undefined;
 };
+
+/**
+ * Score of a state for keeping the best one: mean photo IoU minus 0.02 per physical issue
+ * and per relation issue of the model's own analysis (the reference analysis, for
+ * evaluation only, is not used). A state is kept instead of the last one only when it
+ * scores at least KEEP_BEST_MARGIN higher.
+ */
+const stateScore = (m: { objects: ArrangeObject[]; issues: number; relationIssues?: number }) =>
+    (meanPhotoIoU(m.objects) ?? 0) - 0.02 * m.issues - 0.02 * (m.relationIssues ?? 0);
+const KEEP_BEST_MARGIN = 0.01;
 
 const SYSTEM_PROMPT = `You arrange a 3D scene that was reconstructed from a single photo, so that it matches the photo.
 
@@ -469,11 +487,34 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
     const relationIssuesBefore = before.relationIssues;
     const refRelationIssuesBefore = before.refRelationIssues;
     let lastObjects = objectsBefore, lastIssues = issuesBefore, lastRelationIssues = relationIssuesBefore, lastRef = refRelationIssuesBefore;
+    /** At the end: if an earlier state (or the scene before the run) scored clearly better than the last one, go back to it */
+    let keptRound: number | undefined;
+    const keepBest = () => {
+        const last = states[states.length - 1];
+        const best = states.reduce((a, b) => b.score > a.score ? b : a, states[0]);
+        if (best === last || best.score <= last.score + KEEP_BEST_MARGIN) return;
+        scene.restore(best.snap);
+        keptRound = best.round;
+        record.kept = { round: best.round, score: best.score, lastRound: last.round, lastScore: last.score };
+        lastObjects = best.objects;
+        lastIssues = best.issues;
+        lastRelationIssues = best.relationIssues;
+        lastRef = best.refRelationIssues;
+        onProgress?.(best.round === 0
+            ? `The rounds made the scene worse (score ${last.score.toFixed(3)} vs ${best.score.toFixed(3)} before the run), so the scene was set back to how it was before.`
+            : `Round ${best.round} scored better than the last round ${last.round} (${best.score.toFixed(3)} vs ${last.score.toFixed(3)}), so the scene was set back to round ${best.round}.`);
+    };
     const end = () => ({
         photoIoUBefore, photoIoUAfter: meanPhotoIoU(lastObjects), issuesBefore, issuesAfter: lastIssues,
         relationIssuesBefore, relationIssuesAfter: lastRelationIssues,
-        refRelationIssuesBefore, refRelationIssuesAfter: lastRef, objectsBefore, objectsAfter: lastObjects,
+        refRelationIssuesBefore, refRelationIssuesAfter: lastRef, keptRound, objectsBefore, objectsAfter: lastObjects,
     });
+    const keptNote = () => keptRound === undefined ? '' : keptRound === 0
+        ? ' (Arrange then set the scene back to how it was before the run, which scored better.)'
+        : ` (Arrange then set the scene back to round ${keptRound}, which scored better than the last round.)`;
+    // States after each round (0 = before), to keep the best one if the last rounds made things worse
+    type State = { round: number; score: number; snap: unknown; objects: ArrangeObject[]; issues: number; relationIssues?: number; refRelationIssues?: number };
+    const states: State[] = [{ round: 0, score: stateScore(before), snap: scene.snapshot(), objects: objectsBefore, issues: issuesBefore, relationIssues: relationIssuesBefore, refRelationIssues: before.refRelationIssues }];
     const initial = await renderAll();
     record.initial = {
         round: 0, renderMs: initial.ms, measureMs: before.ms, meanIoU: photoIoUBefore, issues: issuesBefore, relationIssues: relationIssuesBefore,
@@ -521,7 +562,8 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
                 chat.addText('You answered without calling a tool. Check the latest renderings, object list and warnings: call update_placements for another round, or finish with a summary if the scene matches the photo.');
                 continue;
             }
-            return { rounds, summary: texts.join('\n') || `${name} ended without calling finish.`, ...end() };
+            keepBest();
+            return { rounds, summary: (texts.join('\n') || `${name} ended without calling finish.`) + keptNote(), ...end() };
         }
         // Comments between rounds
         texts.forEach(t => onProgress?.(t));
@@ -529,7 +571,8 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
         const finish = calls.find(t => t.name === 'finish');
         if (finish) {
             const summary = String((finish.input as { summary?: unknown })?.summary ?? '').trim();
-            return { rounds, summary: summary || 'Done.', ...end() };
+            keepBest();
+            return { rounds, summary: (summary || 'Done.') + keptNote(), ...end() };
         }
 
         // All tool results of this turn go back together
@@ -557,6 +600,7 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
             lastIssues = after.issues;
             lastRelationIssues = after.relationIssues;
             lastRef = after.refRelationIssues;
+            states.push({ round: rounds, score: stateScore(after), snap: scene.snapshot(), objects: after.objects, issues: after.issues, relationIssues: after.relationIssues, refRelationIssues: after.refRelationIssues });
             record.rounds.push({
                 round: rounds, call: callIndex, reason, edits, problems,
                 applyMs: Math.round(applyMs), renderMs: Math.round(rendered.ms), measureMs: Math.round(after.ms),
@@ -578,5 +622,6 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
         }
         chat.addToolResults(results);
     }
-    return { rounds, summary: rounds >= maxRounds ? 'Stopped after the maximum number of rounds.' : 'Stopped: the model did not finish within the allowed number of turns.', ...end() };
+    keepBest();
+    return { rounds, summary: (rounds >= maxRounds ? 'Stopped after the maximum number of rounds.' : 'Stopped: the model did not finish within the allowed number of turns.') + keptNote(), ...end() };
 };
