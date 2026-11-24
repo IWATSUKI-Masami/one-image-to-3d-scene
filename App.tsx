@@ -1210,7 +1210,10 @@ const App: React.FC = () => {
       const text = await file.text();
       const archive = JSON.parse(text) as ProjectArchive;
 
-      if (!archive.version) throw new Error("Invalid project file");
+      if ((archive as { format?: string }).format === 'one-image-to-3d-scene/layout') {
+        throw new Error('This is a scene layout file (saved with Save in the 3D scene), not a project. Load the project first, then load the layout with Load in the 3D scene panel.');
+      }
+      if (!archive.version || !Array.isArray(archive.croppedImages)) throw new Error("This file is not a project saved with Save in the header.");
 
       // Restore Mode
       // If we loaded data but were in landing, switch to a workspace view
@@ -1284,7 +1287,10 @@ const App: React.FC = () => {
 
     } catch (e) {
       console.error("Failed to load project", e);
-      alert("Failed to load project file. It might be corrupted or incompatible.");
+      const reason = e instanceof SyntaxError
+        ? 'The file is not valid JSON (it may be incomplete or damaged).'
+        : e instanceof Error ? e.message : String(e);
+      alert(`Failed to load project file.\n\n${reason}`);
     } finally {
       setIsArchiving(false);
       // Reset input
