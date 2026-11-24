@@ -176,8 +176,12 @@ export interface HFSpaces {
 /** Background-removal model; both Spaces have the same API */
 export type BgRemovalModel = 'rmbg3' | 'rmbg2';
 
+/** Provider for Arrange in the 3D scene (semantic arrangement of the models) */
+export type ArrangeProviderSetting = 'anthropic' | 'openai' | 'gemini';
+
 export interface AISettings {
   visionProvider: VisionProvider;
+  arrangeProvider: ArrangeProviderSetting;
   imageProvider: ImageProvider;
   bgRemoval: BgRemovalModel;
   keys: AIKeys;

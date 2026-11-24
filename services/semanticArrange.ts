@@ -12,7 +12,7 @@
  * The scene itself (three.js) is behind the ArrangeScene interface, implemented by
  * the 3D scene component.
  */
-import Anthropic from '@anthropic-ai/sdk';
+import { ARRANGE_PROVIDER_LABELS, ArrangeProvider, Block, ToolResult, ToolSpec, createArrangeChat } from './arrangeProviders';
 
 /** One model in the scene, in world units (see the system prompt for the conventions) */
 export interface ArrangeObject {
@@ -74,6 +74,7 @@ export interface ArrangeScene {
 }
 
 export interface ArrangeOptions {
+    provider: ArrangeProvider;
     apiKey: string;
     model: string;
     /** The photo as a data URL or URL */
@@ -97,9 +98,6 @@ export const meanPhotoIoU = (objects: ArrangeObject[]): number | undefined => {
     const v = objects.flatMap(o => o.photoMatch ? [o.photoMatch.iou] : []);
     return v.length ? v.reduce((a, b) => a + b, 0) / v.length : undefined;
 };
-
-/** Models that accept the server-side refusal fallback ("default" form) */
-const FALLBACK_MODELS = new Set(['claude-opus-5-5', 'claude-fable-5-2', 'claude-fable-5-1', 'claude-sonnet-5-5', 'claude-opus-5']);
 
 const SYSTEM_PROMPT = `You arrange a 3D scene that was reconstructed from a single photo, so that it matches the photo.
 
@@ -134,12 +132,11 @@ Check the top view as well as the photo view: an object can look right from the 
 
 Work in rounds: call update_placements with the edits for one round (you can edit several objects at once); you then get the new object list and new renderings. Check them against the photo and correct further. Before you call finish, look at your list of remaining differences: if one of them can be fixed with the tools (e.g. a person too far from the table, hands not on the table top), fix it in another round first. Call finish when the scene matches the photo well, or when further changes would not help, with a short summary of what you changed. Do at most a few rounds.`;
 
-const TOOLS: Anthropic.Beta.BetaTool[] = [
+const TOOLS: ToolSpec[] = [
     {
         name: 'update_placements',
         description: 'Change the placement of one or more models. For each edit, the fields that are given are applied in this order: scale, scale_axes, rotate_y_deg, place_under, along_ray, move, center, rest_on, drop_on. Returns the new object list and new renderings (photo view, top view and oblique view).',
-        strict: true,
-        input_schema: {
+        schema: {
             type: 'object',
             properties: {
                 edits: {
@@ -171,8 +168,7 @@ const TOOLS: Anthropic.Beta.BetaTool[] = [
     {
         name: 'finish',
         description: 'End the arrangement when the scene matches the photo, or when further changes would not help.',
-        strict: true,
-        input_schema: {
+        schema: {
             type: 'object',
             properties: {
                 summary: { type: 'string', description: 'Short summary of what was changed and what still differs from the photo' },
@@ -211,10 +207,7 @@ const describeObjects = (scene: ArrangeScene): string => {
     return `floorY = ${round3(scene.floorY())}${mean !== undefined ? `\nmean photo_match iou = ${round3(mean)}` : ''}\nObjects:\n${lines.join('\n')}`;
 };
 
-const imageBlock = (base64: string, mediaType: 'image/jpeg' | 'image/png' = 'image/jpeg'): Anthropic.Beta.BetaImageBlockParam => ({
-    type: 'image',
-    source: { type: 'base64', media_type: mediaType, data: base64 },
-});
+const imageBlock = (base64: string): Block => ({ type: 'image', base64 });
 
 /** Photo as base64 JPEG (at most 1568 px on the long side, the size Claude uses) */
 const photoToJpeg = async (url: string): Promise<string> => {
@@ -284,22 +277,24 @@ const validateEdits = (input: unknown): { edits: PlacementEdit[]; problems: stri
 };
 
 /**
- * Let Claude arrange the scene. The scene is changed in place through `scene.apply`;
- * the caller records the result (e.g. as placements set by hand, one undo step).
+ * Let a vision model (Claude, OpenAI or Gemini) arrange the scene. The scene is changed
+ * in place through `scene.apply`; the caller records the result (e.g. as placements set
+ * by hand, one undo step).
  */
-export const arrangeSceneWithClaude = async (scene: ArrangeScene, options: ArrangeOptions): Promise<ArrangeResult> => {
-    const { apiKey, model, photoUrl, maxRounds = 6, signal, onProgress } = options;
-    const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
-    const useFallbacks = FALLBACK_MODELS.has(model);
+export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions): Promise<ArrangeResult> => {
+    const { provider, apiKey, model, photoUrl, maxRounds = 6, signal, onProgress } = options;
+    const name = ARRANGE_PROVIDER_LABELS[provider];
 
     onProgress?.('Rendering the scene…');
     const photoIoUBefore = meanPhotoIoU(scene.objects());
     const finalIoU = () => meanPhotoIoU(scene.objects());
     const [photo, photoView, topView, obliqueView] = await Promise.all([photoToJpeg(photoUrl), scene.render('photo'), scene.render('top'), scene.render('oblique')]);
 
-    const messages: Anthropic.Beta.BetaMessageParam[] = [{
-        role: 'user',
-        content: [
+    const chat = createArrangeChat({
+        provider, apiKey, model, signal,
+        system: SYSTEM_PROMPT,
+        tools: TOOLS,
+        first: [
             { type: 'text', text: 'Photo:' },
             imageBlock(photo),
             { type: 'text', text: 'Photo view of the current scene:' },
@@ -310,58 +305,35 @@ export const arrangeSceneWithClaude = async (scene: ArrangeScene, options: Arran
             imageBlock(obliqueView),
             { type: 'text', text: `${describeObjects(scene)}\n\nArrange the scene so that it matches the photo. Use update_placements, and call finish when done.` },
         ],
-    }];
+    });
 
     let rounds = 0;
     for (let turn = 0; turn < maxRounds + 3; turn++) {
-        onProgress?.(rounds === 0 ? 'Claude is looking at the photo and the scene…' : `Claude is checking round ${rounds}…`);
-        const response = await client.beta.messages.create({
-            model,
-            max_tokens: 16000,
-            system: SYSTEM_PROMPT,
-            tools: TOOLS,
-            messages,
-            output_config: { effort: 'high' },
-            ...(useFallbacks ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const } : {}),
-        }, { signal });
+        onProgress?.(rounds === 0 ? `${name} is looking at the photo and the scene…` : `${name} is checking round ${rounds}…`);
+        const { texts, calls } = await chat.next();
 
-        if (response.stop_reason === 'refusal') {
-            throw new Error(`Claude declined to arrange the scene${response.stop_details?.explanation ? `: ${response.stop_details.explanation}` : ''}.`);
+        if (calls.length === 0) {
+            // A final answer without tools becomes the summary
+            return { rounds, summary: texts.join('\n') || `${name} ended without calling finish.`, photoIoUBefore, photoIoUAfter: finalIoU() };
         }
-        if (response.stop_reason === 'max_tokens') {
-            throw new Error('Claude\'s answer was cut off (max_tokens).');
-        }
+        // Comments between rounds
+        texts.forEach(t => onProgress?.(t));
 
-        // Keep the whole assistant turn (thinking blocks included) unchanged
-        messages.push({ role: 'assistant', content: response.content });
-
-        const toolUses = response.content.filter((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === 'tool_use');
-        // Comments between rounds (a final answer without tools becomes the summary instead)
-        if (toolUses.length > 0) {
-            for (const block of response.content) {
-                if (block.type === 'text' && block.text.trim()) onProgress?.(block.text.trim());
-            }
-        }
-        if (toolUses.length === 0) {
-            const text = response.content.filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === 'text').map(b => b.text).join('\n');
-            return { rounds, summary: text.trim() || 'Claude ended without calling finish.', photoIoUBefore, photoIoUAfter: finalIoU() };
-        }
-
-        const finish = toolUses.find(t => t.name === 'finish');
+        const finish = calls.find(t => t.name === 'finish');
         if (finish) {
             const summary = String((finish.input as { summary?: unknown })?.summary ?? '').trim();
             return { rounds, summary: summary || 'Done.', photoIoUBefore, photoIoUAfter: finalIoU() };
         }
 
-        // All tool results of this turn go back in one user message
-        const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
-        for (const tool of toolUses) {
+        // All tool results of this turn go back together
+        const results: ToolResult[] = [];
+        for (const tool of calls) {
             if (tool.name !== 'update_placements') {
-                results.push({ type: 'tool_result', tool_use_id: tool.id, is_error: true, content: `Unknown tool ${tool.name}` });
+                results.push({ id: tool.id, name: tool.name, isError: true, blocks: [{ type: 'text', text: `Unknown tool ${tool.name}` }] });
                 continue;
             }
             if (rounds >= maxRounds) {
-                results.push({ type: 'tool_result', tool_use_id: tool.id, is_error: true, content: 'No more rounds are allowed. Call finish now with a summary.' });
+                results.push({ id: tool.id, name: tool.name, isError: true, blocks: [{ type: 'text', text: 'No more rounds are allowed. Call finish now with a summary.' }] });
                 continue;
             }
             const { edits, problems } = validateEdits(tool.input);
@@ -371,9 +343,9 @@ export const arrangeSceneWithClaude = async (scene: ArrangeScene, options: Arran
             problems.push(...scene.apply(edits));
             const [newPhotoView, newTopView, newObliqueView] = await Promise.all([scene.render('photo'), scene.render('top'), scene.render('oblique')]);
             results.push({
-                type: 'tool_result',
-                tool_use_id: tool.id,
-                content: [
+                id: tool.id,
+                name: tool.name,
+                blocks: [
                     { type: 'text', text: `${problems.length ? `Problems: ${problems.join('; ')}\n` : ''}Applied ${edits.length} edit(s) (round ${rounds} of at most ${maxRounds}).\n${describeObjects(scene)}\nPhoto view:` },
                     imageBlock(newPhotoView),
                     { type: 'text', text: 'Top view:' },
@@ -383,7 +355,7 @@ export const arrangeSceneWithClaude = async (scene: ArrangeScene, options: Arran
                 ],
             });
         }
-        messages.push({ role: 'user', content: results });
+        chat.addToolResults(results);
     }
     return { rounds, summary: 'Stopped after the maximum number of rounds.', photoIoUBefore, photoIoUAfter: finalIoU() };
 };

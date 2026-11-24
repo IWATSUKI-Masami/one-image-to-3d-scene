@@ -1,5 +1,6 @@
 import React from 'react';
 import { X, RotateCcw } from 'lucide-react';
+import { ARRANGE_PROVIDER_LABELS } from '../services/arrangeProviders';
 import { AIKeys, AIModels, AIProvider, AISettings, HFSpaces } from '../types';
 import { BG_REMOVAL_LABELS, BG_REMOVAL_SPACE_KEY, DEFAULT_MODELS, DEFAULT_SPACES, MODEL_SUGGESTIONS, PROVIDER_LABELS, usesBgRemoval } from '../services/ai/models';
 
@@ -12,7 +13,7 @@ interface Props {
 const KEY_FIELDS: { key: keyof AIKeys; label: string; placeholder: string }[] = [
   { key: 'openai', label: 'OpenAI API key', placeholder: 'sk-...' },
   { key: 'gemini', label: 'Google Gemini API key', placeholder: 'AIza...' },
-  { key: 'anthropic', label: 'Anthropic API key (optional: Arrange in the 3D scene)', placeholder: 'sk-ant-...' },
+  { key: 'anthropic', label: 'Anthropic API key (Arrange with Claude)', placeholder: 'sk-ant-...' },
 ];
 
 const SPACE_FIELDS: { key: keyof HFSpaces; label: string }[] = [
@@ -64,7 +65,7 @@ export const AISettingsDialog: React.FC<Props> = ({ settings, onChange, onClose 
   const isSpaceActive = (key: keyof HFSpaces) =>
     (key !== 'rmbg' && key !== 'rmbg2') || (bgRemovalUsed && key === BG_REMOVAL_SPACE_KEY[settings.bgRemoval]);
   const isActive = (field: typeof MODEL_FIELDS[number]) =>
-    field.role === 'arrange' ? true
+    field.role === 'arrange' ? settings.arrangeProvider === 'anthropic'
       : field.role === 'vision' ? field.provider === settings.visionProvider : field.provider === settings.imageProvider;
 
   return (
@@ -92,6 +93,17 @@ export const AISettingsDialog: React.FC<Props> = ({ settings, onChange, onClose 
                 value={settings.visionProvider}
                 onSelect={visionProvider => update({ visionProvider })}
               />
+            </div>
+            <div>
+              <div className="text-sm font-semibold text-slate-700 mb-1">Arrange (3D scene)</div>
+              <SegmentedButtons
+                options={ARRANGE_PROVIDER_LABELS}
+                value={settings.arrangeProvider}
+                onSelect={arrangeProvider => update({ arrangeProvider })}
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                Model for <b>Arrange</b> in the 3D scene: Claude uses its own model setting below; OpenAI and Gemini use their detection model.
+              </p>
             </div>
             <div>
               <div className="text-sm font-semibold text-slate-700 mb-1">Image completion</div>

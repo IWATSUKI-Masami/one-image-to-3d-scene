@@ -33,6 +33,12 @@ export const DEFAULT_SPACES: HFSpaces = {
   hunyuan3d: 'tencent/Hunyuan3D-2.1',
 };
 
+/** Model used by Arrange for each provider (Claude has its own setting; OpenAI and Gemini use the detection model) */
+export const arrangeModel = (settings: AISettings): string =>
+  settings.arrangeProvider === 'openai' ? settings.models.openaiVision
+    : settings.arrangeProvider === 'gemini' ? settings.models.geminiVision
+      : settings.models.claudeArrange;
+
 /** Suggestions shown in the model ID fields (any other ID can be typed in). */
 export const MODEL_SUGGESTIONS: Record<keyof AIModels, string[]> = {
   geminiVision: ['gemini-pro-latest', 'gemini-4-argon', 'gemini-3.1-pro-preview', 'gemini-3.8-flash', 'gemini-flash-latest'],
@@ -109,6 +115,7 @@ const FORMER_DEFAULTS: { models: Partial<Record<keyof AIModels, string[]>>; spac
 export const loadAISettings = (): AISettings => {
   const settings: AISettings = {
     visionProvider: 'openai',
+    arrangeProvider: 'anthropic',
     imageProvider: 'openai',
     bgRemoval: 'rmbg2', // RMBG 2.0: much lighter (a duplicate runs on a T4)
     keys: {
@@ -126,6 +133,7 @@ export const loadAISettings = (): AISettings => {
       if (isProvider(saved.visionProvider)) settings.visionProvider = saved.visionProvider;
       if (isProvider(saved.imageProvider)) settings.imageProvider = saved.imageProvider;
       if (isBgRemovalModel(saved.bgRemoval)) settings.bgRemoval = saved.bgRemoval;
+      if (saved.arrangeProvider === 'anthropic' || saved.arrangeProvider === 'openai' || saved.arrangeProvider === 'gemini') settings.arrangeProvider = saved.arrangeProvider;
       for (const k of Object.keys(DEFAULT_MODELS) as (keyof AIModels)[]) {
         const v = typeof saved.models?.[k] === 'string' ? saved.models[k].trim() : '';
         if (v && !FORMER_DEFAULTS.models[k]?.includes(v)) settings.models[k] = v;
@@ -159,6 +167,7 @@ export const saveAISettings = (settings: AISettings): void => {
       visionProvider: settings.visionProvider,
       imageProvider: settings.imageProvider,
       bgRemoval: settings.bgRemoval,
+      arrangeProvider: settings.arrangeProvider,
       models: overrides(settings.models, DEFAULT_MODELS),
       spaces: overrides(settings.spaces, DEFAULT_SPACES),
     }));

@@ -8,7 +8,8 @@ import { alignmentYawDeg, ASSUMED_HFOV_DEG, MIN_ALIGNMENT_SCORE, viewAngleDeg } 
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { Spinner } from './Spinner';
 import { DetectedObject, Model3D, SceneLayout } from '../types';
-import { ArrangeObject, ArrangeScene, ArrangeView, PlacementEdit, arrangeSceneWithClaude } from '../services/semanticArrange';
+import { ArrangeObject, ArrangeScene, ArrangeView, PlacementEdit, arrangeScene } from '../services/semanticArrange';
+import { ARRANGE_PROVIDER_LABELS, ArrangeProvider } from '../services/arrangeProviders';
 import { Box2D, DepthRange, ObjectMask, depthFromBrightness, loadObjectMask, medianDepthInBox, sameBox } from './depthSampling';
 
 const boxKey = (box: Box2D): string => box.map(v => v.toFixed(6)).join(',');
@@ -94,6 +95,44 @@ const sameTransform = (a?: SavedTransform, b?: SavedTransform) =>
 const isVec3 = (v: unknown): v is [number, number, number] =>
     Array.isArray(v) && v.length === 3 && v.every(n => typeof n === 'number' && Number.isFinite(n));
 
+/** An object's mask in the photo (SAM 2.1), resampled to W×H: 1 = object */
+const loadMaskGrid = async (url: string, W: number, H: number): Promise<Uint8Array> => {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const el = new Image();
+        if (!url.startsWith('data:') && !url.startsWith('blob:')) el.crossOrigin = 'anonymous';
+        el.onload = () => resolve(el);
+        el.onerror = reject;
+        el.src = url;
+    });
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const ctx = c.getContext('2d', { willReadFrequently: true })!;
+    ctx.drawImage(img, 0, 0, W, H);
+    const { data } = ctx.getImageData(0, 0, W, H);
+    const m = new Uint8Array(W * H);
+    for (let i = 0; i < m.length; i++) m[i] = data[i * 4 + 3] > 128 ? 1 : 0;
+    return m;
+};
+
+/** Photo match of each object: its visible part from the photo's camera (ids === i + 1) against its mask */
+const photoMatchStats = (ids: Uint8Array, masks: (Uint8Array | null)[], W: number, H: number) =>
+    masks.map((mask, i) => {
+        if (!mask) return undefined;
+        let inter = 0, union = 0, rendered = 0, maskArea = 0, rx = 0, ry = 0, mx = 0, my = 0;
+        for (let p = 0; p < ids.length; p++) {
+            const r = ids[p] === i + 1 ? 1 : 0, m = mask[p];
+            if (r) { rendered++; rx += p % W; ry += Math.floor(p / W); }
+            if (m) { maskArea++; mx += p % W; my += Math.floor(p / W); }
+            if (r && m) inter++;
+            if (r || m) union++;
+        }
+        if (maskArea === 0) return undefined;
+        const offset: [number, number] = rendered > 0
+            ? [(rx / rendered - mx / maskArea) / W, (ry / rendered - my / maskArea) / H]
+            : [0, 0];
+        return { iou: union ? inter / union : 0, areaRatio: rendered / maskArea, offset, mask: [mx / maskArea / W, my / maskArea / H] as [number, number] };
+    });
+
 interface DepthOnlySceneProps {
     imageUrl: string;
     depthMapUrl: string;
@@ -107,10 +146,9 @@ interface DepthOnlySceneProps {
     initialLayout?: SceneLayout;
     /** Called when placements set by hand, the settings or the camera change, so the project can save them */
     onLayoutChange?: (layout: SceneLayout) => void;
-    /** Anthropic API key and Claude model for Arrange (semantic arrangement of the models) */
-    claudeApiKey?: string;
-    claudeModel?: string;
-    /** Opens the AI Settings dialog (when the Anthropic API key is missing) */
+    /** Provider, API key and model for Arrange (semantic arrangement of the models) */
+    arrange?: { provider: ArrangeProvider; apiKey: string; model: string };
+    /** Opens the AI Settings dialog (when the API key for Arrange is missing) */
     onOpenSettings?: () => void;
 }
 
@@ -124,8 +162,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     sceneName,
     initialLayout,
     onLayoutChange,
-    claudeApiKey,
-    claudeModel,
+    arrange,
     onOpenSettings,
 }) => {
     const mountRef = useRef<HTMLDivElement>(null);
@@ -146,7 +183,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     const [showInfo, setShowInfo] = useState(true);
     const [showWholeModelBoxes, setShowWholeModelBoxes] = useState(false); // Whole Boxes off by default
     const [transformMode, setTransformMode] = useState<'translate' | 'rotate' | 'scale'>('translate');
-    // Arrange (Claude): render function set by the scene setup, progress log, cancel
+    // Arrange: render function set by the scene setup, progress log, cancel
     const arrangeRenderRef = useRef<((view: ArrangeView, labels: { text: string; center: THREE.Vector3 }[]) => string) | null>(null);
     // Object-id rendering from the photo's camera (visible parts only): 0 = none, i + 1 = containers[i]
     const idRenderRef = useRef<((containers: THREE.Object3D[], W: number, H: number) => Uint8Array) | null>(null);
@@ -261,7 +298,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     };
 
     /**
-     * Arrange: let Claude move, turn and scale the models so that the scene matches the
+     * Arrange: let a vision model (Claude, OpenAI or Gemini) move, turn and scale the models so that the scene matches the
      * photo (supports, seated people, relative sizes, orientation). The result becomes
      * placements set by hand and one Undo step.
      */
@@ -299,10 +336,102 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         }
     };
 
+    /** Masks in the photo of these models (null where an object has no mask) */
+    const loadEntryMasks = (models: Model3D[], W: number, H: number) => Promise.all(models.map(async (model) => {
+        const obj = model.box_2d ? detectedObjects.find(o => o.mask && sameBox(o.box_2d, model.box_2d!)) : undefined;
+        if (!obj?.mask) return null;
+        try {
+            return await loadMaskGrid(obj.mask.url, W, H);
+        } catch (e) {
+            console.warn(`Photo match: could not load the mask of ${model.label}`, e);
+            return null;
+        }
+    }));
+
+    /**
+     * Photo match image (for checking and for papers): over the faded photo, for each
+     * object, green = the model's visible part from the photo's camera overlaps the
+     * object's mask, red = mask only (the model is missing there), blue = model only;
+     * object names with their IoU, and the mean IoU. Also a CSV of the values.
+     */
+    const [photoMatchView, setPhotoMatchView] = useState<{ png: string; csv: string; mean: number | undefined } | null>(null);
+    const handlePhotoMatch = async () => {
+        const idRender = idRenderRef.current;
+        if (!idRender) return;
+        const entries = positionedModels.flatMap((model) => {
+            const container = meshContainersRef.current.find(c => c.userData.modelId === model.id);
+            return container ? [{ model, container }] : [];
+        });
+        if (entries.length === 0) return;
+        const W = 1200, H = Math.max(1, Math.round(W / originalAspectRatio));
+        const masks = await loadEntryMasks(entries.map(e => e.model), W, H);
+        if (masks.every(m => !m)) {
+            alert('No object masks: segment the objects first (Segment Objects above the photo).');
+            return;
+        }
+        const ids = idRender(entries.map(e => e.container), W, H);
+        const stats = photoMatchStats(ids, masks, W, H);
+        const photo = await loadImageAsync(imageUrl);
+        const c = document.createElement('canvas');
+        c.width = W; c.height = H + 40;
+        const ctx = c.getContext('2d')!;
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, c.width, c.height);
+        ctx.globalAlpha = 0.35;
+        ctx.drawImage(photo, 0, 0, W, H);
+        ctx.globalAlpha = 1;
+        const overlay = ctx.getImageData(0, 0, W, H);
+        const d = overlay.data;
+        const paint = (p: number, r: number, g: number, b: number) => {
+            d[p * 4] = Math.round(d[p * 4] * 0.35 + r * 0.65);
+            d[p * 4 + 1] = Math.round(d[p * 4 + 1] * 0.35 + g * 0.65);
+            d[p * 4 + 2] = Math.round(d[p * 4 + 2] * 0.35 + b * 0.65);
+        };
+        for (let p = 0; p < W * H; p++) {
+            const id = ids[p];
+            let inMask = -1;
+            for (let i = 0; i < masks.length; i++) if (masks[i]?.[p]) { inMask = i; break; }
+            if (id > 0 && masks[id - 1]?.[p]) paint(p, 20, 170, 80);          // overlap
+            else if (inMask >= 0) paint(p, 225, 50, 50);                       // in the photo, not rendered there
+            else if (id > 0 && masks[id - 1]) paint(p, 40, 110, 235);           // rendered, not in the photo
+        }
+        ctx.putImageData(overlay, 0, 0);
+        // Labels at the mask centroids
+        ctx.font = 'bold 16px sans-serif';
+        ctx.textBaseline = 'middle';
+        const names = entries.map(e => e.model.label.replace(/\s*\(Completed\)\s*$/i, ''));
+        stats.forEach((st, i) => {
+            if (!st) return;
+            const text = `${names[i]}  ${st.iou.toFixed(2)}`;
+            const w = ctx.measureText(text).width + 8;
+            const x = Math.min(Math.max(st.mask[0] * W, w / 2), W - w / 2), y = Math.min(Math.max(st.mask[1] * H, 12), H - 12);
+            ctx.fillStyle = 'rgba(0,0,0,0.7)';
+            ctx.fillRect(x - w / 2, y - 11, w, 22);
+            ctx.fillStyle = '#fff';
+            ctx.fillText(text, x - w / 2 + 4, y);
+        });
+        const valid = stats.filter((v): v is NonNullable<typeof v> => !!v);
+        const mean = valid.length ? valid.reduce((a, v) => a + v.iou, 0) / valid.length : undefined;
+        // Legend
+        ctx.font = '15px sans-serif';
+        let lx = 10;
+        const legend: [string, string][] = [['#14aa50', 'overlap'], ['#e13232', 'photo only (missing in the scene)'], ['#286eeb', 'scene only (not in the photo)']];
+        for (const [color, label] of legend) {
+            ctx.fillStyle = color; ctx.fillRect(lx, H + 13, 14, 14); lx += 20;
+            ctx.fillStyle = '#222'; ctx.fillText(label, lx, H + 20); lx += ctx.measureText(label).width + 22;
+        }
+        if (mean !== undefined) ctx.fillText(`mean IoU ${mean.toFixed(3)} (${valid.length} objects)`, lx + 10, H + 20);
+        const csv = ['object,iou,area_ratio,offset_x,offset_y',
+            ...stats.flatMap((st, i) => st ? [`"${names[i].replace(/"/g, '""')}",${st.iou.toFixed(4)},${st.areaRatio.toFixed(4)},${st.offset[0].toFixed(4)},${st.offset[1].toFixed(4)}`] : []),
+            ...(mean !== undefined ? [`mean,${mean.toFixed(4)},,,`] : [])].join('\n');
+        setPhotoMatchView({ png: c.toDataURL('image/png'), csv, mean });
+    };
+
     const handleArrange = async () => {
         if (arranging) return;
-        if (!claudeApiKey) {
-            alert('Arrange uses Claude (Anthropic API). Enter an Anthropic API key in AI Settings.');
+        if (!arrange?.apiKey) {
+            const name = ARRANGE_PROVIDER_LABELS[arrange?.provider ?? 'anthropic'];
+            alert(`Arrange uses ${name} (set in AI Settings → Arrange). Enter the ${name === 'Claude' ? 'Anthropic' : name} API key in AI Settings.`);
             onOpenSettings?.();
             return;
         }
@@ -318,7 +447,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             alert(`The 3D models are still loading (${entries.length} of ${expected}). Try Arrange again in a moment.`);
             return;
         }
-        // Short ids for Claude (o1, o2, ...)
+        // Short ids for the model (o1, o2, ...)
         const shortId = new Map(entries.map((e, i) => [e.model.id, `o${i + 1}`]));
         const byShort = new Map(entries.map((e, i) => [`o${i + 1}`, e]));
         const describe = (model: Model3D) => model.box_2d
@@ -336,48 +465,15 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
 
         // Photo match: each object's mask in the photo (SAM 2.1), at the size of the id rendering
         const MW = 384, MH = Math.max(1, Math.round(MW / originalAspectRatio));
-        const masks = await Promise.all(entries.map(async ({ model }) => {
-            const obj = model.box_2d ? detectedObjects.find(o => o.mask && sameBox(o.box_2d, model.box_2d!)) : undefined;
-            if (!obj?.mask) return null;
-            try {
-                const img = await loadImageAsync(obj.mask.url);
-                const c = document.createElement('canvas');
-                c.width = MW; c.height = MH;
-                const ctx = c.getContext('2d', { willReadFrequently: true })!;
-                ctx.drawImage(img, 0, 0, MW, MH);
-                const { data } = ctx.getImageData(0, 0, MW, MH);
-                const m = new Uint8Array(MW * MH);
-                for (let i = 0; i < m.length; i++) m[i] = data[i * 4 + 3] > 128 ? 1 : 0;
-                return m;
-            } catch (e) {
-                console.warn(`Arrange: could not load the mask of ${model.label}`, e);
-                return null;
-            }
-        }));
+        const masks = await loadEntryMasks(entries.map(e => e.model), MW, MH);
         const photoMatches = (): (ArrangeObject['photoMatch'])[] => {
             const idRender = idRenderRef.current;
             if (!idRender || masks.every(m => !m)) return entries.map(() => undefined);
             const ids = idRender(entries.map(e => e.container), MW, MH);
-            return entries.map((_, i) => {
-                const mask = masks[i];
-                if (!mask) return undefined;
-                let inter = 0, union = 0, rendered = 0, maskArea = 0, rx = 0, ry = 0, mx = 0, my = 0;
-                for (let p = 0; p < ids.length; p++) {
-                    const r = ids[p] === i + 1 ? 1 : 0, m = mask[p];
-                    if (r) { rendered++; rx += p % MW; ry += Math.floor(p / MW); }
-                    if (m) { maskArea++; mx += p % MW; my += Math.floor(p / MW); }
-                    if (r && m) inter++;
-                    if (r || m) union++;
-                }
-                if (maskArea === 0) return undefined;
-                const offset: [number, number] = rendered > 0
-                    ? [(rx / rendered - mx / maskArea) / MW, (ry / rendered - my / maskArea) / MH]
-                    : [0, 0];
-                return { iou: union ? inter / union : 0, areaRatio: rendered / maskArea, offset };
-            });
+            return photoMatchStats(ids, masks, MW, MH).map(m => m && { iou: m.iou, areaRatio: m.areaRatio, offset: m.offset });
         };
 
-        const arrangeScene: ArrangeScene = {
+        const arrangeSceneApi: ArrangeScene = {
             objects: (): ArrangeObject[] => {
               const matches = photoMatches();
               return entries.map(({ model, container }, i) => {
@@ -498,9 +594,10 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         const log = (m: string) => setArrangeLog(prev => [...prev.slice(-30), m]);
         let outcome: 'done' | 'failed' | 'cancelled' = 'done';
         try {
-            const result = await arrangeSceneWithClaude(arrangeScene, {
-                apiKey: claudeApiKey,
-                model: claudeModel || 'claude-opus-5-5',
+            const result = await arrangeScene(arrangeSceneApi, {
+                provider: arrange.provider,
+                apiKey: arrange.apiKey,
+                model: arrange.model,
                 photoUrl: imageUrl,
                 signal: controller.signal,
                 onProgress: log,
@@ -1783,7 +1880,36 @@ transformControlsRef.current.attach(meshContainer);
         <div className="w-full min-h-[600px] bg-slate-800 rounded-xl border border-slate-700 relative overflow-hidden shadow-inner">
             <div ref={mountRef} className="w-full h-[600px]" />
 
-            {/* Arrange (Claude) progress: bottom left, in place of the info panel (the page's Processing Times panel can cover the bottom right) */}
+            {/* Photo match image */}
+            {photoMatchView && (
+                <div className="absolute inset-0 z-30 bg-slate-900/80 flex items-center justify-center p-4" onClick={() => setPhotoMatchView(null)}>
+                    <div className="bg-white rounded-lg shadow-xl max-w-full max-h-full overflow-auto p-3" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between gap-3 mb-2">
+                            <span className="text-sm font-semibold text-slate-700">
+                                📏 Photo match{photoMatchView.mean !== undefined && ` — mean IoU ${photoMatchView.mean.toFixed(3)}`}
+                            </span>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => { const a = document.createElement('a'); a.href = photoMatchView.png; a.download = `${fileBase()}_photo-match_${fileStamp()}.png`; a.click(); }}
+                                    className="px-2 py-1 text-xs rounded bg-cyan-600 text-white hover:bg-cyan-500"
+                                >
+                                    Save PNG
+                                </button>
+                                <button
+                                    onClick={() => download(new Blob(['\uFEFF' + photoMatchView.csv], { type: 'text/csv' }), `${fileBase()}_photo-match_${fileStamp()}.csv`)}
+                                    className="px-2 py-1 text-xs rounded bg-cyan-600 text-white hover:bg-cyan-500"
+                                >
+                                    Save CSV
+                                </button>
+                                <button onClick={() => setPhotoMatchView(null)} className="text-slate-400 hover:text-slate-700 text-lg leading-none px-1" title="Close">×</button>
+                            </div>
+                        </div>
+                        <img src={photoMatchView.png} alt="Photo match" className="max-w-full max-h-[480px] block" />
+                    </div>
+                </div>
+            )}
+
+            {/* Arrange progress: bottom left, in place of the info panel (the page's Processing Times panel can cover the bottom right) */}
             {arrangeLog.length > 0 && (
                 <div className={`absolute bottom-4 left-4 z-20 w-80 max-h-64 flex flex-col bg-slate-900/95 border-2 rounded-lg shadow-lg text-xs text-slate-200 ${
                     arrangeStatus === 'done' ? 'border-emerald-500' : arrangeStatus === 'failed' ? 'border-red-500' : 'border-violet-500/60'}`}>
@@ -2104,10 +2230,20 @@ transformControlsRef.current.attach(meshContainer);
                             disabled={arranging || !perspective}
                             className="px-2 py-1 text-xs rounded bg-violet-600 text-white hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed"
                             title={perspective
-                                ? 'Arrange the models with Claude (Anthropic API) so that the scene matches the photo: objects on the table, people on their chairs, plausible sizes and orientations. Uses several API calls with images. The result can be undone (Undo in edit mode).'
+                                ? `Arrange the models with ${ARRANGE_PROVIDER_LABELS[arrange?.provider ?? 'anthropic']} (choose the provider in AI Settings) so that the scene matches the photo: objects on the table, people on their chairs, plausible sizes and orientations. Uses several API calls with images. The result can be undone (Undo in edit mode).`
                                 : 'Arrange needs Perspective on'}
                         >
                             {arranging ? '✨ Arranging…' : '✨ Arrange'}
+                        </button>
+                        <button
+                            onClick={handlePhotoMatch}
+                            disabled={arranging || !perspective}
+                            className="px-2 py-1 text-xs rounded bg-slate-600 text-slate-200 hover:bg-slate-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                            title={perspective
+                                ? 'Photo match: compare each model, seen from the photo\'s camera, with its mask in the photo (IoU), shown as an image that can be saved (PNG, CSV)'
+                                : 'Photo match needs Perspective on'}
+                        >
+                            📏 Match
                         </button>
                         {/* Edit Mode Toggle - on right */}
                         <button

@@ -46,7 +46,7 @@ An article explaining the method and its implementation (in Japanese) is on Qiit
 | 6 | 3D generation | TRELLIS.2 or Hunyuan3D-2.1 (Hugging Face Spaces) → textured GLB |
 | 7 | Scene composition | Three.js; models are aligned to point-cloud bounding boxes (PC Box) built from the depth map. By default the boxes are back-projected with perspective (see Usage) |
 | 8 | Front alignment | Each model is rendered around the vertical axis and compared with its completed image (silhouette, aspect ratio, brightness), then turned to match it and by the view angle, so it faces the camera as in the photo |
-| 9 | Semantic arrangement (optional) | **Arrange** in the 3D scene: Claude (Anthropic API) compares the photo with renderings of the scene (from the photo's camera, from above and obliquely) and moves, turns and scales the models with a tool until objects rest on their supports, seated people sit on their chairs, and sizes and orientations match the photo; it sees new renderings after each round |
+| 9 | Semantic arrangement (optional) | **Arrange** in the 3D scene: a vision model (Claude by default, or OpenAI / Gemini) compares the photo with renderings of the scene (from the photo's camera, from above and obliquely) and moves, turns and scales the models with a tool until objects rest on their supports, seated people sit on their chairs, and sizes and orientations match the photo; it sees new renderings after each round |
 
 ### Walkthrough (sample photo)
 
@@ -79,7 +79,7 @@ Results of the current version. Detection and completion use OpenAI (only the ri
 
 - Node.js 18 or later
 - **An API key for OpenAI or Google Gemini** (or both, if you use one for detection and the other for completion)
-- Optional: **an Anthropic API key** for **Arrange** in the 3D scene (semantic arrangement with Claude)
+- Optional, for **Arrange** in the 3D scene (semantic arrangement): **an Anthropic API key** to use Claude (default), or choose OpenAI or Gemini in AI Settings and use their key
 - **Hugging Face token** (required for 3D generation with TRELLIS.2 / Hunyuan3D-2.1; recommended for background removal and depth estimation, since ZeroGPU usage is counted against your own quota). Create a **Read** token in **Settings → Access Tokens** on Hugging Face and enter it in the **HF Token** field at the top right of the app; see [docs/hugging-face-spaces.md](docs/hugging-face-spaces.md)
 
 ## Setup
@@ -120,6 +120,7 @@ In AI Settings you can set:
 | Section | What it sets |
 |---|---|
 | Object detection & checks | Provider for detection and checks (OpenAI / Gemini; default OpenAI) |
+| Arrange (3D scene) | Provider for Arrange (Claude / OpenAI / Gemini; default Claude). OpenAI and Gemini use their detection model |
 | Image completion | Provider for completion (OpenAI / Gemini; default OpenAI) |
 | Background removal | Background-removal model (RMBG 2.0 / RMBG 3.0; default RMBG 2.0). Only used with Gemini completion; disabled when OpenAI is selected |
 | API keys | OpenAI, Gemini and (for Arrange) Anthropic API keys |
@@ -132,7 +133,7 @@ Default models:
 |---|---|---|
 | Object detection, canvas expansion estimate, completion check | OpenAI / Gemini | `gpt-5.6-sol` / `gemini-pro-latest` |
 | Image completion (outpainting) | OpenAI / Gemini | `gpt-image-2.6-sunburst` / `gemini-3-pro-image` |
-| Arrange in the 3D scene (optional) | Anthropic | `claude-opus-5-5` |
+| Arrange in the 3D scene (optional) | Anthropic / OpenAI / Gemini | `claude-opus-5-5` / the detection models above |
 
 - OpenAI returns completions with a transparent background. Gemini cannot, so its completions go through background removal; a failed removal is marked on the completed card.
 - OpenAI is the default for both detection and completion.
@@ -183,7 +184,7 @@ The automatic placement aims for accuracy, and that costs API calls (OpenAI / Ge
 | Completion (per object) | 1 VLM call (how far the object extends beyond its box), then per attempt 1 image generation (with the whole photo as a second, reference image) and 1 VLM check. An attempt is repeated, up to 3 attempts, when parts are cut off, the proportions look wrong or the visible part moved — so one object can cost up to 3 image generations and 4 VLM calls. With **Attempts: 1** it is 1 image generation and 1 VLM call |
 | 3D generation (per object) | 1 Hugging Face Space call (GPU time / ZeroGPU quota, not API credits); people use a higher resolution |
 | Object masks (SAM 2.1), front alignment, depth-based placement | Run in the browser (the depth map is 1 Space call per photo); no API credits |
-| Arrange in the 3D scene (optional, per run) | Up to about 8 Claude calls; each sends the photo and three renderings (only when you press **Arrange**) |
+| Arrange in the 3D scene (optional, per run) | Up to about 8 calls to the chosen model; each sends the photo and three renderings (only when you press **Arrange**) |
 
 The repeated attempts are there so that the objects can be placed automatically. **If exact automatic placement is not important to you and you are going to adjust the scene yourself, use only what you need:**
 
@@ -191,7 +192,7 @@ The repeated attempts are there so that the objects can be placed automatically.
 - Complete and generate 3D models only for the objects you want (select their cards). For example, leave out the partly visible chairs or the table.
 - Accept the first result: do not complete an object again just because its card shows "Part: matched" or "Part: not found"; correct its placement by hand instead.
 - Adjust the scene by hand: turn on **Edit ON** in the 3D scene, click a model, and move / rotate / scale it with the transform controls (**Reset** restores the automatic placement). With **Uniform** (on by default in Scale), any scale handle scales all axes by the same factor; turn it off to scale one axis only. **Undo** / **Redo** (Ctrl+Z / Ctrl+Y) step through the moves, rotations, scales and resets. **Save** in the scene panel saves the layout — where each model is, the scene settings and the camera — as a small JSON file (a few KB; `<photo name>_layout-edited_<date-time>.json` if models were placed by hand, otherwise `_layout_`); the models are not included, so load it with **Load** into the same project. Hand placements are also kept when the scene is rebuilt (e.g. after changing the depth range) and are saved with the project (**Save** in the header); the layout file is for keeping or sharing several placements of the same project. **GLB** exports the placed models as one GLB file for other 3D software (large, since it contains every model).
-- Or let Claude arrange it: **✨ Arrange** in the scene panel (needs an Anthropic API key in AI Settings, and **Perspective** on). Claude compares the photo with renderings of the scene and changes the placements in a few rounds; the progress and elapsed time are shown at the bottom left (**Cancel** stops it); when it ends, the panel turns green ("Arrange finished"), a short chime sounds, and the tab title is marked if the page is in the background. The log ends with the **photo match** before and after (mean IoU between each model's visible part seen from the photo's camera and its mask in the photo), which Claude also uses to keep the objects where they are in the photo. The result is a hand placement: it is saved with the project, and **Undo** in edit mode takes back the whole run.
+- Or let a vision model arrange it: **✨ Arrange** in the scene panel (needs **Perspective** on, and the API key of the provider chosen under **Arrange** in AI Settings: Claude by default, or OpenAI or Gemini). The model compares the photo with renderings of the scene and changes the placements in a few rounds; the progress and elapsed time are shown at the bottom left (**Cancel** stops it); when it ends, the panel turns green ("Arrange finished"), a short chime sounds, and the tab title is marked if the page is in the background. The log ends with the **photo match** before and after (mean IoU between each model's visible part seen from the photo's camera and its mask in the photo), which the model also uses to keep the objects where they are in the photo. **📏 Match** shows the photo match of the current scene at any time as an image over the photo (green = model and mask overlap, red = in the photo only, blue = in the scene only, with each object's IoU) and saves it as PNG and the values as CSV, e.g. before and after Arrange for a paper. The result is a hand placement: it is saved with the project, and **Undo** in edit mode takes back the whole run.
 - Object masks, front alignment and the scene itself cost no credits and can stay on.
 
 

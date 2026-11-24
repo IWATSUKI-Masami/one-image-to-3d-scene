@@ -35,7 +35,7 @@ import { detectObjectsInImage, generateCompletion, verifyCompletion, estimateHid
 const FACE_STYLE_OPTIONS = (Object.entries(FACE_STYLE_LABELS) as [FaceStyle, string][])
   .map(([value, label]) => ({ value, label }));
 const FACE_STYLE_HINT = 'Faces of people in completion. Calm: sharp face, relaxed expression with the mouth closed (open mouths and teeth look uncanny in 3D). Redraw: sharp face, same expression. Mannequin: smooth face without painted features. As in photo: copied as it is.';
-import { loadAISettings, saveAISettings, hasRequiredKeys, bgRemovalSpace, PROVIDER_LABELS, FACE_STYLE_LABELS } from './services/ai/models';
+import { loadAISettings, saveAISettings, hasRequiredKeys, bgRemovalSpace, PROVIDER_LABELS, FACE_STYLE_LABELS, arrangeModel } from './services/ai/models';
 import { AISettingsDialog } from './components/AISettingsDialog';
 import { cropObjectsFromImage, removeBackgroundWithRembg, findBestMatchPosition, hasTransparentBackground, generate3DModelWithHunyuan3D, generate3DModelWithTrellis, blobUrlToDataUrl, dataUrlToBlobUrl, generateDepthMap, prepareImageForCompletion, calculateTightBoundingBox, prepareCompletionCanvas, verifyPartPlacement, makeReferenceImage } from './utils';
 import { DetectedObject, CroppedObject, Model3D, ModelProvider, ProjectArchive, AISettings, FaceStyle, CompletionInfo, PartBoxSource, CompletionAttempt, SceneLayout } from './types';
@@ -2329,8 +2329,7 @@ const App: React.FC = () => {
                             sceneName={sourceImageName ?? undefined}
                             initialLayout={sceneLayoutRef.current ?? undefined}
                             onLayoutChange={(layout) => { sceneLayoutRef.current = layout; }}
-                            claudeApiKey={aiSettings.keys.anthropic}
-                            claudeModel={aiSettings.models.claudeArrange}
+                            arrange={{ provider: aiSettings.arrangeProvider, apiKey: aiSettings.keys[aiSettings.arrangeProvider], model: arrangeModel(aiSettings) }}
                             onOpenSettings={openAISettings}
                           />
                         </div>
