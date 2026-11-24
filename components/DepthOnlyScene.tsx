@@ -458,7 +458,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             'object,iou,area_ratio,offset_x,offset_y,physical_warnings',
             ...stats.flatMap((st, i) => {
                 const w = physics.issues[i].map(x => x.kind === 'penetration'
-                    ? `${Math.round(x.amount * 100)}% inside ${names[x.other]}`
+                    ? (x.amount >= 0.02 ? `${Math.round(x.amount * 100)}% inside ${names[x.other]}` : `cuts through ${names[x.other]} (${(x.depth ?? 0).toFixed(3)} deep)`)
                     : `${x.kind} ${x.amount.toFixed(3)}${x.other >= 0 ? ` (${names[x.other]})` : ' (floor)'}`).join('; ');
                 return st ? [`"${names[i].replace(/"/g, '""')}",${st.iou.toFixed(4)},${st.areaRatio.toFixed(4)},${st.offset[0].toFixed(4)},${st.offset[1].toFixed(4)},"${w}"`] : [];
             }),
@@ -523,7 +523,8 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             return result.issues.map(list => list.map(x =>
                 x.kind === 'floating' ? `floating ${r3(x.amount)} above ${other(x.other)}`
                     : x.kind === 'sunk' ? `${r3(x.amount)} below the ${x.other < 0 ? 'floor' : `top of ${other(x.other)}`}`
-                        : `${Math.round(x.amount * 100)}% of its surface is inside ${other(x.other)}`));
+                        : x.amount >= 0.02 ? `${Math.round(x.amount * 100)}% of its surface is inside ${other(x.other)}`
+                            : `cuts through ${other(x.other)} (up to ${r3(x.depth ?? 0)} deep)`));
         };
 
         const arrangeSceneApi: ArrangeScene = {
@@ -658,7 +659,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         setArrangeElapsed(0);
         const timer = window.setInterval(() => setArrangeElapsed(Math.round((Date.now() - startedAt) / 1000)), 1000);
         // Full log with times since the start, for the report
-        const mmss = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.round(sec) % 60).padStart(2, '0')}`;
+        const mmss = (sec: number) => { const s = Math.round(sec); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
         const fullLog: string[] = [`[0:00] Starting…`];
         const log = (m: string) => {
             fullLog.push(`[${mmss((Date.now() - startedAt) / 1000)}] ${m}`);
@@ -689,7 +690,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             const iou = result.photoIoUBefore !== undefined && result.photoIoUAfter !== undefined
                 ? `\nPhoto match (mean IoU with the photo masks): ${result.photoIoUBefore.toFixed(2)} → ${result.photoIoUAfter.toFixed(2)}`
                 : '';
-            log(`Done (${result.rounds} round${result.rounds === 1 ? '' : 's'}). ${result.summary}${iou}\nPhysical issues (floating, sunk, inside another model): ${result.issuesBefore} → ${result.issuesAfter}`);
+            log(`Done (${result.rounds} round${result.rounds === 1 ? '' : 's'}). ${result.summary}${iou}\nPhysical issues (floating, sunk, inside another model): ${result.issuesBefore} → ${result.issuesAfter}${result.relationIssuesBefore !== undefined ? `\nRelation issues (scene analysis): ${result.relationIssuesBefore} → ${result.relationIssuesAfter}` : ''}`);
         } catch (e: any) {
             outcome = controller.signal.aborted ? 'cancelled' : 'failed';
             log(controller.signal.aborted ? 'Cancelled.' : `Failed: ${e?.message || e}`);
@@ -727,7 +728,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     outcome,
                     ...(result?.photoIoUBefore !== undefined ? { photoIoUBefore: result.photoIoUBefore } : {}),
                     ...(result?.photoIoUAfter !== undefined ? { photoIoUAfter: result.photoIoUAfter } : {}),
-                    ...(result ? { issuesBefore: result.issuesBefore, issuesAfter: result.issuesAfter } : {}),
+                    ...(result ? { issuesBefore: result.issuesBefore, issuesAfter: result.issuesAfter, relationIssuesBefore: result.relationIssuesBefore, relationIssuesAfter: result.relationIssuesAfter } : {}),
                     elapsedS: Math.round(built.totals.elapsedS * 10) / 10,
                     apiS: Math.round(built.totals.apiS * 10) / 10,
                     inputTokens: built.totals.inputTokens,

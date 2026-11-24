@@ -5,8 +5,10 @@
  *   of a model it stands over), e.g. a person whose feet do not touch the floor;
  * - sunk: the model's bottom is a little below the top of the model it stands on
  *   (a cup sunk into the table top);
- * - penetration: part of a model's surface is inside another model (tested with rays and
- *   the nearest face on the meshes, accelerated by a bounding volume hierarchy).
+ * - penetration: part of a model's surface is inside another model, either a larger part
+ *   or a few points that reach deep (one model cutting through another, e.g. a thin table
+ *   top through a person); tested with rays and the nearest face on the meshes,
+ *   accelerated by a bounding volume hierarchy.
  */
 import * as THREE from 'three';
 import { MeshBVH } from 'three-mesh-bvh';
@@ -17,6 +19,8 @@ export interface PhysicsIssue {
     other: number;
     /** Gap or depth in world units (floating, sunk), or the fraction of the surface inside (penetration) */
     amount: number;
+    /** Penetration: how deep the surface points inside reach (world units) */
+    depth?: number;
 }
 
 export interface PhysicsResult {
@@ -67,8 +71,8 @@ const crossings = (p: THREE.Vector3, dir: THREE.Vector3, meshes: THREE.Mesh[]): 
     return hits;
 };
 
-/** Whether the nearest surface faces away from `p` (p behind the nearest face) */
-const behindNearestFace = (p: THREE.Vector3, meshes: THREE.Mesh[]): boolean => {
+/** Distance to the nearest surface (world units) and whether `p` is behind that face */
+const nearestSurface = (p: THREE.Vector3, meshes: THREE.Mesh[]): { distance: number; behind: boolean } => {
     let best = Infinity, inside = false;
     const local = new THREE.Vector3(), inv = new THREE.Matrix4();
     const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), n = new THREE.Vector3();
@@ -89,9 +93,11 @@ const behindNearestFace = (p: THREE.Vector3, meshes: THREE.Mesh[]): boolean => {
         const d = point.distanceTo(p);
         if (d < best) { best = d; inside = n.dot(point.sub(p)) > 0; }
     }
-    return inside;
+    return { distance: best, behind: inside };
 };
 
+/** Surface points needed for a deep penetration with a small fraction */
+const MIN_DEEP_POINTS = 3;
 const UP = new THREE.Vector3(0, 1, 0), SIDE = new THREE.Vector3(1, 0, 0);
 /**
  * Whether a point is inside a model. Generated meshes often have holes or inner shells,
@@ -100,7 +106,7 @@ const UP = new THREE.Vector3(0, 1, 0), SIDE = new THREE.Vector3(1, 0, 0);
  */
 const isInside = (p: THREE.Vector3, meshes: THREE.Mesh[]): boolean => {
     let votes = crossings(p, UP, meshes) % 2 + crossings(p, SIDE, meshes) % 2;
-    if (votes === 1) votes += behindNearestFace(p, meshes) ? 1 : 0;
+    if (votes === 1) votes += nearestSurface(p, meshes).behind ? 1 : 0;
     return votes >= 2;
 };
 
@@ -148,11 +154,22 @@ export const checkPhysics = (models: THREE.Object3D[], floorY: number, tolerance
             if (i === j || !boxes[i].intersectsBox(boxes[j])) continue;
             const pts = samples[i];
             if (pts.length === 0) continue;
-            let inside = 0;
-            for (const p of pts) if (boxes[j].containsPoint(p) && isInside(p, meshes[j])) inside++;
+            let inside = 0, depth = 0;
+            for (const p of pts) {
+                if (!boxes[j].containsPoint(p) || !isInside(p, meshes[j])) continue;
+                // Points within the contact tolerance of the surface touch it (a cup's
+                // bottom on a table top)
+                const d = nearestSurface(p, meshes[j]).distance;
+                if (d <= tolerance) continue;
+                inside++;
+                depth = Math.max(depth, d);
+            }
             const fraction = inside / pts.length;
-            if (fraction >= minFraction) {
-                issues[i].push({ kind: 'penetration', other: j, amount: fraction });
+            // A small fraction still counts when it reaches deep: a thin table top cutting
+            // through a seated person's thighs puts few of the top's points inside the
+            // person, but deep inside
+            if (fraction >= minFraction || (inside >= MIN_DEEP_POINTS && depth > 2 * tolerance)) {
+                issues[i].push({ kind: 'penetration', other: j, amount: fraction, depth });
                 if (i < j || !issues[j].some(x => x.kind === 'penetration' && x.other === i)) pairs++;
             }
         }

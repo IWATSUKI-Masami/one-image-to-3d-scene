@@ -128,6 +128,9 @@ export interface ArrangeRun {
   /** Number of physical issues before and after */
   issuesBefore?: number;
   issuesAfter?: number;
+  /** Relation and size warnings of the scene analysis before and after */
+  relationIssuesBefore?: number;
+  relationIssuesAfter?: number;
   /** Times (seconds: total, waiting for the API), tokens and estimated cost (USD, list prices) */
   elapsedS?: number;
   apiS?: number;

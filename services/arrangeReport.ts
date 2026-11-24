@@ -50,7 +50,7 @@ export interface ArrangeReportInput {
 
 const f = (v: number | undefined, digits = 3) => v === undefined || Number.isNaN(v) ? '-' : v.toFixed(digits);
 const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
-const mmss = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.round(sec) % 60).padStart(2, '0')}`;
+const mmss = (sec: number) => { const s = Math.round(sec); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 
 export const arrangeTotals = (record: ArrangeRecord, endedAt: number): ArrangeTotals => {
     const elapsedS = (endedAt - record.startedAt) / 1000;
@@ -80,7 +80,10 @@ export const buildArrangeReport = (r: ArrangeReportInput) => {
         id: o.id, label: o.label, before: objBefore.get(o.id)?.photoMatch, after: o.photoMatch,
         warningsBefore: objBefore.get(o.id)?.warnings ?? [], warningsAfter: o.warnings ?? [],
         propBefore: objBefore.get(o.id)?.proportionChange, propAfter: o.proportionChange,
+        relBefore: objBefore.get(o.id)?.relationWarnings ?? [], relAfter: o.relationWarnings ?? [],
     }));
+    const a = record.analysis;
+    const rel = (v: number | undefined) => v === undefined ? '-' : String(v);
 
     const text = [
         'Arrange report',
@@ -92,19 +95,29 @@ export const buildArrangeReport = (r: ArrangeReportInput) => {
         `Outcome: ${outcome}, rounds: ${record.rounds.length}`,
         `Photo match (mean IoU with the photo masks): ${f(before?.meanIoU)} -> ${f(after?.meanIoU)}`,
         `Physical issues (floating, sunk, inside another model): ${before?.issues ?? '-'} -> ${after?.issues ?? '-'}`,
+        `Relation issues (relations and sizes of the scene analysis not satisfied): ${rel(before?.relationIssues)} -> ${rel(after?.relationIssues)}`,
         ...(r.summary ? ['', `Summary: ${r.summary}`] : []),
         '',
         'Time:',
         `  total ${f(totals.elapsedS, 1)} s = API ${f(totals.apiS, 1)} s (${totals.calls} calls) + local ${f(totals.localS, 1)} s (rendering, measuring, applying)`,
         ...record.calls.map(c => `  call ${c.index}: started ${f(c.startMs / 1000, 1)} s, ${f(c.durationMs / 1000, 1)} s, tokens in ${c.usage.input} / out ${c.usage.output}${c.usage.reasoning ? ` (reasoning ${c.usage.reasoning})` : ''}${c.usage.cacheRead ? `, cache read ${c.usage.cacheRead}` : ''}, tools: ${c.tools.join(', ') || 'none'}${c.model ? `, model ${c.model}` : ''}`),
         '',
+        'Scene analysis:',
+        ...(a ? [
+            `  scene: ${a.scene}`,
+            `  scale reference: ${a.scale_reference.ids.join(', ') || '-'} (${a.scale_reference.reason})`,
+            ...a.objects.map(o => `  ${o.id}: ${o.height_m} m tall, ${o.width_m} m wide; ${o.pose}`),
+            ...a.relations.map(x => `  ${x.subject} ${x.relation} ${x.object}${x.relation === 'on' || x.relation === 'sits_on' ? ` (contact ${x.contact_visible ? 'visible' : 'not visible'})` : ''}`),
+            ...(a.notes ? [`  notes: ${a.notes}`] : []),
+        ] : ['  none']),
+        '',
         'Tokens and cost:',
         `  input ${totals.inputTokens}, output ${totals.outputTokens}${totals.reasoningTokens ? ` (reasoning ${totals.reasoningTokens})` : ''}`,
         `  estimated cost: ${totals.costUsd !== undefined ? `$${totals.costUsd.toFixed(3)} at list prices (cache discounts not included)` : 'not known for this model (see the token counts)'}`,
         '',
-        'Rounds (mean IoU, physical issues, times in ms: apply / render / measure):',
-        ...(before ? [`  round 0 (before): IoU ${f(before.meanIoU)}, issues ${before.issues}, render ${before.renderMs.toFixed(0)}, measure ${before.measureMs.toFixed(0)}`] : []),
-        ...record.rounds.map(rd => `  round ${rd.round} (call ${rd.call}): IoU ${f(rd.meanIoU)}, issues ${rd.issues}, ${rd.applyMs} / ${rd.renderMs} / ${rd.measureMs}; ${rd.reason}`),
+        'Rounds (mean IoU, physical issues, relation issues, times in ms: apply / render / measure):',
+        ...(before ? [`  round 0 (before): IoU ${f(before.meanIoU)}, issues ${before.issues}, relations ${rel(before.relationIssues)}, render ${before.renderMs.toFixed(0)}, measure ${before.measureMs.toFixed(0)}`] : []),
+        ...record.rounds.map(rd => `  round ${rd.round} (call ${rd.call}): IoU ${f(rd.meanIoU)}, issues ${rd.issues}, relations ${rel(rd.relationIssues)}, ${rd.applyMs} / ${rd.renderMs} / ${rd.measureMs}; ${rd.reason}`),
         '',
         'Edits per round (as requested by the model):',
         ...record.rounds.flatMap(rd => [
@@ -121,6 +134,9 @@ export const buildArrangeReport = (r: ArrangeReportInput) => {
         '',
         'Physical warnings per object (before -> after):',
         ...rows.map(o => `  ${o.id} ${o.label}: ${o.warningsBefore.join('; ') || 'none'} -> ${o.warningsAfter.join('; ') || 'none'}`),
+        '',
+        'Relation warnings per object (before -> after):',
+        ...rows.map(o => `  ${o.id} ${o.label}: ${o.relBefore.join('; ') || 'none'} -> ${o.relAfter.join('; ') || 'none'}`),
         '',
         'Log:',
         ...r.log,
@@ -146,17 +162,19 @@ export const buildArrangeReport = (r: ArrangeReportInput) => {
         `cost_usd,${totals.costUsd !== undefined ? totals.costUsd.toFixed(4) : ''}`,
         `mean_iou,${f(before?.meanIoU)},${f(after?.meanIoU)}`,
         `physical_issues,${before?.issues ?? ''},${after?.issues ?? ''}`,
+        `relation_issues,${before?.relationIssues ?? ''},${after?.relationIssues ?? ''}`,
+        `analysis_relations,${a?.relations.length ?? ''}`,
     ];
 
     const objectsCsv = [
         ...header,
         '',
-        'object,iou_before,iou_after,area_ratio_before,area_ratio_after,offset_x_before,offset_y_before,offset_x_after,offset_y_after,proportion_change_before,proportion_change_after,warnings_before,warnings_after',
+        'object,iou_before,iou_after,area_ratio_before,area_ratio_after,offset_x_before,offset_y_before,offset_x_after,offset_y_after,proportion_change_before,proportion_change_after,warnings_before,warnings_after,relation_warnings_before,relation_warnings_after',
         ...rows.map(o => [q(o.label), f(o.before?.iou), f(o.after?.iou), f(o.before?.areaRatio), f(o.after?.areaRatio),
             f(o.before?.offset[0]), f(o.before?.offset[1]), f(o.after?.offset[0]), f(o.after?.offset[1]),
             f(o.propBefore), f(o.propAfter),
-            q(o.warningsBefore.join('; ')), q(o.warningsAfter.join('; '))].join(',')),
-        `mean,${f(before?.meanIoU)},${f(after?.meanIoU)},,,,,,,,,,`,
+            q(o.warningsBefore.join('; ')), q(o.warningsAfter.join('; ')), q(o.relBefore.join('; ')), q(o.relAfter.join('; '))].join(',')),
+        `mean,${f(before?.meanIoU)},${f(after?.meanIoU)},,,,,,,,,,,,`,
     ].join('\n');
 
     // Rounds (with the API call that requested each), then all API calls
@@ -166,14 +184,14 @@ export const buildArrangeReport = (r: ArrangeReportInput) => {
     const roundsCsv = [
         ...header,
         '',
-        ['round', 'call', 'api_s', 'input_tokens', 'output_tokens', 'reasoning_tokens', 'apply_ms', 'render_ms', 'measure_ms', 'mean_iou', 'physical_issues', 'max_proportion_change', 'edits',
+        ['round', 'call', 'api_s', 'input_tokens', 'output_tokens', 'reasoning_tokens', 'apply_ms', 'render_ms', 'measure_ms', 'mean_iou', 'physical_issues', 'relation_issues', 'max_proportion_change', 'edits',
             ...objectIds.map(id => `iou_${id}`), 'reason'].join(','),
-        ...(before ? [['0', '', '', '', '', '', '', before.renderMs.toFixed(0), before.measureMs.toFixed(0), f(before.meanIoU), before.issues, f(maxProp(before.objects)), 0,
+        ...(before ? [['0', '', '', '', '', '', '', before.renderMs.toFixed(0), before.measureMs.toFixed(0), f(before.meanIoU), before.issues, before.relationIssues ?? '', f(maxProp(before.objects)), 0,
             ...objectIds.map(id => f(before.objects.find(o => o.id === id)?.iou)), q('before')].join(',')] : []),
         ...record.rounds.map(rd => {
             const c = callOf.get(rd.call);
             return [rd.round, rd.call, c ? f(c.durationMs / 1000, 1) : '', c?.usage.input ?? '', c?.usage.output ?? '', c?.usage.reasoning ?? '',
-                rd.applyMs, rd.renderMs, rd.measureMs, f(rd.meanIoU), rd.issues, f(maxProp(rd.objects)), rd.edits.length,
+                rd.applyMs, rd.renderMs, rd.measureMs, f(rd.meanIoU), rd.issues, rd.relationIssues ?? '', f(maxProp(rd.objects)), rd.edits.length,
                 ...objectIds.map(id => f(rd.objects.find(o => o.id === id)?.iou)), q(rd.reason)].join(',');
         }),
         '',
@@ -200,8 +218,8 @@ export const buildArrangeImageSheet = async (record: ArrangeRecord, title: strin
     const before = record.initial;
     if (!before) return undefined;
     const rows = [
-        { label: `Round 0 (before): IoU ${f(before.meanIoU)}, issues ${before.issues}`, images: before.images },
-        ...record.rounds.map(rd => ({ label: `Round ${rd.round}: IoU ${f(rd.meanIoU)}, issues ${rd.issues}`, images: rd.images })),
+        { label: `Round 0 (before): IoU ${f(before.meanIoU)}, issues ${before.issues}${before.relationIssues !== undefined ? `, relations ${before.relationIssues}` : ''}`, images: before.images },
+        ...record.rounds.map(rd => ({ label: `Round ${rd.round}: IoU ${f(rd.meanIoU)}, issues ${rd.issues}${rd.relationIssues !== undefined ? `, relations ${rd.relationIssues}` : ''}`, images: rd.images })),
     ];
     const jpg = (b64: string) => `data:image/jpeg;base64,${b64}`;
     const photo = record.photo ? await loadImage(jpg(record.photo)) : undefined;

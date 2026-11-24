@@ -13,6 +13,7 @@
  * the 3D scene component.
  */
 import { ARRANGE_PROVIDER_LABELS, ArrangeProvider, Block, ToolResult, ToolSpec, Usage, createArrangeChat } from './arrangeProviders';
+import { ANALYSIS_PROMPT, SCENE_TOOL, SceneAnalysis, checkRelations, describeAnalysis, parseAnalysis } from './sceneAnalysis';
 
 /** One model in the scene, in world units (see the system prompt for the conventions) */
 export interface ArrangeObject {
@@ -37,6 +38,8 @@ export interface ArrangeObject {
     photoMatch?: { iou: number; areaRatio: number; offset: [number, number] };
     /** Physical problems found by the checks (floating, sunk, inside another model) */
     warnings?: string[];
+    /** Relations and sizes of the scene analysis that the scene does not satisfy */
+    relationWarnings?: string[];
     /** How far the model's proportions are from the generated model's: largest relative difference between its axis scales (0 = unchanged) */
     proportionChange?: number;
 }
@@ -120,7 +123,9 @@ export interface ArrangeRoundRecord {
     measureMs: number;
     meanIoU?: number;
     issues: number;
-    objects: { id: string; label: string; iou?: number; areaRatio?: number; warnings?: string[]; proportionChange?: number }[];
+    /** Relation and size warnings from the scene analysis (undefined without an analysis) */
+    relationIssues?: number;
+    objects: { id: string; label: string; iou?: number; areaRatio?: number; warnings?: string[]; relationWarnings?: string[]; proportionChange?: number }[];
     /** Renderings after the round (base64 JPEG): photo view, top view, oblique view */
     images: { photo: string; top: string; oblique: string };
 }
@@ -132,6 +137,8 @@ export interface ArrangeRecord {
     initial?: Omit<ArrangeRoundRecord, 'call' | 'reason' | 'edits' | 'problems' | 'applyMs'>;
     /** The photo (base64 JPEG) */
     photo?: string;
+    /** Semantic analysis of the photo made before the placement rounds */
+    analysis?: SceneAnalysis;
     calls: ArrangeCallRecord[];
     rounds: ArrangeRoundRecord[];
 }
@@ -152,6 +159,9 @@ export interface ArrangeResult {
     /** Number of physical issues (floating, sunk, penetrating pairs) before and after */
     issuesBefore: number;
     issuesAfter: number;
+    /** Number of relation and size warnings from the scene analysis before and after */
+    relationIssuesBefore?: number;
+    relationIssuesAfter?: number;
     /** The objects (with their photo match) before and after */
     objectsBefore: ArrangeObject[];
     objectsAfter: ArrangeObject[];
@@ -165,7 +175,7 @@ export const meanPhotoIoU = (objects: ArrangeObject[]): number | undefined => {
 
 const SYSTEM_PROMPT = `You arrange a 3D scene that was reconstructed from a single photo, so that it matches the photo.
 
-How the scene was built: every object in the photo was cut out, its hidden parts were completed by an image model, a 3D model was generated from it, and the model was placed by monocular depth estimation, each object on its own. Positions along the line of sight and sizes are therefore rough, and relations between objects are often wrong: cups float above a table or sink into it, people do not sit on their chairs, a table is too small or too far away, objects intersect.
+How the scene was built: every object in the photo was cut out, its hidden parts were completed by an image model, a 3D model was generated from it, and the model was placed by monocular depth estimation, each object on its own. Positions along the line of sight and sizes are therefore rough, and relations between objects are often wrong: objects float above their support or sink into it, people do not sit on their seats, furniture is too small or too far away, objects intersect.
 
 Conventions (world units are relative, not meters):
 - The photo's camera is at the origin and looks along -Z. +X is right, +Y is up. Objects farther away have more negative z.
@@ -173,30 +183,27 @@ Conventions (world units are relative, not meters):
 - Each object is described by the center and size of its axis-aligned bounding box and its rotation about the vertical axis.
 - Images: "photo" is the original photo; "photo view" renders the scene from the photo's camera; "top view" renders it from above (up in the image = away from the camera, -Z; right = +X); "oblique view" renders it from the front left and above, where distances along the line of sight and contacts are easier to see. Object names are drawn on the renderings.
 
-Your task: make the scene physically and semantically consistent with the photo.
+Your task: make the scene physically and semantically consistent with the photo. A scene analysis made from the photo comes first: what the scene is, the real size of each object, the scale reference, and the relations between objects (on, sits_on, sits_at, faces, in_front_of). Use it as the plan; "relation_warnings" in the object list show relations and sizes that the scene does not satisfy yet. The analysis can be wrong: where the photo clearly shows otherwise, follow the photo and say so in the summary.
 - Keep every object where it is in the photo (its place in the photo view should stay close to the photo). To change an object's distance without changing its place in the photo, use along_ray, which moves it along the line of sight and scales it by the same factor.
-- Supports: objects standing on furniture rest on its top (cups and vases on a table); furniture and standing people rest on the floor. Two ways:
-  - rest_on slides the object along the line of sight until its bottom touches the support, so it keeps its place in the photo and gets the distance (and size) that the support implies. Use it when the object's contact with the support is visible in the photo (a cup on a table top): this is usually better than the depth estimate.
-  - drop_on moves the object straight down or up onto the support and keeps its distance and size. Use it when the contact is not visible (table legs and chair legs below the photo's lower edge, a person's feet hidden by a table): there the bottom's place in the photo says nothing, and rest_on would make the object much too large or too far.
+- Real-world sizes: decide how many world units make a meter from the analysis' scale reference, then give every object the size the analysis gives it. Use along_ray to change size and distance together.
+- Supports ("on" in the analysis): an object resting on another stands on its top, furniture and standing people on the floor. Two ways:
+  - rest_on slides the object along the line of sight until its bottom touches the support, so it keeps its place in the photo and gets the distance (and size) that the support implies. Use it when the contact is visible in the photo (contact visible in the analysis): this is usually better than the depth estimate.
+  - drop_on moves the object straight down or up onto the support and keeps its distance and size. Use it when the contact is not visible (contact not visible in the analysis, e.g. legs below the photo's lower edge or hidden behind something): there the bottom's place in the photo says nothing, and rest_on would make the object much too large or too far.
   Apply them after the support itself is in its final place (edits run in the order given).
-- Seated people sit on their chairs: hips at the seat, feet on the floor, close to the table if they are at a table. rest_on uses the top of a bounding box, which for a chair is the backrest, so place seated people with center or move instead.
-- Each chair that a person sits on goes under that person, not beside or behind them: seat under the hips, backrest behind the person's back, the chair facing the same way as the person (a person who faces right sits on a chair whose seat faces right, so its backrest is on the person's left). A chair seen only at the edge of the photo, or only its backrest, is usually the chair of the person next to it. Use place_under to move a chair under a person (it centers the chair under the person and stands it on the floor), then turn it with rotate_y_deg so that its backrest is behind the person, and adjust with move; check in the top and oblique views that the seat is under the hips and the backrest behind the back.
-- Real-world sizes: decide how many world units make a meter from the people (an adult is about 1.65-1.75 m tall standing and about 1.3 m from the floor to the top of the head when seated on a chair), then make the other objects consistent: dining or cafe table top about 0.72-0.76 m above the floor, chair seat about 0.45 m, a coffee cup about 0.08-0.10 m tall, a small vase 0.15-0.25 m. Keep the objects' places in the photo; use along_ray to change size and distance together.
-- Seated people sit at chair height even when their chair is not in the scene (it may be hidden or missing): their feet on the floor, hips about 0.45 m up, the table top around the height of their lower chest or elbows. Never lower a seated person to the floor.
-- Generated models can have wrong proportions (e.g. a table that is too low or too thick); fix them with scale_axes (stretch along the model's own x, y, z) rather than by changing the whole object's size. Never stretch people: their body proportions stay as generated (scale_axes is refused for people; use scale). Do not stretch other objects only to improve the photo match either; proportion_change in the object list shows how far each object is from the generated model's proportions.
-- Orientation: people and chairs should face the way they face in the photo (e.g. two people talking face each other).
+- Seated people ("sits_on", "sits_at"): hips at the seat, about 0.45 m above the floor, feet on the floor, close to the table or desk they sit at, with the top around the height of their lower chest or elbows. This holds also when the seat is not in the scene ("sits_on none"): never lower a seated person to the floor. rest_on uses the top of a bounding box, which for a chair is the backrest, so place seated people with center or move.
+- A seat in the scene goes under the person who sits on it: use place_under (it centers the seat under the person and stands it on the floor), then turn it with rotate_y_deg so that the person faces the way the seat faces (backrest behind the back), and adjust with move; check in the top and oblique views that the seat is under the hips.
+- Generated models can have wrong proportions (e.g. furniture that is too low or too thick); fix them with scale_axes (stretch along the model's own x, y, z) rather than by changing the whole object's size. Never stretch people: their body proportions stay as generated (scale_axes is refused for people; use scale). Do not stretch other objects only to improve the photo match either; proportion_change in the object list shows how far each object is from the generated model's proportions.
+- Orientation ("faces"): people, chairs and other objects with a front should face the way they face in the photo.
 - Avoid intersections, except where parts overlap in reality (legs under a table).
 - Do not change objects that are already right.
 
-Contacts: people at a table sit close to it, with their forearms or hands on the table top when the photo shows that; a table that people sit at is between or beside them as in the photo, not a wall in front of them. Use the top and oblique views to check who sits where around the table.
-
 Photo match: for objects with a mask in the photo, photo_match compares the model's visible part rendered from the photo's camera (hidden parts behind other models excluded) with the object's mask in the photo: iou (1 = perfect), area_ratio (rendered / photo; > 1 = too large or too near), and offset_xy (where the rendering is relative to the photo, as fractions of the image; + = right / down). Use it to check that your changes keep each object where and as large as it is in the photo, and to find objects that are off (e.g. area_ratio 1.6 and offset_xy [0.05, 0] means too large and too far right). It cannot be perfect: the models' shapes and poses differ from the photo, and objects hidden in the photo by things that are not in the scene lower it. Do not trade physical plausibility for a small gain in it, but avoid changes that lower it clearly.
 
-Physical checks: "warnings" lists problems measured on the meshes: floating (the bottom is above the floor or the surface below it, e.g. a person's feet in the air), sunk (the bottom is below the top of the object it stands on, or below the floor), and inside (part of the object's surface is inside another object). "physical issues" is their number in the scene. Fix them, except contacts that are real (e.g. a seated person slightly sinking into a cushion); a scene with no warnings is not necessarily right, so still compare it with the photo.
+Physical checks: "warnings" lists problems measured on the meshes: floating (the bottom is above the floor or the surface below it, e.g. a person's feet in the air), sunk (the bottom is below the top of the object it stands on, or below the floor), inside (part of the object's surface is inside another object), and cuts through (the object passes through another one, e.g. a table top through a seated person's thighs or torso: the person sits too close or inside the table's outline, or the table is too low). "physical issues" is their number in the scene. Fix them, except contacts that are real (e.g. a seated person slightly sinking into a cushion); a scene with no warnings is not necessarily right, so still compare it with the photo.
 
-Check the top view as well as the photo view: an object can look right from the camera but be at the wrong distance (e.g. a cup on the far side of the table instead of the near side). Compare where objects are on the table in the photo (near or far edge, left or right) with the top view.
+Check the top view as well as the photo view: an object can look right from the camera but be at the wrong distance (e.g. a cup on the far side of a table instead of the near side). Compare the order along the line of sight ("in_front_of" in the analysis, near or far edge of a support, left or right) with the top view.
 
-Work in rounds: call update_placements with the edits for one round (you can edit several objects at once); you then get the new object list and new renderings. Check them against the photo and correct further. Before you call finish, look at your list of remaining differences: if one of them can be fixed with the tools (e.g. a person too far from the table, hands not on the table top), fix it in another round first. Call finish when the scene matches the photo well, or when further changes would not help, with a short summary of what you changed. Do at most a few rounds.`;
+Work in rounds: call update_placements with the edits for one round (you can edit several objects at once); you then get the new object list and new renderings. Check them against the photo and correct further. Before you call finish, look at your list of remaining differences and at the relation warnings: if one of them can be fixed with the tools (e.g. a person too far from the table they sit at), fix it in another round first. Call finish when the scene matches the photo well, or when further changes would not help, with a short summary of what you changed. Do at most a few rounds.`;
 
 const TOOLS: ToolSpec[] = [
     {
@@ -247,7 +254,7 @@ const TOOLS: ToolSpec[] = [
 
 /** Short hash of the prompt and tools, to tell which version of the instructions a result comes from */
 export const ARRANGE_PROMPT_VERSION = (() => {
-    const text = SYSTEM_PROMPT + JSON.stringify(TOOLS);
+    const text = SYSTEM_PROMPT + JSON.stringify(TOOLS) + ANALYSIS_PROMPT + JSON.stringify(SCENE_TOOL);
     let h = 5381;
     for (let i = 0; i < text.length; i++) h = ((h << 5) + h + text.charCodeAt(i)) | 0;
     return (h >>> 0).toString(16).padStart(8, '0');
@@ -256,7 +263,7 @@ export const ARRANGE_PROMPT_VERSION = (() => {
 const round3 = (v: number) => Math.round(v * 1000) / 1000;
 
 /** The object list given to Claude */
-const describeObjects = (scene: ArrangeScene, objects: ArrangeObject[] = scene.objects()): string => {
+const describeObjects = (scene: ArrangeScene, objects: ArrangeObject[], relationIssues?: number): string => {
     const mean = meanPhotoIoU(objects);
     const lines = objects.map(o => JSON.stringify({
         id: o.id,
@@ -270,6 +277,7 @@ const describeObjects = (scene: ArrangeScene, objects: ArrangeObject[] = scene.o
         top_y: round3(o.center[1] + o.size[1] / 2),
         rotation_y_deg: Math.round(o.rotationYDeg),
         ...(o.warnings?.length ? { warnings: o.warnings } : {}),
+        ...(o.relationWarnings?.length ? { relation_warnings: o.relationWarnings } : {}),
         ...(o.proportionChange !== undefined && o.proportionChange > 0.005 ? { proportion_change: round3(o.proportionChange) } : {}),
         ...(o.photoMatch ? {
             photo_match: {
@@ -279,7 +287,7 @@ const describeObjects = (scene: ArrangeScene, objects: ArrangeObject[] = scene.o
             },
         } : {}),
     }));
-    return `floorY = ${round3(scene.floorY())}${mean !== undefined ? `\nmean photo_match iou = ${round3(mean)}` : ''}\nphysical issues = ${scene.issueCount()}\nObjects:\n${lines.join('\n')}`;
+    return `floorY = ${round3(scene.floorY())}${mean !== undefined ? `\nmean photo_match iou = ${round3(mean)}` : ''}\nphysical issues = ${scene.issueCount()}${relationIssues !== undefined ? `\nrelation issues = ${relationIssues}` : ''}\nObjects:\n${lines.join('\n')}`;
 };
 
 const imageBlock = (base64: string): Block => ({ type: 'image', base64 });
@@ -366,13 +374,22 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
     };
     const now = () => performance.now();
     /** Measure the scene: objects with photo match and warnings, and the number of physical issues */
+    let analysis: SceneAnalysis | undefined;
     const measure = () => {
         const t = now();
         const objects = scene.objects();
-        return { objects, issues: scene.issueCount(), ms: now() - t };
+        let relationIssues: number | undefined;
+        if (analysis) {
+            // Same contact tolerance as the physical checks: 1.5% of the tallest model
+            const tolerance = 0.015 * Math.max(...objects.map(o => o.size[1]));
+            const warnings = checkRelations(analysis, objects, scene.floorY(), tolerance);
+            objects.forEach(o => { o.relationWarnings = warnings.get(o.id) ?? []; });
+            relationIssues = [...warnings.values()].reduce((n, w) => n + w.length, 0);
+        }
+        return { objects, issues: scene.issueCount(), relationIssues, ms: now() - t };
     };
     const summarizeObjects = (objects: ArrangeObject[]) => objects.map(o => ({
-        id: o.id, label: o.label, iou: o.photoMatch?.iou, areaRatio: o.photoMatch?.areaRatio, warnings: o.warnings, proportionChange: o.proportionChange,
+        id: o.id, label: o.label, iou: o.photoMatch?.iou, areaRatio: o.photoMatch?.areaRatio, warnings: o.warnings, relationWarnings: o.relationWarnings, proportionChange: o.proportionChange,
 }));
     const renderAll = async () => {
         const t = now();
@@ -380,17 +397,58 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
         return { images: { photo, top, oblique }, ms: now() - t };
     };
 
+    const photo = await photoToJpeg(photoUrl);
+    record.photo = photo;
+
+    // 1. Semantic analysis of the photo (photo and object list only, no renderings)
+    {
+        onProgress?.(`${name} is analyzing the photo…`);
+        const listed = scene.objects();
+        const ids = new Set(listed.map(o => o.id));
+        const list = listed.map(o => JSON.stringify({
+            id: o.id, label: o.label, type: o.type ?? 'object',
+            ...(o.description ? { description: o.description } : {}),
+            ...(o.photoBox ? { photo_box_ymin_xmin_ymax_xmax: o.photoBox.map(round3) } : {}),
+        })).join('\n');
+        const analysisChat = createArrangeChat({
+            provider, apiKey, model, signal,
+            system: ANALYSIS_PROMPT,
+            tools: [SCENE_TOOL],
+            first: [
+                { type: 'text', text: 'Photo:' },
+                imageBlock(photo),
+                { type: 'text', text: `Objects:\n${list}\n\nAnalyze the photo and call report_scene.` },
+            ],
+        });
+        for (let attempt = 0; attempt < 2 && !analysis; attempt++) {
+            const t0 = now(), startMs = Date.now() - startedAt;
+            const { calls, usage, model: answeredBy } = await analysisChat.next();
+            record.calls.push({ index: record.calls.length + 1, startMs, durationMs: Math.round(now() - t0), usage, model: answeredBy, tools: calls.map(c => c.name) });
+            const call = calls.find(c => c.name === SCENE_TOOL.name);
+            if (call) analysis = parseAnalysis(call.input, ids);
+            else analysisChat.addText('Call report_scene with your analysis.');
+        }
+        record.analysis = analysis;
+        onProgress?.(analysis
+            ? `Scene: ${analysis.scene} (${analysis.relations.length} relations)`
+            : `${name} gave no scene analysis; arranging without it.`);
+    }
+
+    // 2. Placement rounds
     onProgress?.('Rendering the scene…');
     const before = measure();
     const objectsBefore = before.objects;
     const photoIoUBefore = meanPhotoIoU(objectsBefore);
     const issuesBefore = before.issues;
-    let lastObjects = objectsBefore, lastIssues = issuesBefore;
-    const end = () => ({ photoIoUBefore, photoIoUAfter: meanPhotoIoU(lastObjects), issuesBefore, issuesAfter: lastIssues, objectsBefore, objectsAfter: lastObjects });
-    const [photo, initial] = await Promise.all([photoToJpeg(photoUrl), renderAll()]);
-    record.photo = photo;
+    const relationIssuesBefore = before.relationIssues;
+    let lastObjects = objectsBefore, lastIssues = issuesBefore, lastRelationIssues = relationIssuesBefore;
+    const end = () => ({
+        photoIoUBefore, photoIoUAfter: meanPhotoIoU(lastObjects), issuesBefore, issuesAfter: lastIssues,
+        relationIssuesBefore, relationIssuesAfter: lastRelationIssues, objectsBefore, objectsAfter: lastObjects,
+    });
+    const initial = await renderAll();
     record.initial = {
-        round: 0, renderMs: initial.ms, measureMs: before.ms, meanIoU: photoIoUBefore, issues: issuesBefore,
+        round: 0, renderMs: initial.ms, measureMs: before.ms, meanIoU: photoIoUBefore, issues: issuesBefore, relationIssues: relationIssuesBefore,
         objects: summarizeObjects(objectsBefore), images: initial.images,
     };
 
@@ -407,7 +465,7 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
             imageBlock(initial.images.top),
             { type: 'text', text: 'Oblique view of the current scene:' },
             imageBlock(initial.images.oblique),
-            { type: 'text', text: `${describeObjects(scene, objectsBefore)}\n\nArrange the scene so that it matches the photo. Use update_placements, and call finish when done.` },
+            { type: 'text', text: `${analysis ? `${describeAnalysis(analysis)}\n\n` : ''}${describeObjects(scene, objectsBefore, relationIssuesBefore)}\n\nArrange the scene so that it matches the photo. Use update_placements, and call finish when done.` },
         ],
     });
 
@@ -462,16 +520,17 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
             const after = measure();
             lastObjects = after.objects;
             lastIssues = after.issues;
+            lastRelationIssues = after.relationIssues;
             record.rounds.push({
                 round: rounds, call: callIndex, reason, edits, problems,
                 applyMs: Math.round(applyMs), renderMs: Math.round(rendered.ms), measureMs: Math.round(after.ms),
-                meanIoU: meanPhotoIoU(after.objects), issues: after.issues, objects: summarizeObjects(after.objects), images: rendered.images,
+                meanIoU: meanPhotoIoU(after.objects), issues: after.issues, relationIssues: after.relationIssues, objects: summarizeObjects(after.objects), images: rendered.images,
             });
             results.push({
                 id: tool.id,
                 name: tool.name,
                 blocks: [
-                    { type: 'text', text: `${problems.length ? `Problems: ${problems.join('; ')}\n` : ''}Applied ${edits.length} edit(s) (round ${rounds} of at most ${maxRounds}).\n${describeObjects(scene, after.objects)}\nPhoto view:` },
+                    { type: 'text', text: `${problems.length ? `Problems: ${problems.join('; ')}\n` : ''}Applied ${edits.length} edit(s) (round ${rounds} of at most ${maxRounds}).\n${describeObjects(scene, after.objects, after.relationIssues)}\nPhoto view:` },
                     imageBlock(rendered.images.photo),
                     { type: 'text', text: 'Top view:' },
                     imageBlock(rendered.images.top),
