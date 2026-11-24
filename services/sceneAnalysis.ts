@@ -41,7 +41,22 @@ export interface RelationBox {
     id: string;
     center: [number, number, number];
     size: [number, number, number];
+    /** Oriented footprint (x, z); without it the axis-aligned box is used */
+    footprint?: { center: [number, number]; half: [number, number]; yawDeg: number };
 }
+
+/** A point (x, z) in a box's footprint frame: offsets along its own axes, and its half extents */
+const local = (b: RelationBox, x: number, z: number) => {
+    const fp = b.footprint ?? { center: [b.center[0], b.center[2]] as [number, number], half: [b.size[0] / 2, b.size[2] / 2] as [number, number], yawDeg: 0 };
+    const yaw = fp.yawDeg * Math.PI / 180, dx = x - fp.center[0], dz = z - fp.center[1];
+    // Inverse of the turn about the vertical axis (three.js: x' = x cos + z sin, z' = -x sin + z cos)
+    return { u: Math.cos(yaw) * dx - Math.sin(yaw) * dz, v: Math.sin(yaw) * dx + Math.cos(yaw) * dz, hu: fp.half[0], hv: fp.half[1] };
+};
+/** Distance on the floor plane from a point to a box's footprint (0 inside) */
+const footprintDistance = (b: RelationBox, x: number, z: number) => {
+    const { u, v, hu, hv } = local(b, x, z);
+    return Math.hypot(Math.max(0, Math.abs(u) - hu), Math.max(0, Math.abs(v) - hv));
+};
 
 export const ANALYSIS_PROMPT = `You analyze a photo before a 3D reconstruction of it is arranged. Every object in the given list was reconstructed as a separate 3D model; another step will place the models so that the scene matches the photo, guided by your analysis. Look only at the photo and the object list (ids, labels, descriptions and boxes in the photo).
 
@@ -175,8 +190,7 @@ export const checkRelations = (analysis: SceneAnalysis, boxes: RelationBox[], fl
     const m = (units: number) => upm ? `${(units / upm).toFixed(2)} m` : `${units.toFixed(2)} units`;
     const min = (b: RelationBox, k: number) => b.center[k] - b.size[k] / 2;
     const max = (b: RelationBox, k: number) => b.center[k] + b.size[k] / 2;
-    const over = (a: RelationBox, b: RelationBox, margin = 0) =>
-        a.center[0] >= min(b, 0) - margin && a.center[0] <= max(b, 0) + margin && a.center[2] >= min(b, 2) - margin && a.center[2] <= max(b, 2) + margin;
+    const over = (a: RelationBox, b: RelationBox, margin = 0) => footprintDistance(b, a.center[0], a.center[2]) <= margin;
     void floorY;
 
     for (const r of analysis.relations) {
@@ -190,14 +204,14 @@ export const checkRelations = (analysis: SceneAnalysis, boxes: RelationBox[], fl
         } else if (r.relation === 'sits_on' && b) {
             if (!over(a, b, 0.25 * Math.max(b.size[0], b.size[2]))) add(r.subject, `should sit on ${r.object} but is not above it`);
         } else if (r.relation === 'sits_at' && b) {
-            // Horizontal gap between the boxes, and whether the person is deep inside the table's outline
-            const gx = Math.max(0, min(b, 0) - max(a, 0), min(a, 0) - max(b, 0));
-            const gz = Math.max(0, min(b, 2) - max(a, 2), min(a, 2) - max(b, 2));
-            const gap = Math.hypot(gx, gz);
+            // Gap between the person and the table's real (oriented) outline, and whether the
+            // person is deep inside that outline
+            const personHalf = Math.min(a.size[0], a.size[2]) / 2;
+            const gap = Math.max(0, footprintDistance(b, a.center[0], a.center[2]) - personHalf);
             const reach = upm ? 0.3 * upm : 0.2 * Math.max(b.size[0], b.size[2]);
-            const dist = Math.hypot(a.center[0] - b.center[0], a.center[2] - b.center[2]);
+            const { u, v, hu, hv } = local(b, a.center[0], a.center[2]);
             if (gap > reach) add(r.subject, `should sit at ${r.object} but is ${m(gap)} away from it`);
-            else if (dist < 0.3 * Math.min(b.size[0], b.size[2])) add(r.subject, `should sit at ${r.object} but is inside its outline`);
+            else if (Math.abs(u) < 0.6 * hu && Math.abs(v) < 0.6 * hv) add(r.subject, `should sit at ${r.object} but is inside its outline`);
         } else if (r.relation === 'in_front_of' && b) {
             if (Math.hypot(...a.center) > Math.hypot(...b.center) + tolerance) add(r.subject, `should be in front of ${r.object} (nearer to the camera) but is behind it`);
         }

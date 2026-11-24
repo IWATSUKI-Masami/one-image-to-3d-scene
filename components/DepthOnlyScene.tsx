@@ -135,7 +135,7 @@ const photoMatchStats = (ids: Uint8Array, masks: (Uint8Array | null)[], W: numbe
         const offset: [number, number] = rendered > 0
             ? [(rx / rendered - mx / maskArea) / W, (ry / rendered - my / maskArea) / H]
             : [0, 0];
-        return { iou: union ? inter / union : 0, areaRatio: rendered / maskArea, offset, mask: [mx / maskArea / W, my / maskArea / H] as [number, number] };
+        return { iou: union ? inter / union : 0, areaRatio: rendered / maskArea, offset, mask: [mx / maskArea / W, my / maskArea / H] as [number, number], maskFraction: maskArea / (W * H) };
     });
 
 interface DepthOnlySceneProps {
@@ -465,6 +465,8 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         });
         const valid = stats.filter((v): v is NonNullable<typeof v> => !!v);
         const mean = valid.length ? valid.reduce((a, v) => a + v.iou, 0) / valid.length : undefined;
+        const areaSum = valid.reduce((a, v) => a + v.maskFraction, 0);
+        const weighted = areaSum > 0 ? valid.reduce((a, v) => a + v.iou * v.maskFraction, 0) / areaSum : undefined;
         // Legend
         ctx.font = '15px sans-serif';
         let lx = 10;
@@ -488,7 +490,8 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     : `${x.kind} ${x.amount.toFixed(3)}${x.other >= 0 ? ` (${names[x.other]})` : ' (floor)'}`).join('; ');
                 return st ? [`"${names[i].replace(/"/g, '""')}",${st.iou.toFixed(4)},${st.areaRatio.toFixed(4)},${st.offset[0].toFixed(4)},${st.offset[1].toFixed(4)},"${w}"`] : [];
             }),
-            ...(mean !== undefined ? [`mean,${mean.toFixed(4)},,,,`] : [])].join('\n');
+            ...(mean !== undefined ? [`mean,${mean.toFixed(4)},,,,`] : []),
+            ...(weighted !== undefined ? [`weighted_by_photo_area,${weighted.toFixed(4)},,,,`] : [])].join('\n');
         setPhotoMatchView({ png: c.toDataURL('image/png'), csv, mean, issues: physics.count, kind: state ? `photo-match-${state}` : 'photo-match' });
     };
 
@@ -536,7 +539,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             const idRender = idRenderRef.current;
             if (!idRender || masks.every(m => !m)) return entries.map(() => undefined);
             const ids = idRender(entries.map(e => e.container), MW, MH);
-            return photoMatchStats(ids, masks, MW, MH).map(m => m && { iou: m.iou, areaRatio: m.areaRatio, offset: m.offset });
+            return photoMatchStats(ids, masks, MW, MH).map(m => m && { iou: m.iou, areaRatio: m.areaRatio, offset: m.offset, maskFraction: m.maskFraction });
         };
 
         // Physical checks: contact tolerance from the size of the scene (1.5% of the tallest model)
@@ -552,6 +555,27 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     : x.kind === 'sunk' ? `${r3(x.amount)} below the ${x.other < 0 ? 'floor' : `top of ${other(x.other)}`}`
                         : x.amount >= 0.02 ? `${Math.round(x.amount * 100)}% of its surface is inside ${other(x.other)}`
                             : `cuts through ${other(x.other)} (up to ${r3(x.depth ?? 0)} deep)`));
+        };
+
+        /**
+         * The model's footprint as an oriented rectangle: its box without the turn about the
+         * vertical axis, turned back (a table turned 30° has its real outline, not the larger
+         * axis-aligned box that also covers the empty space beside its corners)
+         */
+        const footprintOf = (container: THREE.Object3D) => {
+            const yaw = container.rotation.y;
+            container.rotation.y = 0;
+            const b0 = boxOf(container);
+            container.rotation.y = yaw;
+            container.updateMatrixWorld(true);
+            const c0 = b0.getCenter(new THREE.Vector3());
+            const dx = c0.x - container.position.x, dz = c0.z - container.position.z;
+            const cos = Math.cos(yaw), sin = Math.sin(yaw);
+            return {
+                center: [container.position.x + cos * dx + sin * dz, container.position.z - sin * dx + cos * dz] as [number, number],
+                half: [(b0.max.x - b0.min.x) / 2, (b0.max.z - b0.min.z) / 2] as [number, number],
+                yawDeg: yaw * 180 / Math.PI,
+            };
         };
 
         const arrangeSceneApi: ArrangeScene = {
@@ -578,6 +602,9 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     center: c.toArray() as [number, number, number],
                     size: sz.toArray() as [number, number, number],
                     rotationYDeg: container.rotation.y * 180 / Math.PI,
+                    ...(model.frontAlignment && applyAlignment && container.userData.autoTransform
+                        ? { alignedRotationYDeg: (container.userData.autoTransform as SavedTransform).rotation[1] * 180 / Math.PI } : {}),
+                    footprint: footprintOf(container),
                 };
               });
             },

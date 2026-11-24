@@ -101,6 +101,7 @@ export const buildArrangeReport = (r: ArrangeReportInput) => {
         `Ended: ${new Date(endedAt).toISOString()} (elapsed ${mmss(totals.elapsedS)})`,
         `Outcome: ${outcome}, rounds: ${record.rounds.length}${kept ? `; kept ${kept.round === 0 ? 'the scene as before the run' : `round ${kept.round}`} (score ${kept.score.toFixed(3)}), which scored better than round ${kept.lastRound} (${kept.lastScore.toFixed(3)})` : ''}`,
         `Photo match (mean IoU with the photo masks): ${f(before?.meanIoU)} -> ${f(after?.meanIoU)}`,
+        `Photo match weighted by the objects' areas in the photo: ${f(before?.weightedIoU)} -> ${f(after?.weightedIoU)}`,
         `Physical issues (floating, sunk, inside another model): ${before?.issues ?? '-'} -> ${after?.issues ?? '-'}`,
         `Photo camera (downward tilt, horizontal field of view): ${before?.cameraAfter ? `${before.cameraAfter.pitchDeg}°, ${before.cameraAfter.hfovDeg}°` : '-'} -> ${after?.cameraAfter ? `${after.cameraAfter.pitchDeg}°, ${after.cameraAfter.hfovDeg}°` : '-'}`,
         `Relation issues (relations and sizes of the scene analysis not satisfied): ${rel(before?.relationIssues)} -> ${rel(after?.relationIssues)}`,
@@ -128,6 +129,11 @@ export const buildArrangeReport = (r: ArrangeReportInput) => {
         ] : []),
         ...(record.analysisRaw !== undefined && (!a || a.objects.length === 0) ? [`  as sent by the model: ${JSON.stringify(record.analysisRaw)}`] : []),
         '',
+        ...(record.emptyCalls?.length ? [
+            'Calls of update_placements that changed nothing (as sent by the model):',
+            ...record.emptyCalls.map(e => `  call ${e.call}: ${JSON.stringify(e.input)}`),
+            '',
+        ] : []),
         'Tokens and cost:',
         `  input ${totals.inputTokens}, output ${totals.outputTokens}${totals.reasoningTokens ? ` (reasoning ${totals.reasoningTokens})` : ''}`,
         `  estimated cost: ${totals.costUsd !== undefined ? `$${totals.costUsd.toFixed(3)} at list prices (cache discounts not included)` : 'not known for this model (see the token counts)'}`,
@@ -188,6 +194,7 @@ export const buildArrangeReport = (r: ArrangeReportInput) => {
         `reasoning_tokens,${totals.reasoningTokens}`,
         `cost_usd,${totals.costUsd !== undefined ? totals.costUsd.toFixed(4) : ''}`,
         `mean_iou,${f(before?.meanIoU)},${f(after?.meanIoU)}`,
+        `weighted_iou,${f(before?.weightedIoU)},${f(after?.weightedIoU)}`,
         `physical_issues,${before?.issues ?? ''},${after?.issues ?? ''}`,
         `relation_issues,${before?.relationIssues ?? ''},${after?.relationIssues ?? ''}`,
         `analysis_relations,${a?.relations.length ?? ''}`,
@@ -202,13 +209,15 @@ export const buildArrangeReport = (r: ArrangeReportInput) => {
     const objectsCsv = [
         ...header,
         '',
-        'object,iou_before,iou_after,area_ratio_before,area_ratio_after,offset_x_before,offset_y_before,offset_x_after,offset_y_after,proportion_change_before,proportion_change_after,warnings_before,warnings_after,relation_warnings_before,relation_warnings_after,ref_relation_warnings_before,ref_relation_warnings_after',
+        'object,iou_before,iou_after,area_ratio_before,area_ratio_after,offset_x_before,offset_y_before,offset_x_after,offset_y_after,proportion_change_before,proportion_change_after,warnings_before,warnings_after,relation_warnings_before,relation_warnings_after,ref_relation_warnings_before,ref_relation_warnings_after,photo_area',
         ...rows.map(o => [q(o.label), f(o.before?.iou), f(o.after?.iou), f(o.before?.areaRatio), f(o.after?.areaRatio),
             f(o.before?.offset[0]), f(o.before?.offset[1]), f(o.after?.offset[0]), f(o.after?.offset[1]),
             f(o.propBefore), f(o.propAfter),
             q(o.warningsBefore.join('; ')), q(o.warningsAfter.join('; ')), q(o.relBefore.join('; ')), q(o.relAfter.join('; ')),
-            q(refWarn(before?.refRelationWarnings, o.id).join('; ')), q(refWarn(after?.refRelationWarnings, o.id).join('; '))].join(',')),
-        `mean,${f(before?.meanIoU)},${f(after?.meanIoU)},,,,,,,,,,,,,,`,
+            q(refWarn(before?.refRelationWarnings, o.id).join('; ')), q(refWarn(after?.refRelationWarnings, o.id).join('; ')),
+            f(o.after?.maskFraction ?? o.before?.maskFraction, 4)].join(',')),
+        `mean,${f(before?.meanIoU)},${f(after?.meanIoU)},,,,,,,,,,,,,,,`,
+        `weighted_by_photo_area,${f(before?.weightedIoU)},${f(after?.weightedIoU)},,,,,,,,,,,,,,,`,
     ].join('\n');
 
     // Rounds (with the API call that requested each), then all API calls
@@ -218,14 +227,14 @@ export const buildArrangeReport = (r: ArrangeReportInput) => {
     const roundsCsv = [
         ...header,
         '',
-        ['round', 'call', 'api_s', 'input_tokens', 'output_tokens', 'reasoning_tokens', 'apply_ms', 'render_ms', 'measure_ms', 'mean_iou', 'physical_issues', 'relation_issues', 'ref_relation_issues', 'camera_pitch_deg', 'camera_hfov_deg', 'max_proportion_change', 'edits',
+        ['round', 'call', 'api_s', 'input_tokens', 'output_tokens', 'reasoning_tokens', 'apply_ms', 'render_ms', 'measure_ms', 'mean_iou', 'weighted_iou', 'physical_issues', 'relation_issues', 'ref_relation_issues', 'camera_pitch_deg', 'camera_hfov_deg', 'max_proportion_change', 'edits',
             ...objectIds.map(id => `iou_${id}`), 'reason'].join(','),
-        ...(before ? [['0', '', '', '', '', '', '', before.renderMs.toFixed(0), before.measureMs.toFixed(0), f(before.meanIoU), before.issues, before.relationIssues ?? '', before.refRelationIssues ?? '', before.cameraAfter?.pitchDeg ?? '', before.cameraAfter?.hfovDeg ?? '', f(maxProp(before.objects)), 0,
+        ...(before ? [['0', '', '', '', '', '', '', before.renderMs.toFixed(0), before.measureMs.toFixed(0), f(before.meanIoU), f(before.weightedIoU), before.issues, before.relationIssues ?? '', before.refRelationIssues ?? '', before.cameraAfter?.pitchDeg ?? '', before.cameraAfter?.hfovDeg ?? '', f(maxProp(before.objects)), 0,
             ...objectIds.map(id => f(before.objects.find(o => o.id === id)?.iou)), q('before')].join(',')] : []),
         ...record.rounds.map(rd => {
             const c = callOf.get(rd.call);
             return [rd.round, rd.call, c ? f(c.durationMs / 1000, 1) : '', c?.usage.input ?? '', c?.usage.output ?? '', c?.usage.reasoning ?? '',
-                rd.applyMs, rd.renderMs, rd.measureMs, f(rd.meanIoU), rd.issues, rd.relationIssues ?? '', rd.refRelationIssues ?? '', rd.cameraAfter?.pitchDeg ?? '', rd.cameraAfter?.hfovDeg ?? '', f(maxProp(rd.objects)), rd.edits.length,
+                rd.applyMs, rd.renderMs, rd.measureMs, f(rd.meanIoU), f(rd.weightedIoU), rd.issues, rd.relationIssues ?? '', rd.refRelationIssues ?? '', rd.cameraAfter?.pitchDeg ?? '', rd.cameraAfter?.hfovDeg ?? '', f(maxProp(rd.objects)), rd.edits.length,
                 ...objectIds.map(id => f(rd.objects.find(o => o.id === id)?.iou)), q(rd.reason)].join(',');
         }),
         '',

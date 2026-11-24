@@ -29,13 +29,17 @@ export interface ArrangeObject {
     size: [number, number, number];
     /** Rotation about the vertical axis (degrees) */
     rotationYDeg: number;
+    /** Rotation set by the front alignment (the model's view from the camera matched with its completed image of the photo) */
+    alignedRotationYDeg?: number;
+    /** Oriented footprint on the floor plane (x, z): center, half extents along the model's own axes, turn about the vertical axis */
+    footprint?: { center: [number, number]; half: [number, number]; yawDeg: number };
     /**
      * How well the model's visible part, rendered from the photo's camera, matches the
      * object's mask in the photo (SAM 2.1): intersection over union, rendered area / mask
      * area, and the offset of the rendered centroid from the mask centroid (fractions of
      * the image width and height; + = right / down). Missing when the object has no mask.
      */
-    photoMatch?: { iou: number; areaRatio: number; offset: [number, number] };
+    photoMatch?: { iou: number; areaRatio: number; offset: [number, number]; maskFraction?: number };
     /** Physical problems found by the checks (floating, sunk, inside another model) */
     warnings?: string[];
     /** Relations and sizes of the scene analysis that the scene does not satisfy */
@@ -138,6 +142,8 @@ export interface ArrangeRoundRecord {
     renderMs: number;
     measureMs: number;
     meanIoU?: number;
+    /** Mean IoU weighted by the objects' areas in the photo */
+    weightedIoU?: number;
     issues: number;
     /** Relation and size warnings from the scene analysis (undefined without an analysis) */
     relationIssues?: number;
@@ -164,6 +170,8 @@ export interface ArrangeRecord {
     analysisRaw?: unknown;
     /** Reference analysis used for the evaluation */
     reference?: SceneAnalysis;
+    /** update_placements calls that changed nothing, as the model sent them (to find out why) */
+    emptyCalls?: { call: number; input: unknown }[];
     /** Set when the scene was set back to an earlier, better state at the end (0 = as before the run) */
     kept?: { round: number; score: number; lastRound: number; lastScore: number };
     calls: ArrangeCallRecord[];
@@ -200,6 +208,16 @@ export interface ArrangeResult {
 }
 
 /** Mean photo IoU over the objects that have a mask */
+/**
+ * Mean photo IoU weighted by each object's area in the photo (its mask), so that objects
+ * seen only as a sliver at the photo's edge count less (for evaluation; not shown to the model)
+ */
+export const weightedPhotoIoU = (objects: ArrangeObject[]): number | undefined => {
+    const v = objects.flatMap(o => o.photoMatch?.maskFraction ? [[o.photoMatch.iou, o.photoMatch.maskFraction]] : []);
+    const w = v.reduce((a, [, f]) => a + f, 0);
+    return w > 0 ? v.reduce((a, [iou, f]) => a + iou * f, 0) / w : undefined;
+};
+
 export const meanPhotoIoU = (objects: ArrangeObject[]): number | undefined => {
     const v = objects.flatMap(o => o.photoMatch ? [o.photoMatch.iou] : []);
     return v.length ? v.reduce((a, b) => a + b, 0) / v.length : undefined;
@@ -235,7 +253,7 @@ Your task: make the scene physically and semantically consistent with the photo.
 - Seated people ("sits_on", "sits_at"): hips at the seat, about 0.45 m above the floor, feet on the floor, close to the table or desk they sit at, with the top around the height of their lower chest or elbows. This holds also when the seat is not in the scene ("sits_on none"): never lower a seated person to the floor. rest_on uses the top of a bounding box, which for a chair is the backrest, so place seated people with center or move.
 - A seat in the scene goes under the person who sits on it: use place_under (it centers the seat under the person and stands it on the floor), then turn it with rotate_y_deg so that the person faces the way the seat faces (backrest behind the back), and adjust with move; check in the top and oblique views that the seat is under the hips.
 - Generated models can have wrong proportions (e.g. furniture that is too low or too thick); fix them with scale_axes (stretch along the model's own x, y, z) rather than by changing the whole object's size. Never stretch people: their body proportions stay as generated (scale_axes is refused for people; use scale). Do not stretch other objects only to improve the photo match either; proportion_change in the object list shows how far each object is from the generated model's proportions.
-- Orientation ("faces"): people, chairs and other objects with a front should face the way they face in the photo.
+- Orientation ("faces"): people, chairs and other objects with a front should face the way they face in the photo. rotation_y_deg_from_photo is the turn that the front alignment found by comparing each model, seen from the camera, with the object in the photo (e.g. a table seen corner-on); keep it unless the photo clearly shows another orientation, and do not turn furniture square to the camera only because that seems usual.
 - The photo's camera: the scene was built for a level camera (pitch_deg 0) with a 60° horizontal field of view, which is only an assumption. If the objects cannot all have their real sizes and their places in the photo at the same time (e.g. a table top at its real height falls below its place in the photo, cups resting on the table come out too large, people seated behind the table look too small), the camera is probably tilted down (most photos of people at a table: about 5-20°) or has another field of view (phones about 65-75°, zoomed photos narrower). Then set camera with update_placements: all models keep their place and apparent size in the photo. The floor then moves to the bottom of the lowest model, which may be wrong (e.g. a chair re-projected below the people's feet); set floor_at in the same call to the object that stands on the floor most reliably (usually a person whose feet are generated, or a piece of furniture whose legs are visible), and fix the other supports in the same edits (drop_on floor for furniture and people whose contact is hidden, rest_on for objects on tops). The camera's height above the floor follows from the floor and needs no setting. Change the camera early, before fine-tuning, and only for such a conflict.
 - Avoid intersections, except where parts overlap in reality (legs under a table).
 - Do not change objects that are already right.
@@ -330,6 +348,7 @@ const describeObjects = (scene: ArrangeScene, objects: ArrangeObject[], relation
         bottom_y: round3(o.center[1] - o.size[1] / 2),
         top_y: round3(o.center[1] + o.size[1] / 2),
         rotation_y_deg: Math.round(o.rotationYDeg),
+        ...(o.alignedRotationYDeg !== undefined ? { rotation_y_deg_from_photo: Math.round(o.alignedRotationYDeg) } : {}),
         ...(o.warnings?.length ? { warnings: o.warnings } : {}),
         ...(o.relationWarnings?.length ? { relation_warnings: o.relationWarnings } : {}),
         ...(o.proportionChange !== undefined && o.proportionChange > 0.005 ? { proportion_change: round3(o.proportionChange) } : {}),
@@ -554,7 +573,7 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
     const states: State[] = [{ round: 0, score: stateScore(before), snap: scene.snapshot(), objects: objectsBefore, issues: issuesBefore, relationIssues: relationIssuesBefore, refRelationIssues: before.refRelationIssues }];
     const initial = await renderAll();
     record.initial = {
-        round: 0, renderMs: initial.ms, measureMs: before.ms, meanIoU: photoIoUBefore, issues: issuesBefore, relationIssues: relationIssuesBefore,
+        round: 0, renderMs: initial.ms, measureMs: before.ms, meanIoU: photoIoUBefore, weightedIoU: weightedPhotoIoU(objectsBefore), issues: issuesBefore, relationIssues: relationIssuesBefore,
         refRelationIssues: before.refRelationIssues, refRelationWarnings: before.refRelationWarnings, cameraAfter: scene.camera(),
         objects: summarizeObjects(objectsBefore), images: initial.images,
     };
@@ -633,7 +652,10 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
             if (camera) problems.push(...scene.setCamera(camera.pitchDeg, camera.hfovDeg));
             const floorAt = typeof (tool.input as { floor_at?: unknown })?.floor_at === 'string' ? (tool.input as { floor_at: string }).floor_at : undefined;
             if (floorAt) problems.push(...scene.setFloorAt(floorAt));
-            if (edits.length === 0 && !camera && !floorAt) problems.push('nothing was changed: the call had no edits, camera or floor_at');
+            if (edits.length === 0 && !camera && !floorAt) {
+                problems.push('nothing was changed: the call had no edits, camera or floor_at');
+                record.emptyCalls = [...(record.emptyCalls ?? []), { call: callIndex, input: tool.input }];
+            }
             problems.push(...scene.apply(edits));
             const applyMs = now() - ta;
             const rendered = await renderAll();
@@ -646,7 +668,7 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
             record.rounds.push({
                 round: rounds, call: callIndex, reason, edits, ...(camera ? { camera } : {}), ...(floorAt ? { floorAt } : {}), problems, cameraAfter: scene.camera(),
                 applyMs: Math.round(applyMs), renderMs: Math.round(rendered.ms), measureMs: Math.round(after.ms),
-                meanIoU: meanPhotoIoU(after.objects), issues: after.issues, relationIssues: after.relationIssues,
+                meanIoU: meanPhotoIoU(after.objects), weightedIoU: weightedPhotoIoU(after.objects), issues: after.issues, relationIssues: after.relationIssues,
                 refRelationIssues: after.refRelationIssues, refRelationWarnings: after.refRelationWarnings, objects: summarizeObjects(after.objects), images: rendered.images,
             });
             results.push({
