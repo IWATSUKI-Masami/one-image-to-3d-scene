@@ -346,7 +346,25 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                             if (support && support !== entry) top = boxOf(support.container).max.y;
                             else problems.push(`${edit.id}: unknown support ${edit.rest_on}`);
                         }
-                        if (top !== undefined) o.position.y += top - boxOf(o).min.y;
+                        if (top !== undefined) {
+                            // Slide the object along the line of sight until its bottom touches the
+                            // support (scaling it with the distance), so that it keeps its place in
+                            // the photo: a cup seen on the near edge of the table lands on the near
+                            // edge, not wherever the depth estimate put it. If the line of sight
+                            // does not reach the support plane, drop it vertically instead.
+                            const b = boxOf(o);
+                            const bottom = new THREE.Vector3((b.min.x + b.max.x) / 2, b.min.y, (b.min.z + b.max.z) / 2);
+                            const t = bottom.y !== 0 ? top / bottom.y : NaN;
+                            if (Number.isFinite(t) && t > 0.25 && t < 4) {
+                                const c = b.getCenter(new THREE.Vector3());
+                                o.scale.multiplyScalar(t);
+                                shiftCenterTo(o, c.multiplyScalar(t));
+                                o.position.y += top - boxOf(o).min.y; // exact contact
+                            } else {
+                                o.position.y += top - b.min.y;
+                                problems.push(`${edit.id}: the line of sight does not reach the support, so it was moved vertically (its place in the photo changed)`);
+                            }
+                        }
                     }
                     o.updateMatrixWorld(true);
                     layoutRef.current.set(entry.model.id, transformOf(o));

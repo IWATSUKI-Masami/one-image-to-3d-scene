@@ -45,7 +45,7 @@ export interface PlacementEdit {
     move?: [number, number, number];
     /** Put the bounding-box center here (world units) */
     center?: [number, number, number];
-    /** Put the bottom of the model on the floor ("floor") or on top of another model's bounding box (its id) */
+    /** Put the bottom of the model on the floor ("floor") or on top of another model's bounding box (its id), moving it along the line of sight so that it keeps its place in the photo */
     rest_on?: string;
 }
 
@@ -93,7 +93,7 @@ Conventions (world units are relative, not meters):
 
 Your task: make the scene physically and semantically consistent with the photo.
 - Keep every object where it is in the photo (its place in the photo view should stay close to the photo). To change an object's distance without changing its place in the photo, use along_ray, which moves it along the line of sight and scales it by the same factor.
-- Supports: objects standing on furniture rest on its top (cups and vases on a table: use rest_on with the table's id); furniture and standing people rest on the floor (rest_on "floor").
+- Supports: objects standing on furniture rest on its top (cups and vases on a table: use rest_on with the table's id); furniture and standing people rest on the floor (rest_on "floor"). rest_on slides the object along the line of sight until it touches the support, so it keeps its place in the photo and gets the distance (and size) that the support implies; this is usually better than the depth estimate. Apply rest_on after the support itself is in its final place (edits run in the order given), and to drop an object straight down instead, use move.
 - Seated people sit on their chairs: hips at the seat, feet on the floor, close to the table if they are at a table. rest_on uses the top of a bounding box, which for a chair is the backrest, so place seated people with center or move instead.
 - Real-world sizes: decide how many world units make a meter from the people (an adult is about 1.65-1.75 m tall standing and about 1.3 m from the floor to the top of the head when seated on a chair), then make the other objects consistent: dining or cafe table top about 0.72-0.76 m above the floor, chair seat about 0.45 m, a coffee cup about 0.08-0.10 m tall, a small vase 0.15-0.25 m. Keep the objects' places in the photo; use along_ray to change size and distance together.
 - Seated people sit at chair height even when their chair is not in the scene (it may be hidden or missing): their feet on the floor, hips about 0.45 m up, the table top around the height of their lower chest or elbows. Never lower a seated person to the floor.
@@ -101,6 +101,8 @@ Your task: make the scene physically and semantically consistent with the photo.
 - Orientation: people and chairs should face the way they face in the photo (e.g. two people talking face each other).
 - Avoid intersections, except where parts overlap in reality (legs under a table).
 - Do not change objects that are already right.
+
+Check the top view as well as the photo view: an object can look right from the camera but be at the wrong distance (e.g. a cup on the far side of the table instead of the near side). Compare where objects are on the table in the photo (near or far edge, left or right) with the top view.
 
 Work in rounds: call update_placements with the edits for one round (you can edit several objects at once); you then get the new object list and new renderings. Check them against the photo and correct further. When the scene matches the photo well, or when further changes would not help, call finish with a short summary of what you changed. Do at most a few rounds.`;
 
@@ -124,7 +126,7 @@ const TOOLS: Anthropic.Beta.BetaTool[] = [
                             along_ray: { type: 'number', description: 'Move the center along the line of sight by this factor (>1 = farther); the size is scaled by the same factor, so the object keeps its place and size in the photo' },
                             move: { type: 'array', items: { type: 'number' }, description: 'Offset [dx, dy, dz] in world units' },
                             center: { type: 'array', items: { type: 'number' }, description: 'New bounding-box center [x, y, z] in world units' },
-                            rest_on: { type: 'string', description: '"floor", or the id of the object whose bounding-box top this object should stand on' },
+                            rest_on: { type: 'string', description: '"floor", or the id of the object whose bounding-box top this object should stand on; the object slides along the line of sight until it touches it (keeps its place in the photo)' },
                         },
                         required: ['id'],
                         additionalProperties: false,
