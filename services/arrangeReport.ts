@@ -140,6 +140,7 @@ export const buildArrangeReport = (r: ArrangeReportInput) => {
         ...record.rounds.flatMap(rd => [
             `  round ${rd.round}:`,
             ...(rd.camera ? [`    camera: pitch ${rd.camera.pitchDeg}°, horizontal field of view ${rd.camera.hfovDeg}°`] : []),
+            ...(rd.floorAt ? [`    floor at the bottom of ${rd.floorAt}`] : []),
             ...rd.edits.map(e => `    ${JSON.stringify(e)}`),
             ...(rd.problems.length ? [`    problems: ${rd.problems.join('; ')}`] : []),
         ]),

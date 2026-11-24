@@ -699,6 +699,14 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 if (gridRef.current) gridRef.current.position.y = floorY;
                 return problems;
             },
+            setFloorAt: (id) => {
+                const entry = byShort.get(id);
+                if (!entry) return [`floor_at: unknown id ${id}`];
+                floorY = boxOf(entry.container).min.y;
+                floorYRef.current = floorY;
+                if (gridRef.current) gridRef.current.position.y = floorY;
+                return [];
+            },
             snapshot: () => ({
                 camera: { ...photoCameraRef.current }, floorY,
                 models: entries.map(({ model, container }) => ({ id: model.id, t: transformOf(container), set: layoutRef.current.get(model.id) })),

@@ -84,6 +84,8 @@ export interface ArrangeScene {
     camera(): { pitchDeg: number; hfovDeg: number };
     /** Change the photo's camera; every model keeps its place and apparent size in the photo. Returns problems */
     setCamera(pitchDeg: number, hfovDeg: number): string[];
+    /** Put the floor at the bottom of a model (by id), without moving any model. Returns problems */
+    setFloorAt(id: string): string[];
     /** The placements of all models (and the camera), to go back to later */
     snapshot(): unknown;
     /** Put the models back where a snapshot had them */
@@ -128,6 +130,8 @@ export interface ArrangeRoundRecord {
     edits: PlacementEdit[];
     /** Camera set in this round (before the edits), if any */
     camera?: { pitchDeg: number; hfovDeg: number };
+    /** Object whose bottom became the floor in this round, if any */
+    floorAt?: string;
     problems: string[];
     /** Milliseconds to apply the edits, render the views and measure the scene */
     applyMs: number;
@@ -232,7 +236,7 @@ Your task: make the scene physically and semantically consistent with the photo.
 - A seat in the scene goes under the person who sits on it: use place_under (it centers the seat under the person and stands it on the floor), then turn it with rotate_y_deg so that the person faces the way the seat faces (backrest behind the back), and adjust with move; check in the top and oblique views that the seat is under the hips.
 - Generated models can have wrong proportions (e.g. furniture that is too low or too thick); fix them with scale_axes (stretch along the model's own x, y, z) rather than by changing the whole object's size. Never stretch people: their body proportions stay as generated (scale_axes is refused for people; use scale). Do not stretch other objects only to improve the photo match either; proportion_change in the object list shows how far each object is from the generated model's proportions.
 - Orientation ("faces"): people, chairs and other objects with a front should face the way they face in the photo.
-- The photo's camera: the scene was built for a level camera (pitch_deg 0) with a 60° horizontal field of view, which is only an assumption. If the objects cannot all have their real sizes and their places in the photo at the same time (e.g. a table top at its real height falls below its place in the photo, cups resting on the table come out too large, people seated behind the table look too small), the camera is probably tilted down (most photos of people at a table: about 5-20°) or has another field of view (phones about 65-75°, zoomed photos narrower). Then set camera with update_placements: all models keep their place and apparent size in the photo, and you fix the supports again in the same or the next round (drop_on floor for furniture and people, rest_on for objects on tops). Change the camera early, before fine-tuning, and only for such a conflict.
+- The photo's camera: the scene was built for a level camera (pitch_deg 0) with a 60° horizontal field of view, which is only an assumption. If the objects cannot all have their real sizes and their places in the photo at the same time (e.g. a table top at its real height falls below its place in the photo, cups resting on the table come out too large, people seated behind the table look too small), the camera is probably tilted down (most photos of people at a table: about 5-20°) or has another field of view (phones about 65-75°, zoomed photos narrower). Then set camera with update_placements: all models keep their place and apparent size in the photo. The floor then moves to the bottom of the lowest model, which may be wrong (e.g. a chair re-projected below the people's feet); set floor_at in the same call to the object that stands on the floor most reliably (usually a person whose feet are generated, or a piece of furniture whose legs are visible), and fix the other supports in the same edits (drop_on floor for furniture and people whose contact is hidden, rest_on for objects on tops). The camera's height above the floor follows from the floor and needs no setting. Change the camera early, before fine-tuning, and only for such a conflict.
 - Avoid intersections, except where parts overlap in reality (legs under a table).
 - Do not change objects that are already right.
 
@@ -247,7 +251,7 @@ Work in rounds: call update_placements with the edits for one round (you can edi
 const TOOLS: ToolSpec[] = [
     {
         name: 'update_placements',
-        description: 'Change the placement of one or more models, optionally after setting the photo\'s camera (camera). For each edit, the fields that are given are applied in this order: scale, scale_axes, rotate_y_deg, place_under, along_ray, move, center, rest_on, drop_on. Returns the new object list and new renderings (photo view, top view and oblique view).',
+        description: 'Change the placement of one or more models, optionally after setting the photo\'s camera (camera) and the floor (floor_at). For each edit, the fields that are given are applied in this order: scale, scale_axes, rotate_y_deg, place_under, along_ray, move, center, rest_on, drop_on. Returns the new object list and new renderings (photo view, top view and oblique view).',
         schema: {
             type: 'object',
             properties: {
@@ -281,6 +285,7 @@ const TOOLS: ToolSpec[] = [
                     required: ['pitch_deg', 'hfov_deg'],
                     additionalProperties: false,
                 },
+                floor_at: { type: 'string', description: 'Optional: put the floor at the bottom of this object (its id), e.g. a seated person whose feet are on the floor in reality, after the camera and before the edits; no model moves. Without it the floor is the bottom of the lowest model.' },
                 reason: { type: 'string', description: 'What these edits fix, in one or two sentences' },
             },
             required: ['edits', 'reason'],
@@ -626,6 +631,9 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
             onProgress?.(`Round ${rounds}: ${reason || `${edits.length} edit(s)`}`);
             const ta = now();
             if (camera) problems.push(...scene.setCamera(camera.pitchDeg, camera.hfovDeg));
+            const floorAt = typeof (tool.input as { floor_at?: unknown })?.floor_at === 'string' ? (tool.input as { floor_at: string }).floor_at : undefined;
+            if (floorAt) problems.push(...scene.setFloorAt(floorAt));
+            if (edits.length === 0 && !camera && !floorAt) problems.push('nothing was changed: the call had no edits, camera or floor_at');
             problems.push(...scene.apply(edits));
             const applyMs = now() - ta;
             const rendered = await renderAll();
@@ -636,7 +644,7 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
             lastRef = after.refRelationIssues;
             states.push({ round: rounds, score: stateScore(after), snap: scene.snapshot(), objects: after.objects, issues: after.issues, relationIssues: after.relationIssues, refRelationIssues: after.refRelationIssues });
             record.rounds.push({
-                round: rounds, call: callIndex, reason, edits, ...(camera ? { camera } : {}), problems, cameraAfter: scene.camera(),
+                round: rounds, call: callIndex, reason, edits, ...(camera ? { camera } : {}), ...(floorAt ? { floorAt } : {}), problems, cameraAfter: scene.camera(),
                 applyMs: Math.round(applyMs), renderMs: Math.round(rendered.ms), measureMs: Math.round(after.ms),
                 meanIoU: meanPhotoIoU(after.objects), issues: after.issues, relationIssues: after.relationIssues,
                 refRelationIssues: after.refRelationIssues, refRelationWarnings: after.refRelationWarnings, objects: summarizeObjects(after.objects), images: rendered.images,
