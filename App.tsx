@@ -39,6 +39,7 @@ import { loadAISettings, saveAISettings, hasRequiredKeys, bgRemovalSpace, PROVID
 import { AISettingsDialog } from './components/AISettingsDialog';
 import { cropObjectsFromImage, removeBackgroundWithRembg, findBestMatchPosition, hasTransparentBackground, generate3DModelWithHunyuan3D, generate3DModelWithTrellis, blobUrlToDataUrl, dataUrlToBlobUrl, generateDepthMap, prepareImageForCompletion, calculateTightBoundingBox, prepareCompletionCanvas, verifyPartPlacement, makeReferenceImage } from './utils';
 import { DetectedObject, CroppedObject, Model3D, ModelProvider, ProjectArchive, AISettings, FaceStyle, CompletionInfo, PartBoxSource, CompletionAttempt, SceneLayout } from './types';
+import { sceneEditState } from './services/arrangeProviders';
 import { Scan, Sparkles, AlertCircle, Layers, Image as ImageIcon, User, Box, ArrowLeft, Upload, Plug, Wand2, RefreshCw, Star, Download, MonitorPlay, Cuboid, Save, FolderOpen, Trash2 } from 'lucide-react';
 
 type AppMode = 'landing' | 'analyze' | 'batch-remove' | 'complete-body' | 'generate-3d';
@@ -1172,9 +1173,11 @@ const App: React.FC = () => {
 
       // File name: <photo name>_<furthest stage>_<local date-time>.json
       // e.g. 2PersonsAroundTable_3d-models_20261118-143005.json
-      // (scene-edited: the 3D scene has placements set by hand)
+      // (scene-edited: the 3D scene has placements set by hand; scene-arranged-claude:
+      // ... placed by Arrange with Claude, possibly corrected by hand afterwards)
       const stage =
-        archive.models3D.length > 0 && archive.depthMapUrl && archive.sceneLayout?.models.length ? 'scene-edited'
+        archive.models3D.length > 0 && archive.depthMapUrl && archive.sceneLayout?.models.length
+          ? sceneEditState(archive.sceneLayout).replace(/^/, 'scene-')
         : archive.models3D.length > 0 && archive.depthMapUrl ? 'scene'
           : archive.models3D.length > 0 ? '3d-models'
             : archive.completedImages.length > 0 ? 'completed'

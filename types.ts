@@ -114,11 +114,26 @@ export interface SceneModelPlacement {
   scale: [number, number, number];
 }
 
+/** One Arrange run that changed the scene (kept with the layout and the project) */
+export interface ArrangeRun {
+  provider: 'anthropic' | 'openai' | 'gemini';
+  model: string;
+  /** ISO date-time of the end of the run */
+  at: string;
+  rounds: number;
+  outcome: 'done' | 'failed' | 'cancelled';
+  /** Mean photo IoU before and after */
+  photoIoUBefore?: number;
+  photoIoUAfter?: number;
+}
+
 /** Scene settings, camera and model placements (in a project: only the placements set by hand) */
 export interface SceneLayout {
   settings: { depthScale: number; perspective: boolean; applyAlignment: boolean; pointSize: number };
   camera?: { position: [number, number, number]; target: [number, number, number]; fov: number };
   models: SceneModelPlacement[];
+  /** Arrange runs whose changes are in the placements (oldest first); undone runs are removed */
+  arrangeRuns?: ArrangeRun[];
 }
 
 export interface ProjectArchive {

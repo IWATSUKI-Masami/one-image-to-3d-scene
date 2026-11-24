@@ -17,6 +17,20 @@ export const ARRANGE_PROVIDER_LABELS: Record<ArrangeProvider, string> = {
     gemini: 'Gemini',
 };
 
+/** Short provider name for file names */
+export const ARRANGE_PROVIDER_FILE_NAMES: Record<ArrangeProvider, string> = { anthropic: 'claude', openai: 'openai', gemini: 'gemini' };
+
+/**
+ * State of a scene's placements for file names: "edited" (set by hand) or
+ * "arranged-<provider>" (by the last Arrange run, possibly corrected by hand afterwards);
+ * "" when everything is placed automatically.
+ */
+export const sceneEditState = (layout: { models: unknown[]; arrangeRuns?: { provider: ArrangeProvider }[] } | null | undefined): string => {
+    if (!layout || layout.models.length === 0) return '';
+    const last = layout.arrangeRuns?.[layout.arrangeRuns.length - 1];
+    return last ? `arranged-${ARRANGE_PROVIDER_FILE_NAMES[last.provider]}` : 'edited';
+};
+
 /** Content shared by all providers: text, or a base64 JPEG */
 export type Block = { type: 'text'; text: string } | { type: 'image'; base64: string };
 

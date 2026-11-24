@@ -7,9 +7,9 @@ import { removeStrayFragments } from './meshCleanup';
 import { alignmentYawDeg, ASSUMED_HFOV_DEG, MIN_ALIGNMENT_SCORE, viewAngleDeg } from '../services/frontAlignment';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { Spinner } from './Spinner';
-import { DetectedObject, Model3D, SceneLayout } from '../types';
+import { ArrangeRun, DetectedObject, Model3D, SceneLayout } from '../types';
 import { ArrangeObject, ArrangeScene, ArrangeView, PlacementEdit, arrangeScene } from '../services/semanticArrange';
-import { ARRANGE_PROVIDER_LABELS, ArrangeProvider } from '../services/arrangeProviders';
+import { ARRANGE_PROVIDER_LABELS, ArrangeProvider, sceneEditState } from '../services/arrangeProviders';
 import { Box2D, DepthRange, ObjectMask, depthFromBrightness, loadObjectMask, medianDepthInBox, sameBox } from './depthSampling';
 
 const boxKey = (box: Box2D): string => box.map(v => v.toFixed(6)).join(',');
@@ -197,8 +197,11 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     const arrangeAbortRef = useRef<AbortController | null>(null);
     // Edit history (Undo / Redo) of placements set by hand
     // Each history entry is a group of model changes undone together (one drag, or one Arrange run)
-    const undoStackRef = useRef<EditStep[][]>([]);
-    const redoStackRef = useRef<EditStep[][]>([]);
+    // (an Arrange run also carries its record, which Undo removes and Redo restores)
+    const undoStackRef = useRef<{ steps: EditStep[]; run?: ArrangeRun }[]>([]);
+    const redoStackRef = useRef<{ steps: EditStep[]; run?: ArrangeRun }[]>([]);
+    // Arrange runs whose changes are in the current placements (saved with the layout and the project)
+    const arrangeRunsRef = useRef<ArrangeRun[]>(initialLayout?.arrangeRuns ?? []);
     const [historySize, setHistorySize] = useState({ undo: 0, redo: 0 });
     const updateHistorySize = () => setHistorySize({ undo: undoStackRef.current.length, redo: redoStackRef.current.length });
     // Placement of the model being dragged, when the drag started (undefined = automatic)
@@ -252,18 +255,21 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 const label = model?.label ?? kept?.label;
                 return label ? [{ id, label, box_2d: model?.box_2d ?? kept?.box_2d, ...t }] : [];
             }),
+            ...(arrangeRunsRef.current.length ? { arrangeRuns: [...arrangeRunsRef.current] } : {}),
         };
     };
+    /** "", "edited" or "arranged-<provider>", for file names */
+    const editState = () => sceneEditState({ models: [...layoutRef.current.keys()], arrangeRuns: arrangeRunsRef.current });
     // Called from event handlers of the scene, which outlive a render: always use the latest
     const reportLayoutRef = useRef<() => void>(() => {});
     reportLayoutRef.current = () => onLayoutChange?.(currentLayout());
 
     /** Record an edit (a new edit clears the redo history) */
-    const pushStepRef = useRef<(step: EditStep | EditStep[]) => void>(() => {});
-    pushStepRef.current = (step) => {
-        const group = Array.isArray(step) ? step : [step];
-        if (group.length === 0) return;
-        undoStackRef.current.push(group);
+    const pushStepRef = useRef<(step: EditStep | EditStep[], run?: ArrangeRun) => void>(() => {});
+    pushStepRef.current = (step, run) => {
+        const steps = Array.isArray(step) ? step : [step];
+        if (steps.length === 0) return;
+        undoStackRef.current.push({ steps, run });
         if (undoStackRef.current.length > 100) undoStackRef.current.shift();
         redoStackRef.current = [];
         updateHistorySize();
@@ -282,7 +288,8 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     undoRef.current = () => {
         const group = undoStackRef.current.pop();
         if (!group) return;
-        for (const step of [...group].reverse()) placeModel(step.modelId, step.before);
+        for (const step of [...group.steps].reverse()) placeModel(step.modelId, step.before);
+        if (group.run) arrangeRunsRef.current = arrangeRunsRef.current.filter(r => r !== group.run);
         redoStackRef.current.push(group);
         updateHistorySize();
         reportLayoutRef.current();
@@ -291,7 +298,8 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     redoRef.current = () => {
         const group = redoStackRef.current.pop();
         if (!group) return;
-        for (const step of group) placeModel(step.modelId, step.after);
+        for (const step of group.steps) placeModel(step.modelId, step.after);
+        if (group.run) arrangeRunsRef.current = [...arrangeRunsRef.current, group.run];
         undoStackRef.current.push(group);
         updateHistorySize();
         reportLayoutRef.current();
@@ -354,7 +362,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
      * object's mask, red = mask only (the model is missing there), blue = model only;
      * object names with their IoU, and the mean IoU. Also a CSV of the values.
      */
-    const [photoMatchView, setPhotoMatchView] = useState<{ png: string; csv: string; mean: number | undefined } | null>(null);
+    const [photoMatchView, setPhotoMatchView] = useState<{ png: string; csv: string; mean: number | undefined; kind: string } | null>(null);
     const handlePhotoMatch = async () => {
         const idRender = idRenderRef.current;
         if (!idRender) return;
@@ -371,6 +379,9 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         }
         const ids = idRender(entries.map(e => e.container), W, H);
         const stats = photoMatchStats(ids, masks, W, H);
+        // State of the placements (file name and CSV header), so before/after files can be told apart
+        const state = editState();
+        const lastRun = arrangeRunsRef.current[arrangeRunsRef.current.length - 1];
         const photo = await loadImageAsync(imageUrl);
         const c = document.createElement('canvas');
         c.width = W; c.height = H + 40;
@@ -420,11 +431,17 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             ctx.fillStyle = color; ctx.fillRect(lx, H + 13, 14, 14); lx += 20;
             ctx.fillStyle = '#222'; ctx.fillText(label, lx, H + 20); lx += ctx.measureText(label).width + 22;
         }
-        if (mean !== undefined) ctx.fillText(`mean IoU ${mean.toFixed(3)} (${valid.length} objects)`, lx + 10, H + 20);
-        const csv = ['object,iou,area_ratio,offset_x,offset_y',
+        if (mean !== undefined) ctx.fillText(`mean IoU ${mean.toFixed(3)} (${valid.length} objects)${state ? `, ${state.replace('-', ' ')}` : ', automatic placement'}`, lx + 10, H + 20);
+        const csv = [
+            `scene,"${(sceneName ?? '').replace(/"/g, '""')}"`,
+            `placement,${state ? (lastRun ? 'arranged' : 'edited by hand') : 'automatic'}`,
+            ...(lastRun ? [`arranged_by,${ARRANGE_PROVIDER_LABELS[lastRun.provider]} (${lastRun.model})`, `arranged_at,${lastRun.at}`] : []),
+            `computed_at,${new Date().toISOString()}`,
+            '',
+            'object,iou,area_ratio,offset_x,offset_y',
             ...stats.flatMap((st, i) => st ? [`"${names[i].replace(/"/g, '""')}",${st.iou.toFixed(4)},${st.areaRatio.toFixed(4)},${st.offset[0].toFixed(4)},${st.offset[1].toFixed(4)}`] : []),
             ...(mean !== undefined ? [`mean,${mean.toFixed(4)},,,`] : [])].join('\n');
-        setPhotoMatchView({ png: c.toDataURL('image/png'), csv, mean });
+        setPhotoMatchView({ png: c.toDataURL('image/png'), csv, mean, kind: state ? `photo-match-${state}` : 'photo-match' });
     };
 
     const handleArrange = async () => {
@@ -593,8 +610,9 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         const timer = window.setInterval(() => setArrangeElapsed(Math.round((Date.now() - startedAt) / 1000)), 1000);
         const log = (m: string) => setArrangeLog(prev => [...prev.slice(-30), m]);
         let outcome: 'done' | 'failed' | 'cancelled' = 'done';
+        let result: Awaited<ReturnType<typeof arrangeScene>> | undefined;
         try {
-            const result = await arrangeScene(arrangeSceneApi, {
+            result = await arrangeScene(arrangeSceneApi, {
                 provider: arrange.provider,
                 apiKey: arrange.apiKey,
                 model: arrange.model,
@@ -620,7 +638,21 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 const prev = before.get(model.id);
                 return sameTransform(prev ?? container.userData.autoTransform, after) ? [] : [{ modelId: model.id, before: prev, after }];
             });
-            pushStepRef.current(steps);
+            // Record the run with its changes (Undo removes it again), so files say "arranged-<provider>"
+            let run: ArrangeRun | undefined;
+            if (steps.length > 0) {
+                run = {
+                    provider: arrange.provider,
+                    model: arrange.model,
+                    at: new Date().toISOString(),
+                    rounds: result?.rounds ?? 0,
+                    outcome,
+                    ...(result?.photoIoUBefore !== undefined ? { photoIoUBefore: result.photoIoUBefore } : {}),
+                    ...(result?.photoIoUAfter !== undefined ? { photoIoUAfter: result.photoIoUAfter } : {}),
+                };
+                arrangeRunsRef.current = [...arrangeRunsRef.current, run];
+            }
+            pushStepRef.current(steps, run);
             reportLayoutRef.current();
             arrangeAbortRef.current = null;
             setArranging(false);
@@ -843,9 +875,12 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 const model = id ? byId.get(id) : undefined;
                 return model ? [{ id: model.id, label: model.label, box_2d: model.box_2d, ...transformOf(container) }] : [];
             }),
+            ...(arrangeRunsRef.current.length ? { arrangeRuns: [...arrangeRunsRef.current] } : {}),
         };
-        // layout-edited: some models were placed by hand (or by a loaded layout)
-        const kind = layoutRef.current.size > 0 ? 'layout-edited' : 'layout';
+        // layout-edited: some models were placed by hand (or by a loaded layout);
+        // layout-arranged-<provider>: by Arrange (possibly corrected by hand afterwards)
+        const state = editState();
+        const kind = state ? `layout-${state}` : 'layout';
         download(new Blob([JSON.stringify(layout, null, 1)], { type: 'application/json' }), `${fileBase()}_${kind}_${fileStamp()}.json`);
     };
 
@@ -908,6 +943,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             return;
         }
         layoutRef.current = next;
+        arrangeRunsRef.current = Array.isArray(layout.arrangeRuns) ? layout.arrangeRuns : [];
         // A loaded layout replaces all placements; edits before it cannot be undone one by one
         undoStackRef.current = [];
         redoStackRef.current = [];
@@ -1890,13 +1926,13 @@ transformControlsRef.current.attach(meshContainer);
                             </span>
                             <div className="flex items-center gap-2">
                                 <button
-                                    onClick={() => { const a = document.createElement('a'); a.href = photoMatchView.png; a.download = `${fileBase()}_photo-match_${fileStamp()}.png`; a.click(); }}
+                                    onClick={() => { const a = document.createElement('a'); a.href = photoMatchView.png; a.download = `${fileBase()}_${photoMatchView.kind}_${fileStamp()}.png`; a.click(); }}
                                     className="px-2 py-1 text-xs rounded bg-cyan-600 text-white hover:bg-cyan-500"
                                 >
                                     Save PNG
                                 </button>
                                 <button
-                                    onClick={() => download(new Blob(['\uFEFF' + photoMatchView.csv], { type: 'text/csv' }), `${fileBase()}_photo-match_${fileStamp()}.csv`)}
+                                    onClick={() => download(new Blob(['\uFEFF' + photoMatchView.csv], { type: 'text/csv' }), `${fileBase()}_${photoMatchView.kind}_${fileStamp()}.csv`)}
                                     className="px-2 py-1 text-xs rounded bg-cyan-600 text-white hover:bg-cyan-500"
                                 >
                                     Save CSV
@@ -2233,7 +2269,7 @@ transformControlsRef.current.attach(meshContainer);
                                 ? `Arrange the models with ${ARRANGE_PROVIDER_LABELS[arrange?.provider ?? 'anthropic']} (choose the provider in AI Settings) so that the scene matches the photo: objects on the table, people on their chairs, plausible sizes and orientations. Uses several API calls with images. The result can be undone (Undo in edit mode).`
                                 : 'Arrange needs Perspective on'}
                         >
-                            {arranging ? '✨ Arranging…' : '✨ Arrange'}
+                            {arranging ? '✨ Arranging…' : `✨ Arrange (${ARRANGE_PROVIDER_LABELS[arrange?.provider ?? 'anthropic']})`}
                         </button>
                         <button
                             onClick={handlePhotoMatch}
