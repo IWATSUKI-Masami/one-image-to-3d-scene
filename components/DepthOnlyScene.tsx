@@ -152,6 +152,9 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     const gridRef = useRef<THREE.GridHelper | null>(null);
     const [arranging, setArranging] = useState(false);
     const [arrangeLog, setArrangeLog] = useState<string[]>([]);
+    // How the last Arrange run ended, and how long it has been running (seconds)
+    const [arrangeStatus, setArrangeStatus] = useState<'running' | 'done' | 'failed' | 'cancelled' | null>(null);
+    const [arrangeElapsed, setArrangeElapsed] = useState(0);
     const arrangeAbortRef = useRef<AbortController | null>(null);
     // Edit history (Undo / Redo) of placements set by hand
     // Each history entry is a group of model changes undone together (one drag, or one Arrange run)
@@ -260,6 +263,40 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
      * photo (supports, seated people, relative sizes, orientation). The result becomes
      * placements set by hand and one Undo step.
      */
+    /**
+     * Tell the user that Arrange has ended (it can take minutes): a short chime, and a
+     * mark in the tab title while the page is in the background.
+     */
+    const signalArrangeEnd = (ok: boolean) => {
+        try {
+            const ctx = new AudioContext();
+            const notes = ok ? [660, 880] : [440, 330];
+            notes.forEach((f, i) => {
+                const osc = ctx.createOscillator(), gain = ctx.createGain();
+                osc.frequency.value = f;
+                osc.connect(gain); gain.connect(ctx.destination);
+                const t0 = ctx.currentTime + i * 0.18;
+                gain.gain.setValueAtTime(0.0001, t0);
+                gain.gain.exponentialRampToValueAtTime(0.2, t0 + 0.02);
+                gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
+                osc.start(t0); osc.stop(t0 + 0.17);
+            });
+            window.setTimeout(() => ctx.close(), 800);
+        } catch {
+            // No audio (e.g. blocked by the browser): the panel and the title still show it
+        }
+        if (document.hidden) {
+            const title = document.title;
+            document.title = `${ok ? '✅' : '⚠️'} Arrange ${ok ? 'finished' : 'failed'} — ${title}`;
+            const restore = () => {
+                if (document.hidden) return;
+                document.title = title;
+                document.removeEventListener('visibilitychange', restore);
+            };
+            document.addEventListener('visibilitychange', restore);
+        }
+    };
+
     const handleArrange = async () => {
         if (arranging) return;
         if (!claudeApiKey) {
@@ -382,8 +419,13 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         const controller = new AbortController();
         arrangeAbortRef.current = controller;
         setArranging(true);
+        setArrangeStatus('running');
         setArrangeLog(['Starting…']);
+        const startedAt = Date.now();
+        setArrangeElapsed(0);
+        const timer = window.setInterval(() => setArrangeElapsed(Math.round((Date.now() - startedAt) / 1000)), 1000);
         const log = (m: string) => setArrangeLog(prev => [...prev.slice(-30), m]);
+        let outcome: 'done' | 'failed' | 'cancelled' = 'done';
         try {
             const result = await arrangeSceneWithClaude(arrangeScene, {
                 apiKey: claudeApiKey,
@@ -394,9 +436,13 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             });
             log(`Done (${result.rounds} round${result.rounds === 1 ? '' : 's'}). ${result.summary}`);
         } catch (e: any) {
+            outcome = controller.signal.aborted ? 'cancelled' : 'failed';
             log(controller.signal.aborted ? 'Cancelled.' : `Failed: ${e?.message || e}`);
             console.error('Arrange failed:', e);
         } finally {
+            window.clearInterval(timer);
+            setArrangeStatus(outcome);
+            if (outcome !== 'cancelled') signalArrangeEnd(outcome === 'done');
             // Whatever was changed is one Undo step
             const steps: EditStep[] = entries.flatMap(({ model, container }) => {
                 const after = transformOf(container);
@@ -1593,11 +1639,18 @@ transformControlsRef.current.attach(meshContainer);
         <div className="w-full min-h-[600px] bg-slate-800 rounded-xl border border-slate-700 relative overflow-hidden shadow-inner">
             <div ref={mountRef} className="w-full h-[600px]" />
 
-            {/* Arrange (Claude) progress */}
+            {/* Arrange (Claude) progress: bottom left, in place of the info panel (the page's Processing Times panel can cover the bottom right) */}
             {arrangeLog.length > 0 && (
-                <div className="absolute bottom-4 right-4 z-20 w-80 max-h-64 flex flex-col bg-slate-900/95 border border-violet-500/60 rounded-lg shadow-lg text-xs text-slate-200">
-                    <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700">
-                        <span className="font-semibold text-violet-300">✨ Arrange (Claude)</span>
+                <div className={`absolute bottom-4 left-4 z-20 w-80 max-h-64 flex flex-col bg-slate-900/95 border-2 rounded-lg shadow-lg text-xs text-slate-200 ${
+                    arrangeStatus === 'done' ? 'border-emerald-500' : arrangeStatus === 'failed' ? 'border-red-500' : 'border-violet-500/60'}`}>
+                    <div className={`flex items-center justify-between px-3 py-2 border-b border-slate-700 ${
+                        arrangeStatus === 'done' ? 'bg-emerald-600/30' : arrangeStatus === 'failed' ? 'bg-red-600/30' : ''}`}>
+                        <span className="font-semibold text-violet-300 flex items-center gap-1.5">
+                            {arrangeStatus === 'running' && <><span className="inline-block w-3 h-3 border-2 border-violet-300 border-t-transparent rounded-full animate-spin" /> Arranging… {Math.floor(arrangeElapsed / 60)}:{String(arrangeElapsed % 60).padStart(2, '0')}</>}
+                            {arrangeStatus === 'done' && <span className="text-emerald-300">✅ Arrange finished</span>}
+                            {arrangeStatus === 'failed' && <span className="text-red-300">⚠️ Arrange failed</span>}
+                            {arrangeStatus === 'cancelled' && <span className="text-slate-300">Arrange cancelled</span>}
+                        </span>
                         {arranging ? (
                             <button onClick={() => arrangeAbortRef.current?.abort()} className="px-2 py-0.5 rounded bg-red-600 hover:bg-red-500 text-white">Cancel</button>
                         ) : (
@@ -1931,7 +1984,7 @@ transformControlsRef.current.attach(meshContainer);
                 </div>
             )}
 
-            {showInfo ? (
+            {arrangeLog.length > 0 ? null : showInfo ? (
             <div className="absolute bottom-4 left-4 bg-slate-900/90 backdrop-blur px-3 py-2 rounded-lg text-xs text-slate-400 shadow-sm border border-slate-700">
                 <div className="flex items-start justify-between gap-3 mb-1">
                     <p className="font-bold text-slate-300">Depth-Only 3D Scene</p>
