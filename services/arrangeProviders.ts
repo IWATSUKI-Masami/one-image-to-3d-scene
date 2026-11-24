@@ -52,6 +52,8 @@ export interface ArrangeChat {
     next(): Promise<Turn>;
     /** Results of the tool calls of the last turn (all of them, in one message) */
     addToolResults(results: ToolResult[]): void;
+    /** A plain user message (after a turn without tool calls) */
+    addText(text: string): void;
 }
 
 export interface ChatOptions {
@@ -127,6 +129,9 @@ const claudeChat = (o: ChatOptions): ArrangeChat => {
                 })),
             });
         },
+        addText(text) {
+            messages.push({ role: 'user', content: [{ type: 'text', text }] });
+        },
     };
 };
 
@@ -198,6 +203,9 @@ const openaiChat = (o: ChatOptions): ArrangeChat => {
                 });
             }
         },
+        addText(text) {
+            input.push({ role: 'user', content: [{ type: 'input_text', text }] });
+        },
     };
 };
 
@@ -262,6 +270,9 @@ const geminiChat = (o: ChatOptions): ArrangeChat => {
             // renderings with their captions)
             for (const r of results) parts.push(...geminiParts(r.blocks[0]?.type === 'text' ? r.blocks.slice(1) : r.blocks));
             contents.push({ role: 'user', parts });
+        },
+        addText(text) {
+            contents.push({ role: 'user', parts: [{ text }] });
         },
     };
 };

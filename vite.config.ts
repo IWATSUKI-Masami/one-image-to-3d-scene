@@ -9,7 +9,7 @@ const appVersion = (() => {
   const pkg = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf8')).version as string;
   try {
     const commit = execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-    const dirty = execSync('git status --porcelain', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() ? '+changes' : '';
+    const dirty = execSync('git status --porcelain --untracked-files=no', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() ? '+changes' : '';
     return `${pkg} (${commit}${dirty})`;
   } catch {
     return pkg;

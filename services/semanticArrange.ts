@@ -411,7 +411,7 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
         ],
     });
 
-    let rounds = 0;
+    let rounds = 0, nudged = false;
     for (let turn = 0; turn < maxRounds + 3; turn++) {
         onProgress?.(rounds === 0 ? `${name} is looking at the photo and the scene…` : `${name} is checking round ${rounds}…`);
         const t0 = now(), startMs = Date.now() - startedAt;
@@ -420,7 +420,15 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
         record.calls.push({ index: callIndex, startMs, durationMs: Math.round(now() - t0), usage, model: answeredBy, tools: calls.map(c => c.name) });
 
         if (calls.length === 0) {
-            // A final answer without tools becomes the summary
+            // An answer without tools: ask once to continue with a tool (Gemini sometimes
+            // answers with a stray text after the first round); a second one ends the run
+            if (!nudged) {
+                nudged = true;
+                texts.forEach(t => onProgress?.(t));
+                onProgress?.(`${name} answered without a tool call; asking it to continue…`);
+                chat.addText('You answered without calling a tool. Check the latest renderings, object list and warnings: call update_placements for another round, or finish with a summary if the scene matches the photo.');
+                continue;
+            }
             return { rounds, summary: texts.join('\n') || `${name} ended without calling finish.`, ...end() };
         }
         // Comments between rounds

@@ -5,8 +5,8 @@
  *   of a model it stands over), e.g. a person whose feet do not touch the floor;
  * - sunk: the model's bottom is a little below the top of the model it stands on
  *   (a cup sunk into the table top);
- * - penetration: part of a model's surface is inside another model (tested with rays
- *   on the meshes, accelerated by a bounding volume hierarchy).
+ * - penetration: part of a model's surface is inside another model (tested with rays and
+ *   the nearest face on the meshes, accelerated by a bounding volume hierarchy).
  */
 import * as THREE from 'three';
 import { MeshBVH } from 'three-mesh-bvh';
@@ -53,18 +53,55 @@ const samplePoints = (root: THREE.Object3D, count: number): THREE.Vector3[] => {
     return pts;
 };
 
-/** Whether a point is inside a (closed) model: an odd number of surface crossings along +Y */
-const isInside = (p: THREE.Vector3, meshes: THREE.Mesh[]): boolean => {
+/** Number of surface crossings of a ray from `p` in world direction `dir` */
+const crossings = (p: THREE.Vector3, dir: THREE.Vector3, meshes: THREE.Mesh[]): number => {
     let hits = 0;
     const ray = new THREE.Ray();
     const inv = new THREE.Matrix4();
     for (const m of meshes) {
         inv.copy(m.matrixWorld).invert();
         ray.origin.copy(p).applyMatrix4(inv);
-        ray.direction.set(0, 1, 0).transformDirection(inv);
+        ray.direction.copy(dir).transformDirection(inv);
         hits += bvhOf(m.geometry).raycast(ray, THREE.DoubleSide).length;
     }
-    return hits % 2 === 1;
+    return hits;
+};
+
+/** Whether the nearest surface faces away from `p` (p behind the nearest face) */
+const behindNearestFace = (p: THREE.Vector3, meshes: THREE.Mesh[]): boolean => {
+    let best = Infinity, inside = false;
+    const local = new THREE.Vector3(), inv = new THREE.Matrix4();
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), n = new THREE.Vector3();
+    for (const m of meshes) {
+        inv.copy(m.matrixWorld).invert();
+        local.copy(p).applyMatrix4(inv);
+        const hit = bvhOf(m.geometry).closestPointToPoint(local);
+        if (!hit || hit.faceIndex === undefined) continue;
+        const g = m.geometry, pos = g.attributes.position, idx = g.index;
+        const i0 = idx ? idx.getX(hit.faceIndex * 3) : hit.faceIndex * 3;
+        const i1 = idx ? idx.getX(hit.faceIndex * 3 + 1) : hit.faceIndex * 3 + 1;
+        const i2 = idx ? idx.getX(hit.faceIndex * 3 + 2) : hit.faceIndex * 3 + 2;
+        a.fromBufferAttribute(pos, i0).applyMatrix4(m.matrixWorld);
+        b.fromBufferAttribute(pos, i1).applyMatrix4(m.matrixWorld);
+        c.fromBufferAttribute(pos, i2).applyMatrix4(m.matrixWorld);
+        n.subVectors(c, b).cross(a.clone().sub(b)).normalize();
+        const point = hit.point.clone().applyMatrix4(m.matrixWorld);
+        const d = point.distanceTo(p);
+        if (d < best) { best = d; inside = n.dot(point.sub(p)) > 0; }
+    }
+    return inside;
+};
+
+const UP = new THREE.Vector3(0, 1, 0), SIDE = new THREE.Vector3(1, 0, 0);
+/**
+ * Whether a point is inside a model. Generated meshes often have holes or inner shells,
+ * which break a single parity test, so three tests vote: an odd number of surface
+ * crossings upwards, an odd number sideways, and the nearest face facing away.
+ */
+const isInside = (p: THREE.Vector3, meshes: THREE.Mesh[]): boolean => {
+    let votes = crossings(p, UP, meshes) % 2 + crossings(p, SIDE, meshes) % 2;
+    if (votes === 1) votes += behindNearestFace(p, meshes) ? 1 : 0;
+    return votes >= 2;
 };
 
 /**
@@ -90,8 +127,11 @@ export const checkPhysics = (models: THREE.Object3D[], floorY: number, tolerance
         if (b.min.y < floorY - tolerance) issues[i].push({ kind: 'sunk', other: -1, amount: floorY - b.min.y });
         // Sunk into the top of a model it stands on (a small depth; a person's feet far
         // below a table top are under the table, not in it)
+        // A model standing on the floor (a seated person's feet under a table) is not sunk
+        // into a top above it
+        const onFloor = b.min.y <= floorY + tolerance;
         boxes.forEach((o, j) => {
-            if (j === i || cx < o.min.x || cx > o.max.x || cz < o.min.z || cz > o.max.z) return;
+            if (onFloor || j === i || cx < o.min.x || cx > o.max.x || cz < o.min.z || cz > o.max.z) return;
             const depth = o.max.y - b.min.y;
             if (depth > tolerance && depth < (b.max.y - b.min.y) * 0.5 && b.max.y > o.max.y) {
                 issues[i].push({ kind: 'sunk', other: j, amount: depth });
