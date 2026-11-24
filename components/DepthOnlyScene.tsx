@@ -368,6 +368,17 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                         o.rotation.y += edit.rotate_y_deg * Math.PI / 180;
                         shiftCenterTo(o, c);
                     }
+                    if (edit.place_under !== undefined) {
+                        // A chair under a seated person: same horizontal center, standing on the floor
+                        const person = byShort.get(edit.place_under);
+                        if (person && person !== entry) {
+                            const pc = boxOf(person.container).getCenter(new THREE.Vector3());
+                            const c = boxOf(o).getCenter(new THREE.Vector3());
+                            o.position.x += pc.x - c.x;
+                            o.position.z += pc.z - c.z;
+                            o.position.y += floorY - boxOf(o).min.y;
+                        } else problems.push(`${edit.id}: unknown person ${edit.place_under}`);
+                    }
                     if (edit.along_ray !== undefined) {
                         const c = boxOf(o).getCenter(new THREE.Vector3());
                         o.scale.multiplyScalar(edit.along_ray);

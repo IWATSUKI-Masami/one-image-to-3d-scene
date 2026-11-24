@@ -49,6 +49,8 @@ export interface PlacementEdit {
     rest_on?: string;
     /** Put the bottom of the model on the floor or on another model's top by moving it straight down or up (keeps its distance and size) */
     drop_on?: string;
+    /** Move a chair (or stool) horizontally under a seated person (their id) and stand it on the floor */
+    place_under?: string;
 }
 
 export type ArrangeView = 'photo' | 'top' | 'oblique';
@@ -100,6 +102,7 @@ Your task: make the scene physically and semantically consistent with the photo.
   - drop_on moves the object straight down or up onto the support and keeps its distance and size. Use it when the contact is not visible (table legs and chair legs below the photo's lower edge, a person's feet hidden by a table): there the bottom's place in the photo says nothing, and rest_on would make the object much too large or too far.
   Apply them after the support itself is in its final place (edits run in the order given).
 - Seated people sit on their chairs: hips at the seat, feet on the floor, close to the table if they are at a table. rest_on uses the top of a bounding box, which for a chair is the backrest, so place seated people with center or move instead.
+- Each chair that a person sits on goes under that person, not beside or behind them: seat under the hips, backrest behind the person's back, the chair facing the same way as the person (a person who faces right sits on a chair whose seat faces right, so its backrest is on the person's left). A chair seen only at the edge of the photo, or only its backrest, is usually the chair of the person next to it. Use place_under to move a chair under a person (it centers the chair under the person and stands it on the floor), then turn it with rotate_y_deg so that its backrest is behind the person, and adjust with move; check in the top and oblique views that the seat is under the hips and the backrest behind the back.
 - Real-world sizes: decide how many world units make a meter from the people (an adult is about 1.65-1.75 m tall standing and about 1.3 m from the floor to the top of the head when seated on a chair), then make the other objects consistent: dining or cafe table top about 0.72-0.76 m above the floor, chair seat about 0.45 m, a coffee cup about 0.08-0.10 m tall, a small vase 0.15-0.25 m. Keep the objects' places in the photo; use along_ray to change size and distance together.
 - Seated people sit at chair height even when their chair is not in the scene (it may be hidden or missing): their feet on the floor, hips about 0.45 m up, the table top around the height of their lower chest or elbows. Never lower a seated person to the floor.
 - Generated models can have wrong proportions (e.g. a table that is too low or too thick); fix them with scale_axes (stretch along the model's own x, y, z) rather than by changing the whole object's size.
@@ -116,7 +119,7 @@ Work in rounds: call update_placements with the edits for one round (you can edi
 const TOOLS: Anthropic.Beta.BetaTool[] = [
     {
         name: 'update_placements',
-        description: 'Change the placement of one or more models. For each edit, the fields that are given are applied in this order: scale, scale_axes, rotate_y_deg, along_ray, move, center, rest_on, drop_on. Returns the new object list and new renderings (photo view, top view and oblique view).',
+        description: 'Change the placement of one or more models. For each edit, the fields that are given are applied in this order: scale, scale_axes, rotate_y_deg, place_under, along_ray, move, center, rest_on, drop_on. Returns the new object list and new renderings (photo view, top view and oblique view).',
         strict: true,
         input_schema: {
             type: 'object',
@@ -134,6 +137,7 @@ const TOOLS: Anthropic.Beta.BetaTool[] = [
                             move: { type: 'array', items: { type: 'number' }, description: 'Offset [dx, dy, dz] in world units' },
                             center: { type: 'array', items: { type: 'number' }, description: 'New bounding-box center [x, y, z] in world units' },
                             rest_on: { type: 'string', description: '"floor", or the id of the object whose bounding-box top this object should stand on; the object slides along the line of sight until it touches it (keeps its place in the photo)' },
+                            place_under: { type: 'string', description: 'Id of a seated person: moves this chair horizontally so that it is centered under the person, and stands it on the floor (then turn it with rotate_y_deg so that its backrest is behind the person)' },
                             drop_on: { type: 'string', description: '"floor", or the id of the object whose bounding-box top this object should stand on; moves straight down or up and keeps distance and size (use when the contact is not visible in the photo)' },
                         },
                         required: ['id'],
@@ -238,6 +242,10 @@ const validateEdits = (input: unknown): { edits: PlacementEdit[]; problems: stri
         if (e.rest_on !== undefined) {
             if (typeof e.rest_on === 'string') edit.rest_on = e.rest_on;
             else problems.push(`${e.id}: rest_on must be a string`);
+        }
+        if (e.place_under !== undefined) {
+            if (typeof e.place_under === 'string') edit.place_under = e.place_under;
+            else problems.push(`${e.id}: place_under must be a string`);
         }
         if (e.drop_on !== undefined) {
             if (typeof e.drop_on === 'string') edit.drop_on = e.drop_on;
