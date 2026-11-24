@@ -104,6 +104,23 @@ export interface Model3D {
   provider?: ModelProvider | 'triposr-local'; // Service that generated the model ('triposr-local': projects saved by earlier versions)
 }
 
+/** Where one model is in the 3D scene (its container's position, Euler XYZ rotation in radians, and scale) */
+export interface SceneModelPlacement {
+  id: string;
+  label: string;
+  box_2d?: [number, number, number, number];
+  position: [number, number, number];
+  rotation: [number, number, number];
+  scale: [number, number, number];
+}
+
+/** Scene settings, camera and model placements (in a project: only the placements set by hand) */
+export interface SceneLayout {
+  settings: { depthScale: number; perspective: boolean; applyAlignment: boolean; pointSize: number };
+  camera?: { position: [number, number, number]; target: [number, number, number]; fov: number };
+  models: SceneModelPlacement[];
+}
+
 export interface ProjectArchive {
   version: number;
   timestamp: number;
@@ -118,6 +135,7 @@ export interface ProjectArchive {
   depthMapUrl?: string | null;
   processingTimes?: Record<string, number>;
   sourceImageName?: string; // File name of the analyzed photo (without extension), used for saved file names
+  sceneLayout?: SceneLayout; // Placements set by hand in the 3D scene, scene settings and camera
 }
 
 // ---- AI provider settings ----

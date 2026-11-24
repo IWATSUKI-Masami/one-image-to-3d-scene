@@ -38,7 +38,7 @@ const FACE_STYLE_HINT = 'Faces of people in completion. Calm: sharp face, relaxe
 import { loadAISettings, saveAISettings, hasRequiredKeys, bgRemovalSpace, PROVIDER_LABELS, FACE_STYLE_LABELS } from './services/ai/models';
 import { AISettingsDialog } from './components/AISettingsDialog';
 import { cropObjectsFromImage, removeBackgroundWithRembg, findBestMatchPosition, hasTransparentBackground, generate3DModelWithHunyuan3D, generate3DModelWithTrellis, blobUrlToDataUrl, dataUrlToBlobUrl, generateDepthMap, prepareImageForCompletion, calculateTightBoundingBox, prepareCompletionCanvas, verifyPartPlacement, makeReferenceImage } from './utils';
-import { DetectedObject, CroppedObject, Model3D, ModelProvider, ProjectArchive, AISettings, FaceStyle, CompletionInfo, PartBoxSource, CompletionAttempt } from './types';
+import { DetectedObject, CroppedObject, Model3D, ModelProvider, ProjectArchive, AISettings, FaceStyle, CompletionInfo, PartBoxSource, CompletionAttempt, SceneLayout } from './types';
 import { Scan, Sparkles, AlertCircle, Layers, Image as ImageIcon, User, Box, ArrowLeft, Upload, Plug, Wand2, RefreshCw, Star, Download, MonitorPlay, Cuboid, Save, FolderOpen, Trash2 } from 'lucide-react';
 
 type AppMode = 'landing' | 'analyze' | 'batch-remove' | 'complete-body' | 'generate-3d';
@@ -68,6 +68,9 @@ const App: React.FC = () => {
   const [depthMapUrl, setDepthMapUrl] = useState<string | null>(null);
   // Delete Scene closes the 3D scene but keeps the depth map; Generate 3D Scene opens it again
   const [sceneOpen, setSceneOpen] = useState(true);
+  // Placements set by hand in the 3D scene, its settings and camera (saved with the project).
+  // A ref, not state: the scene reports every change, and re-rendering would rebuild it.
+  const sceneLayoutRef = useRef<SceneLayout | null>(null);
   const [isGeneratingDepth, setIsGeneratingDepth] = useState(false);
 
   // 3D generation settings
@@ -366,6 +369,7 @@ const App: React.FC = () => {
     setModels3D([]);
     setDepthMapUrl(null);
     setSceneOpen(true);
+    sceneLayoutRef.current = null;
     setError(null);
 
     setIsAnalyzing(true);
@@ -608,6 +612,7 @@ const App: React.FC = () => {
     setModels3D([]);
     setDepthMapUrl(null);
     setSceneOpen(true);
+    sceneLayoutRef.current = null;
     setError(null);
 
     setActiveTab('original');
@@ -1099,6 +1104,7 @@ const App: React.FC = () => {
     setModels3D([]);
     setDepthMapUrl(null);
     setSceneOpen(true);
+    sceneLayoutRef.current = null;
     setError(null);
 
     setActiveTab('original');
@@ -1160,13 +1166,16 @@ const App: React.FC = () => {
         models3D: archiveModels,
         depthMapUrl: archiveDepthMapUrl,
         processingTimes: Object.fromEntries(processingTimes),
-        sourceImageName: sourceImageName ?? undefined
+        sourceImageName: sourceImageName ?? undefined,
+        sceneLayout: sceneLayoutRef.current ?? undefined
       };
 
       // File name: <photo name>_<furthest stage>_<local date-time>.json
       // e.g. 2PersonsAroundTable_3d-models_20261118-143005.json
+      // (scene-edited: the 3D scene has placements set by hand)
       const stage =
-        archive.models3D.length > 0 && archive.depthMapUrl ? 'scene'
+        archive.models3D.length > 0 && archive.depthMapUrl && archive.sceneLayout?.models.length ? 'scene-edited'
+        : archive.models3D.length > 0 && archive.depthMapUrl ? 'scene'
           : archive.models3D.length > 0 ? '3d-models'
             : archive.completedImages.length > 0 ? 'completed'
               : archive.croppedImages.length > 0 ? 'detected'
@@ -1225,6 +1234,7 @@ const App: React.FC = () => {
 
       setOriginalImageDimensions(archive.originalImageDimensions);
       setSourceImageName(archive.sourceImageName ?? null);
+      sceneLayoutRef.current = archive.sceneLayout ?? null;
       cancelSegmentation();
       setDetectedObjects(archive.detectedObjects);
 
@@ -2293,6 +2303,7 @@ const App: React.FC = () => {
                               // The depth map is kept (it costs a Space call and is shown on the left);
                               // Generate 3D Scene builds the scene again from it
                               setSceneOpen(false);
+                              sceneLayoutRef.current = null; // placements set by hand go with the scene
                               setActiveTab('3d');
                             }}
                             title="Close the 3D scene (the depth map is kept). Generate 3D Scene in the 3D Models tab builds it again."
@@ -2316,6 +2327,8 @@ const App: React.FC = () => {
                             positionedModels={positionedModels}
                             showModels={true}
                             sceneName={sourceImageName ?? undefined}
+                            initialLayout={sceneLayoutRef.current ?? undefined}
+                            onLayoutChange={(layout) => { sceneLayoutRef.current = layout; }}
                           />
                         </div>
                       </div>

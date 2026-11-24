@@ -7,7 +7,7 @@ import { removeStrayFragments } from './meshCleanup';
 import { alignmentYawDeg, ASSUMED_HFOV_DEG, MIN_ALIGNMENT_SCORE, viewAngleDeg } from '../services/frontAlignment';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { Spinner } from './Spinner';
-import { DetectedObject, Model3D } from '../types';
+import { DetectedObject, Model3D, SceneLayout } from '../types';
 import { Box2D, DepthRange, ObjectMask, depthFromBrightness, loadObjectMask, medianDepthInBox, sameBox } from './depthSampling';
 
 const boxKey = (box: Box2D): string => box.map(v => v.toFixed(6)).join(',');
@@ -59,14 +59,11 @@ interface SavedTransform {
 }
 
 /** Scene layout file: where each model is, without the models themselves (they are in the project) */
-interface SceneLayoutFile {
+interface SceneLayoutFile extends SceneLayout {
     format: 'one-image-to-3d-scene/layout';
     version: 1;
     savedAt: string;
     scene?: string;
-    settings: { depthScale: number; perspective: boolean; applyAlignment: boolean; pointSize: number };
-    camera?: { position: [number, number, number]; target: [number, number, number]; fov: number };
-    models: ({ id: string; label: string; box_2d?: Box2D } & SavedTransform)[];
 }
 
 const LAYOUT_FORMAT = 'one-image-to-3d-scene/layout';
@@ -95,6 +92,10 @@ interface DepthOnlySceneProps {
     showModels?: boolean;
     /** Used in the names of saved files (e.g. the photo's name) */
     sceneName?: string;
+    /** Placements set by hand, settings and camera to start from (e.g. from a loaded project) */
+    initialLayout?: SceneLayout;
+    /** Called when placements set by hand, the settings or the camera change, so the project can save them */
+    onLayoutChange?: (layout: SceneLayout) => void;
 }
 
 export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
@@ -105,21 +106,23 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     positionedModels = [],
     showModels = true,
     sceneName,
+    initialLayout,
+    onLayoutChange,
 }) => {
     const mountRef = useRef<HTMLDivElement>(null);
     const [loading, setLoading] = useState(true);
-    const [depthScale, setDepthScale] = useState(0.5);
+    const [depthScale, setDepthScale] = useState(initialLayout?.settings.depthScale ?? 0.5);
     // Bumped to rebuild the scene after the browser drops its WebGL context
     const [contextGeneration, setContextGeneration] = useState(0);
-    const [pointSize, setPointSize] = useState(2.0);
+    const [pointSize, setPointSize] = useState(initialLayout?.settings.pointSize ?? 2.0);
     const [showBoxes, setShowBoxes] = useState(false); // PC Boxes off by default
     const [showPointCloud, setShowPointCloud] = useState(false);
     const [showModelsToggle, setShowModelsToggle] = useState(showModels);
     const [showModelBoxes, setShowModelBoxes] = useState(false); // Model Boxes off by default
     // Turn models so that their front view matches their completed image
-    const [applyAlignment, setApplyAlignment] = useState(true);
+    const [applyAlignment, setApplyAlignment] = useState(initialLayout?.settings.applyAlignment ?? true);
     // Perspective back-projection (see toWorldXY); off = the paper's image-plane placement
-    const [perspective, setPerspective] = useState(true);
+    const [perspective, setPerspective] = useState(initialLayout?.settings.perspective ?? true);
     // Info panel at the bottom left (can be hidden so that it does not cover the scene)
     const [showInfo, setShowInfo] = useState(true);
     const [showWholeModelBoxes, setShowWholeModelBoxes] = useState(false); // Whole Boxes off by default
@@ -143,9 +146,37 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
     const mouseRef = useRef(new THREE.Vector2());
     // Placements set by hand (edit mode) or loaded from a layout file, by model id.
     // They replace the automatic placement and survive scene rebuilds (e.g. a depth change).
-    const layoutRef = useRef<Map<string, SavedTransform>>(new Map());
+    const layoutRef = useRef<Map<string, SavedTransform>>(new Map(
+        (initialLayout?.models ?? [])
+            .filter(m => isVec3(m.position) && isVec3(m.rotation) && isVec3(m.scale))
+            .map(m => [m.id, { position: m.position, rotation: m.rotation, scale: m.scale }])
+    ));
     // Camera of a loaded layout, applied once the rebuilt scene is ready
-    const pendingCameraRef = useRef<SceneLayoutFile['camera'] | null>(null);
+    const pendingCameraRef = useRef<SceneLayout['camera'] | null>(initialLayout?.camera ?? null);
+
+    /** Current placements set by hand, settings and camera (reported to the project) */
+    const currentLayout = (): SceneLayout => {
+        const s = sceneRef.current;
+        const byId = new Map(positionedModels.map(m => [m.id, m]));
+        return {
+            settings: { depthScale, perspective, applyAlignment, pointSize },
+            camera: s ? {
+                position: s.camera.position.toArray() as [number, number, number],
+                target: s.controls.target.toArray() as [number, number, number],
+                fov: s.camera.fov,
+            } : pendingCameraRef.current ?? initialLayout?.camera,
+            models: [...layoutRef.current].flatMap(([id, t]) => {
+                const model = byId.get(id);
+                const kept = initialLayout?.models.find(m => m.id === id);
+                // Placements of models not in this scene (not selected) are kept as they were
+                const label = model?.label ?? kept?.label;
+                return label ? [{ id, label, box_2d: model?.box_2d ?? kept?.box_2d, ...t }] : [];
+            }),
+        };
+    };
+    // Called from event handlers of the scene, which outlive a render: always use the latest
+    const reportLayoutRef = useRef<() => void>(() => {});
+    reportLayoutRef.current = () => onLayoutChange?.(currentLayout());
 
     // Store references for dynamic updates
     const sceneRef = useRef<{
@@ -162,6 +193,11 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         depthCanvas: HTMLCanvasElement | null;
         depthCtx: CanvasRenderingContext2D | null;
     } | null>(null);
+
+    // Report setting changes to the project
+    useEffect(() => {
+        reportLayoutRef.current();
+    }, [depthScale, perspective, applyAlignment, pointSize]);
 
     // Update point size dynamically
     useEffect(() => {
@@ -426,6 +462,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             applyLayoutToScene();
             applyPendingCamera();
         }
+        reportLayoutRef.current();
         if (missing.length > 0) {
             alert(`Layout loaded. Not in the current scene (kept out): ${missing.join(', ')}`);
         }
@@ -552,6 +589,8 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         // Controls
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
+        // Remember the view when the user stops turning or zooming
+        controls.addEventListener('end', () => reportLayoutRef.current());
         controls.dampingFactor = 0.05;
         controls.target.set(0, 0, 0);
 
@@ -611,7 +650,10 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
             } else {
                 // Remember the placement set by hand, so that it survives scene rebuilds and is saved with Save
                 const edited = transformControls.object;
-                if (edited?.userData.modelId) layoutRef.current.set(edited.userData.modelId, transformOf(edited));
+                if (edited?.userData.modelId) {
+                    layoutRef.current.set(edited.userData.modelId, transformOf(edited));
+                    reportLayoutRef.current();
+                }
                 // Dragging ended - keep isDraggingRef true for a short time to block click events
                 setTimeout(() => {
                     isDraggingRef.current = false;
@@ -755,6 +797,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                     controls.update();
                     inPhotoView = false;
                     pendingCameraRef.current = null;
+                    reportLayoutRef.current();
                 }
 
                 setLoading(false);
@@ -1435,6 +1478,7 @@ transformControlsRef.current.attach(meshContainer);
                                     if (!meshContainer) return;
                                     applyTransform(meshContainer, meshContainer.userData.autoTransform);
                                     layoutRef.current.delete(meshContainer.userData.modelId);
+                                    reportLayoutRef.current();
                                 }}
                                 className="px-2 py-1 text-xs rounded bg-orange-600 text-white hover:bg-orange-500"
                                 title="Back to the automatic placement"
