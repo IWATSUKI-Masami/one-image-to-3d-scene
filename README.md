@@ -46,7 +46,7 @@ An article explaining the method and its implementation (in Japanese) is on Qiit
 | 6 | 3D generation | TRELLIS.2 or Hunyuan3D-2.1 (Hugging Face Spaces) → textured GLB |
 | 7 | Scene composition | Three.js; models are aligned to point-cloud bounding boxes (PC Box) built from the depth map. By default the boxes are back-projected with perspective (see Usage) |
 | 8 | Front alignment | Each model is rendered around the vertical axis and compared with its completed image (silhouette, aspect ratio, brightness), then turned to match it and by the view angle, so it faces the camera as in the photo |
-| 9 | Semantic arrangement (optional) | **Arrange** in the 3D scene: Claude (Anthropic API) compares the photo with renderings of the scene (from the photo's camera and from above) and moves, turns and scales the models with a tool until objects rest on their supports, seated people sit on their chairs, and sizes and orientations match the photo; it sees new renderings after each round |
+| 9 | Semantic arrangement (optional) | **Arrange** in the 3D scene: Claude (Anthropic API) compares the photo with renderings of the scene (from the photo's camera, from above and obliquely) and moves, turns and scales the models with a tool until objects rest on their supports, seated people sit on their chairs, and sizes and orientations match the photo; it sees new renderings after each round |
 
 ### Walkthrough (sample photo)
 
@@ -183,7 +183,7 @@ The automatic placement aims for accuracy, and that costs API calls (OpenAI / Ge
 | Completion (per object) | 1 VLM call (how far the object extends beyond its box), then per attempt 1 image generation (with the whole photo as a second, reference image) and 1 VLM check. An attempt is repeated, up to 3 attempts, when parts are cut off, the proportions look wrong or the visible part moved — so one object can cost up to 3 image generations and 4 VLM calls. With **Attempts: 1** it is 1 image generation and 1 VLM call |
 | 3D generation (per object) | 1 Hugging Face Space call (GPU time / ZeroGPU quota, not API credits); people use a higher resolution |
 | Object masks (SAM 2.1), front alignment, depth-based placement | Run in the browser (the depth map is 1 Space call per photo); no API credits |
-| Arrange in the 3D scene (optional, per run) | Up to about 8 Claude calls; each sends the photo and two renderings (only when you press **Arrange**) |
+| Arrange in the 3D scene (optional, per run) | Up to about 8 Claude calls; each sends the photo and three renderings (only when you press **Arrange**) |
 
 The repeated attempts are there so that the objects can be placed automatically. **If exact automatic placement is not important to you and you are going to adjust the scene yourself, use only what you need:**
 

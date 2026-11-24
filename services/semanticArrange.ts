@@ -49,7 +49,7 @@ export interface PlacementEdit {
     rest_on?: string;
 }
 
-export type ArrangeView = 'photo' | 'top';
+export type ArrangeView = 'photo' | 'top' | 'oblique';
 
 export interface ArrangeScene {
     /** Current state of every model */
@@ -89,7 +89,7 @@ Conventions (world units are relative, not meters):
 - The photo's camera is at the origin and looks along -Z. +X is right, +Y is up. Objects farther away have more negative z.
 - The floor is the plane y = floorY (given in the object list). It is the bottom of the lowest model; the floor is usually not visible in the photo.
 - Each object is described by the center and size of its axis-aligned bounding box and its rotation about the vertical axis.
-- Images: "photo" is the original photo; "photo view" renders the scene from the photo's camera; "top view" renders it from above (up in the image = away from the camera, -Z; right = +X). Object names are drawn on the renderings.
+- Images: "photo" is the original photo; "photo view" renders the scene from the photo's camera; "top view" renders it from above (up in the image = away from the camera, -Z; right = +X); "oblique view" renders it from the front left and above, where distances along the line of sight and contacts are easier to see. Object names are drawn on the renderings.
 
 Your task: make the scene physically and semantically consistent with the photo.
 - Keep every object where it is in the photo (its place in the photo view should stay close to the photo). To change an object's distance without changing its place in the photo, use along_ray, which moves it along the line of sight and scales it by the same factor.
@@ -102,14 +102,16 @@ Your task: make the scene physically and semantically consistent with the photo.
 - Avoid intersections, except where parts overlap in reality (legs under a table).
 - Do not change objects that are already right.
 
+Contacts: people at a table sit close to it, with their forearms or hands on the table top when the photo shows that; a table that people sit at is between or beside them as in the photo, not a wall in front of them. Use the top and oblique views to check who sits where around the table.
+
 Check the top view as well as the photo view: an object can look right from the camera but be at the wrong distance (e.g. a cup on the far side of the table instead of the near side). Compare where objects are on the table in the photo (near or far edge, left or right) with the top view.
 
-Work in rounds: call update_placements with the edits for one round (you can edit several objects at once); you then get the new object list and new renderings. Check them against the photo and correct further. When the scene matches the photo well, or when further changes would not help, call finish with a short summary of what you changed. Do at most a few rounds.`;
+Work in rounds: call update_placements with the edits for one round (you can edit several objects at once); you then get the new object list and new renderings. Check them against the photo and correct further. Before you call finish, look at your list of remaining differences: if one of them can be fixed with the tools (e.g. a person too far from the table, hands not on the table top), fix it in another round first. Call finish when the scene matches the photo well, or when further changes would not help, with a short summary of what you changed. Do at most a few rounds.`;
 
 const TOOLS: Anthropic.Beta.BetaTool[] = [
     {
         name: 'update_placements',
-        description: 'Change the placement of one or more models. For each edit, the fields that are given are applied in this order: scale, scale_axes, rotate_y_deg, along_ray, move, center, rest_on. Returns the new object list and new renderings (photo view and top view).',
+        description: 'Change the placement of one or more models. For each edit, the fields that are given are applied in this order: scale, scale_axes, rotate_y_deg, along_ray, move, center, rest_on. Returns the new object list and new renderings (photo view, top view and oblique view).',
         strict: true,
         input_schema: {
             type: 'object',
@@ -246,7 +248,7 @@ export const arrangeSceneWithClaude = async (scene: ArrangeScene, options: Arran
     const useFallbacks = FALLBACK_MODELS.has(model);
 
     onProgress?.('Rendering the scene…');
-    const [photo, photoView, topView] = await Promise.all([photoToJpeg(photoUrl), scene.render('photo'), scene.render('top')]);
+    const [photo, photoView, topView, obliqueView] = await Promise.all([photoToJpeg(photoUrl), scene.render('photo'), scene.render('top'), scene.render('oblique')]);
 
     const messages: Anthropic.Beta.BetaMessageParam[] = [{
         role: 'user',
@@ -257,6 +259,8 @@ export const arrangeSceneWithClaude = async (scene: ArrangeScene, options: Arran
             imageBlock(photoView),
             { type: 'text', text: 'Top view of the current scene:' },
             imageBlock(topView),
+            { type: 'text', text: 'Oblique view of the current scene:' },
+            imageBlock(obliqueView),
             { type: 'text', text: `${describeObjects(scene)}\n\nArrange the scene so that it matches the photo. Use update_placements, and call finish when done.` },
         ],
     }];
@@ -315,7 +319,7 @@ export const arrangeSceneWithClaude = async (scene: ArrangeScene, options: Arran
             const reason = String((tool.input as { reason?: unknown })?.reason ?? '').trim();
             onProgress?.(`Round ${rounds}: ${reason || `${edits.length} edit(s)`}`);
             problems.push(...scene.apply(edits));
-            const [newPhotoView, newTopView] = await Promise.all([scene.render('photo'), scene.render('top')]);
+            const [newPhotoView, newTopView, newObliqueView] = await Promise.all([scene.render('photo'), scene.render('top'), scene.render('oblique')]);
             results.push({
                 type: 'tool_result',
                 tool_use_id: tool.id,
@@ -324,6 +328,8 @@ export const arrangeSceneWithClaude = async (scene: ArrangeScene, options: Arran
                     imageBlock(newPhotoView),
                     { type: 'text', text: 'Top view:' },
                     imageBlock(newTopView),
+                    { type: 'text', text: 'Oblique view:' },
+                    imageBlock(newObliqueView),
                 ],
             });
         }

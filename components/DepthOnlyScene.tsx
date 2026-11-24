@@ -1008,6 +1008,19 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                 pc.position.set(0, 0, 0);
                 pc.lookAt(0, 0, -1);
                 cam = pc;
+            } else if (view === 'oblique') {
+                // From the front left and above (camera side, turned 40° to the left, 30° down),
+                // so that distances along the line of sight and contacts become visible
+                const b = new THREE.Box3().setFromObject(modelsGroup);
+                const c = b.getCenter(new THREE.Vector3());
+                const radius = b.getSize(new THREE.Vector3()).length() / 2 || 1;
+                const fov = 35;
+                const dist = radius / Math.sin((fov / 2) * Math.PI / 180) * 1.05;
+                const az = -40 * Math.PI / 180, el = 30 * Math.PI / 180;
+                const pc = new THREE.PerspectiveCamera(fov, 1, dist / 100, dist * 10);
+                pc.position.set(c.x + Math.sin(az) * Math.cos(el) * dist, c.y + Math.sin(el) * dist, c.z + Math.cos(az) * Math.cos(el) * dist);
+                pc.lookAt(c);
+                cam = pc;
             } else {
                 const b = new THREE.Box3().setFromObject(modelsGroup);
                 const c = b.getCenter(new THREE.Vector3());
