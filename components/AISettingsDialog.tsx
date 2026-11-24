@@ -104,6 +104,21 @@ export const AISettingsDialog: React.FC<Props> = ({ settings, onChange, onClose 
               <p className="mt-1 text-xs text-slate-500">
                 Model for <b>Arrange</b> in the 3D scene: Claude uses its own model setting below; OpenAI and Gemini use their detection model.
               </p>
+              <label className="mt-2 flex items-center gap-2 text-xs text-slate-600">
+                At most
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={settings.arrangeMaxRounds}
+                  onChange={e => {
+                    const v = Math.round(Number(e.target.value));
+                    if (Number.isFinite(v)) update({ arrangeMaxRounds: Math.min(20, Math.max(1, v)) });
+                  }}
+                  className="w-16 px-2 py-1 border border-slate-300 rounded-md"
+                />
+                rounds per run (default 6; each round is one API call with images)
+              </label>
             </div>
             <div>
               <div className="text-sm font-semibold text-slate-700 mb-1">Image completion</div>

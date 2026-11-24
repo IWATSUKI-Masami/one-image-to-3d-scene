@@ -120,7 +120,7 @@ In AI Settings you can set:
 | Section | What it sets |
 |---|---|
 | Object detection & checks | Provider for detection and checks (OpenAI / Gemini; default OpenAI) |
-| Arrange (3D scene) | Provider for Arrange (Claude / OpenAI / Gemini; default Claude). OpenAI and Gemini use their detection model |
+| Arrange (3D scene) | Provider for Arrange (Claude / OpenAI / Gemini; default Claude; OpenAI and Gemini use their detection model) and the maximum number of rounds per run (default 6) |
 | Image completion | Provider for completion (OpenAI / Gemini; default OpenAI) |
 | Background removal | Background-removal model (RMBG 2.0 / RMBG 3.0; default RMBG 2.0). Only used with Gemini completion; disabled when OpenAI is selected |
 | API keys | OpenAI, Gemini and (for Arrange) Anthropic API keys |

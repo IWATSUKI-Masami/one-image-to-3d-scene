@@ -2332,7 +2332,7 @@ const App: React.FC = () => {
                             sceneName={sourceImageName ?? undefined}
                             initialLayout={sceneLayoutRef.current ?? undefined}
                             onLayoutChange={(layout) => { sceneLayoutRef.current = layout; }}
-                            arrange={{ provider: aiSettings.arrangeProvider, apiKey: aiSettings.keys[aiSettings.arrangeProvider], model: arrangeModel(aiSettings) }}
+                            arrange={{ provider: aiSettings.arrangeProvider, apiKey: aiSettings.keys[aiSettings.arrangeProvider], model: arrangeModel(aiSettings), maxRounds: aiSettings.arrangeMaxRounds }}
                             onOpenSettings={openAISettings}
                             onProcessingTime={(label, seconds) => setProcessingTimes(prev => new Map(prev).set(label, seconds))}
                           />

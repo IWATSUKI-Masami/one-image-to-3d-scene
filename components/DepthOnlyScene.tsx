@@ -149,7 +149,7 @@ interface DepthOnlySceneProps {
     /** Called when placements set by hand, the settings or the camera change, so the project can save them */
     onLayoutChange?: (layout: SceneLayout) => void;
     /** Provider, API key and model for Arrange (semantic arrangement of the models) */
-    arrange?: { provider: ArrangeProvider; apiKey: string; model: string };
+    arrange?: { provider: ArrangeProvider; apiKey: string; model: string; maxRounds?: number };
     /** Reports how long a step took (seconds), for the Processing Times panel */
     onProcessingTime?: (label: string, seconds: number) => void;
     /** Opens the AI Settings dialog (when the API key for Arrange is missing) */
@@ -534,9 +534,14 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
               return entries.map(({ model, container }, i) => {
                 const b = boxOf(container);
                 const c = b.getCenter(new THREE.Vector3()), sz = b.getSize(new THREE.Vector3());
+                // Proportions relative to the generated model (its automatic placement scales uniformly)
+                const auto = container.userData.autoTransform?.scale as [number, number, number] | undefined;
+                const rel = auto ? [container.scale.x / auto[0], container.scale.y / auto[1], container.scale.z / auto[2]] : [1, 1, 1];
+                const proportionChange = Math.max(...rel) / Math.min(...rel) - 1;
                 return {
                     photoMatch: matches[i],
                     warnings: warnings[i],
+                    proportionChange,
                     id: shortId.get(model.id)!,
                     label: model.label.replace(/\s*\(Completed\)\s*$/i, ''),
                     description: describe(model),
@@ -563,7 +568,10 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                         o.scale.multiplyScalar(edit.scale);
                         shiftCenterTo(o, c);
                     }
-                    if (edit.scale_axes) {
+                    if (edit.scale_axes && entry.model.type === 'person' && Math.max(...edit.scale_axes) / Math.min(...edit.scale_axes) > 1.001) {
+                        // People keep their body proportions: only uniform scaling
+                        problems.push(`${edit.id}: scale_axes was not applied, because people keep their proportions; use scale (uniform) instead`);
+                    } else if (edit.scale_axes) {
                         // Stretch along the model's own axes (e.g. a table generated too low)
                         const c = boxOf(o).getCenter(new THREE.Vector3());
                         o.scale.multiply(new THREE.Vector3(...edit.scale_axes));
@@ -662,7 +670,7 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
         let outcome: 'done' | 'failed' | 'cancelled' = 'done';
         let result: Awaited<ReturnType<typeof arrangeScene>> | undefined;
         // Filled by the run as it goes (also kept when it fails or is cancelled)
-        const MAX_ROUNDS = 6;
+        const MAX_ROUNDS = arrange.maxRounds ?? 6;
         const record: ArrangeRecord = {
             settings: { provider: arrange.provider, model: arrange.model, effort: ARRANGE_EFFORT, maxRounds: MAX_ROUNDS, promptVersion: ARRANGE_PROMPT_VERSION, appVersion: APP_VERSION },
             startedAt, calls: [], rounds: [],

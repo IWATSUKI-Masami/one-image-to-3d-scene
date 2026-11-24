@@ -120,7 +120,7 @@ AI Settings では次の項目を設定できます。
 | 項目 | 内容 |
 |---|---|
 | Object detection & checks | 物体検出・チェックに使う AI（OpenAI / Gemini。既定は OpenAI） |
-| Arrange (3D scene) | Arrange に使う AI（Claude / OpenAI / Gemini。既定は Claude）。OpenAI と Gemini は物体検出のモデルを使う |
+| Arrange (3D scene) | Arrange に使う AI（Claude / OpenAI / Gemini。既定は Claude。OpenAI と Gemini は物体検出のモデルを使う）と、1回の実行での最大回数（既定は6） |
 | Image completion | 画像補完に使う AI（OpenAI / Gemini。既定は OpenAI） |
 | Background removal | 背景除去のモデル（RMBG 2.0 / RMBG 3.0。既定は RMBG 2.0）。Gemini で補完するときだけ使い、OpenAI を選んでいる間は選択できない |
 | API keys | OpenAI、Gemini、（Arrange 用の）Anthropic の API キー |

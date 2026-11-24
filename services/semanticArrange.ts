@@ -37,6 +37,8 @@ export interface ArrangeObject {
     photoMatch?: { iou: number; areaRatio: number; offset: [number, number] };
     /** Physical problems found by the checks (floating, sunk, inside another model) */
     warnings?: string[];
+    /** How far the model's proportions are from the generated model's: largest relative difference between its axis scales (0 = unchanged) */
+    proportionChange?: number;
 }
 
 /** One change requested by Claude; every field is optional and applied in this order */
@@ -118,7 +120,7 @@ export interface ArrangeRoundRecord {
     measureMs: number;
     meanIoU?: number;
     issues: number;
-    objects: { id: string; label: string; iou?: number; areaRatio?: number; warnings?: string[] }[];
+    objects: { id: string; label: string; iou?: number; areaRatio?: number; warnings?: string[]; proportionChange?: number }[];
     /** Renderings after the round (base64 JPEG): photo view, top view, oblique view */
     images: { photo: string; top: string; oblique: string };
 }
@@ -181,7 +183,7 @@ Your task: make the scene physically and semantically consistent with the photo.
 - Each chair that a person sits on goes under that person, not beside or behind them: seat under the hips, backrest behind the person's back, the chair facing the same way as the person (a person who faces right sits on a chair whose seat faces right, so its backrest is on the person's left). A chair seen only at the edge of the photo, or only its backrest, is usually the chair of the person next to it. Use place_under to move a chair under a person (it centers the chair under the person and stands it on the floor), then turn it with rotate_y_deg so that its backrest is behind the person, and adjust with move; check in the top and oblique views that the seat is under the hips and the backrest behind the back.
 - Real-world sizes: decide how many world units make a meter from the people (an adult is about 1.65-1.75 m tall standing and about 1.3 m from the floor to the top of the head when seated on a chair), then make the other objects consistent: dining or cafe table top about 0.72-0.76 m above the floor, chair seat about 0.45 m, a coffee cup about 0.08-0.10 m tall, a small vase 0.15-0.25 m. Keep the objects' places in the photo; use along_ray to change size and distance together.
 - Seated people sit at chair height even when their chair is not in the scene (it may be hidden or missing): their feet on the floor, hips about 0.45 m up, the table top around the height of their lower chest or elbows. Never lower a seated person to the floor.
-- Generated models can have wrong proportions (e.g. a table that is too low or too thick); fix them with scale_axes (stretch along the model's own x, y, z) rather than by changing the whole object's size.
+- Generated models can have wrong proportions (e.g. a table that is too low or too thick); fix them with scale_axes (stretch along the model's own x, y, z) rather than by changing the whole object's size. Never stretch people: their body proportions stay as generated (scale_axes is refused for people; use scale). Do not stretch other objects only to improve the photo match either; proportion_change in the object list shows how far each object is from the generated model's proportions.
 - Orientation: people and chairs should face the way they face in the photo (e.g. two people talking face each other).
 - Avoid intersections, except where parts overlap in reality (legs under a table).
 - Do not change objects that are already right.
@@ -268,6 +270,7 @@ const describeObjects = (scene: ArrangeScene, objects: ArrangeObject[] = scene.o
         top_y: round3(o.center[1] + o.size[1] / 2),
         rotation_y_deg: Math.round(o.rotationYDeg),
         ...(o.warnings?.length ? { warnings: o.warnings } : {}),
+        ...(o.proportionChange !== undefined && o.proportionChange > 0.005 ? { proportion_change: round3(o.proportionChange) } : {}),
         ...(o.photoMatch ? {
             photo_match: {
                 iou: round3(o.photoMatch.iou),
@@ -369,8 +372,8 @@ export const arrangeScene = async (scene: ArrangeScene, options: ArrangeOptions)
         return { objects, issues: scene.issueCount(), ms: now() - t };
     };
     const summarizeObjects = (objects: ArrangeObject[]) => objects.map(o => ({
-        id: o.id, label: o.label, iou: o.photoMatch?.iou, areaRatio: o.photoMatch?.areaRatio, warnings: o.warnings,
-    }));
+        id: o.id, label: o.label, iou: o.photoMatch?.iou, areaRatio: o.photoMatch?.areaRatio, warnings: o.warnings, proportionChange: o.proportionChange,
+}));
     const renderAll = async () => {
         const t = now();
         const [photo, top, oblique] = await Promise.all([scene.render('photo'), scene.render('top'), scene.render('oblique')]);

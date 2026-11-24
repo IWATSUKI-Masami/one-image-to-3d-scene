@@ -116,6 +116,7 @@ export const loadAISettings = (): AISettings => {
   const settings: AISettings = {
     visionProvider: 'openai',
     arrangeProvider: 'anthropic',
+    arrangeMaxRounds: 6,
     imageProvider: 'openai',
     bgRemoval: 'rmbg2', // RMBG 2.0: much lighter (a duplicate runs on a T4)
     keys: {
@@ -134,6 +135,7 @@ export const loadAISettings = (): AISettings => {
       if (isProvider(saved.imageProvider)) settings.imageProvider = saved.imageProvider;
       if (isBgRemovalModel(saved.bgRemoval)) settings.bgRemoval = saved.bgRemoval;
       if (saved.arrangeProvider === 'anthropic' || saved.arrangeProvider === 'openai' || saved.arrangeProvider === 'gemini') settings.arrangeProvider = saved.arrangeProvider;
+      if (Number.isInteger(saved.arrangeMaxRounds) && saved.arrangeMaxRounds >= 1 && saved.arrangeMaxRounds <= 20) settings.arrangeMaxRounds = saved.arrangeMaxRounds;
       for (const k of Object.keys(DEFAULT_MODELS) as (keyof AIModels)[]) {
         const v = typeof saved.models?.[k] === 'string' ? saved.models[k].trim() : '';
         if (v && !FORMER_DEFAULTS.models[k]?.includes(v)) settings.models[k] = v;
@@ -168,6 +170,7 @@ export const saveAISettings = (settings: AISettings): void => {
       imageProvider: settings.imageProvider,
       bgRemoval: settings.bgRemoval,
       arrangeProvider: settings.arrangeProvider,
+      arrangeMaxRounds: settings.arrangeMaxRounds,
       models: overrides(settings.models, DEFAULT_MODELS),
       spaces: overrides(settings.spaces, DEFAULT_SPACES),
     }));

@@ -79,6 +79,7 @@ export const buildArrangeReport = (r: ArrangeReportInput) => {
     const rows = objectsAfter.map(o => ({
         id: o.id, label: o.label, before: objBefore.get(o.id)?.photoMatch, after: o.photoMatch,
         warningsBefore: objBefore.get(o.id)?.warnings ?? [], warningsAfter: o.warnings ?? [],
+        propBefore: objBefore.get(o.id)?.proportionChange, propAfter: o.proportionChange,
     }));
 
     const text = [
@@ -115,6 +116,9 @@ export const buildArrangeReport = (r: ArrangeReportInput) => {
         'Photo match per object (IoU before -> after; area ratio before -> after):',
         ...rows.map(o => `  ${o.id} ${o.label}: ${f(o.before?.iou)} -> ${f(o.after?.iou)}; ${f(o.before?.areaRatio)} -> ${f(o.after?.areaRatio)}`),
         '',
+        'Proportion change per object (largest relative difference of the axis scales from the generated model; 0 = unchanged):',
+        ...rows.map(o => `  ${o.id} ${o.label}: ${f(o.propBefore)} -> ${f(o.propAfter)}`),
+        '',
         'Physical warnings per object (before -> after):',
         ...rows.map(o => `  ${o.id} ${o.label}: ${o.warningsBefore.join('; ') || 'none'} -> ${o.warningsAfter.join('; ') || 'none'}`),
         '',
@@ -147,27 +151,29 @@ export const buildArrangeReport = (r: ArrangeReportInput) => {
     const objectsCsv = [
         ...header,
         '',
-        'object,iou_before,iou_after,area_ratio_before,area_ratio_after,offset_x_before,offset_y_before,offset_x_after,offset_y_after,warnings_before,warnings_after',
+        'object,iou_before,iou_after,area_ratio_before,area_ratio_after,offset_x_before,offset_y_before,offset_x_after,offset_y_after,proportion_change_before,proportion_change_after,warnings_before,warnings_after',
         ...rows.map(o => [q(o.label), f(o.before?.iou), f(o.after?.iou), f(o.before?.areaRatio), f(o.after?.areaRatio),
             f(o.before?.offset[0]), f(o.before?.offset[1]), f(o.after?.offset[0]), f(o.after?.offset[1]),
+            f(o.propBefore), f(o.propAfter),
             q(o.warningsBefore.join('; ')), q(o.warningsAfter.join('; '))].join(',')),
-        `mean,${f(before?.meanIoU)},${f(after?.meanIoU)},,,,,,,,`,
+        `mean,${f(before?.meanIoU)},${f(after?.meanIoU)},,,,,,,,,,`,
     ].join('\n');
 
     // Rounds (with the API call that requested each), then all API calls
     const callOf = new Map(record.calls.map(c => [c.index, c]));
+    const maxProp = (objs: { proportionChange?: number }[]) => Math.max(0, ...objs.map(o => o.proportionChange ?? 0));
     const objectIds = (before?.objects ?? []).map(o => o.id);
     const roundsCsv = [
         ...header,
         '',
-        ['round', 'call', 'api_s', 'input_tokens', 'output_tokens', 'reasoning_tokens', 'apply_ms', 'render_ms', 'measure_ms', 'mean_iou', 'physical_issues', 'edits',
+        ['round', 'call', 'api_s', 'input_tokens', 'output_tokens', 'reasoning_tokens', 'apply_ms', 'render_ms', 'measure_ms', 'mean_iou', 'physical_issues', 'max_proportion_change', 'edits',
             ...objectIds.map(id => `iou_${id}`), 'reason'].join(','),
-        ...(before ? [['0', '', '', '', '', '', '', before.renderMs.toFixed(0), before.measureMs.toFixed(0), f(before.meanIoU), before.issues, 0,
+        ...(before ? [['0', '', '', '', '', '', '', before.renderMs.toFixed(0), before.measureMs.toFixed(0), f(before.meanIoU), before.issues, f(maxProp(before.objects)), 0,
             ...objectIds.map(id => f(before.objects.find(o => o.id === id)?.iou)), q('before')].join(',')] : []),
         ...record.rounds.map(rd => {
             const c = callOf.get(rd.call);
             return [rd.round, rd.call, c ? f(c.durationMs / 1000, 1) : '', c?.usage.input ?? '', c?.usage.output ?? '', c?.usage.reasoning ?? '',
-                rd.applyMs, rd.renderMs, rd.measureMs, f(rd.meanIoU), rd.issues, rd.edits.length,
+                rd.applyMs, rd.renderMs, rd.measureMs, f(rd.meanIoU), rd.issues, f(maxProp(rd.objects)), rd.edits.length,
                 ...objectIds.map(id => f(rd.objects.find(o => o.id === id)?.iou)), q(rd.reason)].join(',');
         }),
         '',

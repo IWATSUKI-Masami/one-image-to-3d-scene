@@ -211,6 +211,8 @@ export type ArrangeProviderSetting = 'anthropic' | 'openai' | 'gemini';
 export interface AISettings {
   visionProvider: VisionProvider;
   arrangeProvider: ArrangeProviderSetting;
+  /** Maximum number of Arrange rounds (1-20) */
+  arrangeMaxRounds: number;
   imageProvider: ImageProvider;
   bgRemoval: BgRemovalModel;
   keys: AIKeys;
