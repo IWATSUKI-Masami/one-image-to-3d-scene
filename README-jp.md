@@ -67,8 +67,8 @@
     <td width="50%"><img src="docs/images/step5-depth-map.webp" alt="深度マップ"><br><sub><b>深度推定</b>：Depth Anything V2 による深度マップです（明るいほど手前）。</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/scene-result.webp" alt="3Dシーン"><br><sub><b>シーン合成</b>：8つの物体を、遠近を考慮してそれぞれの PC Box の奥行きに置きます。背もたれしか見えない椅子も人物の後ろに置かれますが、天板の手前しか見えないテーブルの位置はまだおおよそです。</sub></td>
-    <td width="50%"><img src="docs/images/step7-scene-ui.webp" alt="操作パネル付きの3Dシーン"><br><sub><b>3D Scene タブ</b>：シーンと操作パネルです。深度の範囲、点の大きさ、<b>Perspective</b>、<b>Align</b>（向き合わせ）、各種の枠と点群の表示、配置の <b>Save</b> / <b>Load</b>、<b>GLB</b> の書き出し、<b>✨ Arrange</b>（AI による意味を考えた配置替え）、<b>Match</b>（写真との一致度）、<b>Ref</b>（評価用の正解の解析）、モデルを手で動かす <b>Edit</b> があります。</sub></td>
+    <td width="50%"><img src="docs/images/scene-auto.webp" alt="3Dシーン"><br><sub><b>シーン合成</b>：8つの物体を、遠近を考慮してそれぞれの PC Box の奥行きに置きます。背もたれしか見えない椅子も人物の後ろに置かれますが、天板の手前しか見えないテーブルの位置はまだおおよそです。</sub></td>
+    <td width="50%"><img src="docs/images/scene-tab.webp" alt="操作パネル付きの3Dシーン"><br><sub><b>3D Scene タブ</b>：シーンと操作パネルです。深度の範囲、点の大きさ、<b>Perspective</b>、<b>Align</b>（向き合わせ）、各種の枠と点群の表示、配置の <b>Save</b> / <b>Load</b>、<b>GLB</b> の書き出し、<b>✨ Arrange</b>（AI による意味を考えた配置替え）、<b>Match</b>（写真との一致度）、<b>Ref</b>（評価用の正解の解析）、モデルを手で動かす <b>Edit</b> があります。</sub></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/images/scene-edited.webp" alt="手で編集した3Dシーン"><br><sub><b>手で編集した結果</b>：サンプルのテーブルと椅子の位置と大きさを、編集モード（<b>Edit ON</b>）の移動（Move）と拡大縮小（Scale）で直し、上から見たところです。カップと花瓶がテーブルに載り、2人が椅子に座っています。</sub></td>
