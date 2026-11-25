@@ -23,8 +23,8 @@
 
 上の3Dシーンは自動で配置した結果です。配置は、画像を読める AI に **✨ Arrange** で直させることも（下の「処理の流れ」の最後の行と、[AI による意味を考えた配置替え](#ai-による意味を考えた配置替えarrange)を参照）、3D Scene タブの編集モード（**Edit ON**）で手で直すこともできます。
 
-<p align="center"><img src="docs/images/demo-rotate.gif" alt="論文のサンプルの3Dシーンをアプリで回したところ" width="480"></p>
-<p align="center"><sub>論文のサンプルの3Dシーンを、アプリで回したところです（自動の配置）。処理の流れ全体のデモ動画：<a href="docs/videos/demo-ja.mp4"><code>docs/videos/demo-ja.mp4</code></a>（24秒、正方形、日本語字幕）、<a href="docs/videos/demo.mp4"><code>docs/videos/demo.mp4</code></a>（33秒、英語字幕）</sub></p>
+<p align="center"><img src="docs/images/demo-rotate-cafe.gif" alt="cafe-couple の Arrange の後の3Dシーンをアプリで回したところ" width="480"></p>
+<p align="center"><sub>上の写真の3Dシーンを、<b>Arrange</b> の後にアプリで回したところです（動画：<a href="docs/videos/scene-rotate-cafe.mp4"><code>docs/videos/scene-rotate-cafe.mp4</code></a>、10秒）。処理の流れ全体のデモ動画（論文のサンプル）：<a href="docs/videos/demo-ja.mp4"><code>docs/videos/demo-ja.mp4</code></a>（24秒、正方形、日本語字幕）、<a href="docs/videos/demo.mp4"><code>docs/videos/demo.mp4</code></a>（33秒、英語字幕）</sub></p>
 
 手法と実装の解説記事を Qiita に書きました：[生成AIで隠れた部分を描き足しても位置がずれない：1枚の写真から3Dシーンを組み立てる](https://qiita.com/miwastsuki2026/items/08ce2be1fc32118401ae)
 
