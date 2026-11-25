@@ -44,6 +44,35 @@ import { Scan, Sparkles, AlertCircle, Layers, Image as ImageIcon, User, Box, Arr
 
 type AppMode = 'landing' | 'analyze' | 'batch-remove' | 'complete-body' | 'generate-3d';
 
+/** Name without the " (Completed)" suffix and without a number added by numberDuplicates */
+const baseName = (label: string) => label.replace(/ \(Completed\)$/, '').replace(/ \d+$/, '');
+const completedSuffix = (label: string) => / \(Completed\)$/.test(label) ? ' (Completed)' : '';
+
+/**
+ * Number items that share a name ("wooden desk 1 (Completed)", "wooden desk 2 (Completed)"),
+ * oldest first (lists keep the newest first); a name used once has no number. Japanese names
+ * get the same numbers.
+ */
+const numberDuplicates = <T extends { label: string; labelJa?: string }>(items: T[]): T[] => {
+    const groups = new Map<string, number[]>();
+    items.forEach((it, i) => {
+        const key = baseName(it.label).toLowerCase() + completedSuffix(it.label);
+        groups.set(key, [...(groups.get(key) ?? []), i]);
+    });
+    const out = [...items];
+    for (const idx of groups.values()) {
+        const oldestFirst = [...idx].reverse();
+        oldestFirst.forEach((i, k) => {
+            const it = items[i];
+            const n = idx.length > 1 ? ` ${k + 1}` : '';
+            const label = `${baseName(it.label)}${n}${completedSuffix(it.label)}`;
+            const labelJa = it.labelJa ? it.labelJa.replace(/（補完）$/, '').replace(/ \d+$/, '') + n + (/（補完）$/.test(it.labelJa) ? '（補完）' : '') : undefined;
+            if (label !== it.label || labelJa !== it.labelJa) out[i] = { ...it, label, ...(labelJa !== undefined ? { labelJa } : {}) };
+        });
+    }
+    return out;
+};
+
 const App: React.FC = () => {
   const [mode, setMode] = useState<AppMode>('landing');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -539,7 +568,7 @@ const App: React.FC = () => {
       // Note: Scene depth map is generated separately via handleGenerateDepthMap
       // No need to generate per-object depth maps
 
-      setModels3D(prev => [newModel3D, ...prev]);
+      setModels3D(prev => numberDuplicates([newModel3D, ...prev]));
       addToSelection('3d', [newModelId]);
 
       // If we are in the standalone generation mode, switch to a workspace mode to view results
@@ -952,7 +981,7 @@ const App: React.FC = () => {
 
     try {
       const generatedObject = makeCompletedItem(item, await completeWithRetries(item, 'Complete Body'));
-      setCompletedImages(prev => [generatedObject, ...prev]);
+      setCompletedImages(prev => numberDuplicates([generatedObject, ...prev]));
       addToSelection('completed', [generatedObject.id]);
       setActiveTab('completed');
     } catch (e) {
@@ -989,7 +1018,7 @@ const App: React.FC = () => {
         const tItem = performance.now();
         try {
           const generatedObject = makeCompletedItem(item, await completeWithRetries(item, 'Batch Complete'));
-          setCompletedImages(prev => [generatedObject, ...prev]);
+          setCompletedImages(prev => numberDuplicates([generatedObject, ...prev]));
           addToSelection('completed', [generatedObject.id]);
         } catch (e) {
           console.error(`Failed to complete ${item.label}`, e);
@@ -1072,6 +1101,15 @@ const App: React.FC = () => {
       update = { label, description, labelJa: undefined, descriptionJa: undefined, annotationEdited: true };
     }
     setCroppedImages(prev => prev.map(i => (i.id === item.id ? { ...i, ...update } : i)));
+    // Completed images and 3D models made from this object (same box) take the new name too,
+    // keeping their " (Completed)" suffix; names shared by several of them are numbered
+    const rename = <T extends { label: string; labelJa?: string; box_2d?: [number, number, number, number] }>(list: T[]): T[] =>
+      numberDuplicates(list.map(x => (x.box_2d && item.box_2d && sameBox(x.box_2d, item.box_2d)
+        ? { ...x, label: `${update.label ?? x.label}${completedSuffix(x.label)}`,
+            ...(update.labelJa ? { labelJa: `${update.labelJa}${x.labelJa?.endsWith('（補完）') ? '（補完）' : ''}` } : {}) }
+        : x)));
+    setCompletedImages(prev => rename(prev));
+    setModels3D(prev => rename(prev));
     // The detected object (same box) gets the new English annotation too
     setDetectedObjects(prev => prev.map(o => (sameBox(o.box_2d, item.box_2d)
       ? { ...o, label: update.label ?? o.label, description: update.description ?? o.description }
@@ -1168,7 +1206,14 @@ const App: React.FC = () => {
         depthMapUrl: archiveDepthMapUrl,
         processingTimes: Object.fromEntries(processingTimes),
         sourceImageName: sourceImageName ?? undefined,
-        sceneLayout: sceneLayoutRef.current ?? undefined
+        sceneLayout: sceneLayoutRef.current ?? undefined,
+        // Which cards are checked in each tab (the 3D scene shows only the checked models)
+        selection: {
+          original: [...selectedItemsPerTab.original],
+          completed: [...selectedItemsPerTab.completed],
+          models3D: [...selectedItemsPerTab['3d']],
+          scene: [...selectedItemsPerTab.scene],
+        },
       };
 
       // File name: <photo name>_<furthest stage>_<local date-time>.json
@@ -1287,9 +1332,19 @@ const App: React.FC = () => {
         setProcessingTimes(new Map(Object.entries(archive.processingTimes)));
       }
 
-      // Restore selected items for 3D models (so they appear in 3D Scene)
-      if (restoredModels.length > 0) {
-        setSelectedItems(new Set(restoredModels.map(m => m.id)));
+      // Restore which cards were checked; projects saved before this was kept check every
+      // 3D model (so that they all appear in the 3D scene)
+      if (archive.selection) {
+        const sel = archive.selection;
+        setSelectedItemsPerTab({
+          original: new Set(sel.original ?? []),
+          completed: new Set(sel.completed ?? []),
+          '3d': new Set(sel.models3D ?? []),
+          scene: new Set(sel.scene ?? sel.models3D ?? []),
+        });
+      } else if (restoredModels.length > 0) {
+        const all = new Set(restoredModels.map(m => m.id));
+        setSelectedItemsPerTab(prev => ({ ...prev, '3d': all, scene: new Set(all) }));
       }
 
       // Navigate to a relevant tab
@@ -1833,13 +1888,14 @@ const App: React.FC = () => {
                       )}
                     </div>
 
-                    <div className="relative rounded-xl overflow-hidden shadow-sm border border-slate-200 bg-white group">
+                    {/* No overflow-hidden here: the object names shown on hover may extend beyond the photo */}
+                    <div className="relative rounded-xl shadow-sm border border-slate-200 bg-white group">
                       {previewUrl && (
                         <>
                           <img
                             src={previewUrl}
                             alt="Original"
-                            className="w-full h-auto block"
+                            className="w-full h-auto block rounded-xl"
                           />
                           {/* Bounding Boxes Layer */}
                           {!isAnalyzing && showMasks && detectedObjects.some(o => o.mask) && (
@@ -1853,7 +1909,7 @@ const App: React.FC = () => {
 
                       {/* Analyzing Overlay */}
                       {isAnalyzing && (
-                        <div className="absolute inset-0 bg-white/60 backdrop-blur-sm flex items-center justify-center flex-col gap-3">
+                        <div className="absolute inset-0 rounded-xl bg-white/60 backdrop-blur-sm flex items-center justify-center flex-col gap-3">
                           <Spinner />
                           <p className="text-sm font-medium text-slate-600 animate-pulse">Scanning objects...</p>
                         </div>
@@ -2409,7 +2465,8 @@ const App: React.FC = () => {
                       const url = URL.createObjectURL(blob);
                       const a = document.createElement('a');
                       a.href = url;
-                      a.download = `processing_times_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.csv`;
+                      // Named after the photo, like the project and stats files (e.g. office-desk_processing_times_<date-time>.csv)
+                      a.download = `${sourceImageName || 'project'}_processing_times_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.csv`;
                       a.click();
                       URL.revokeObjectURL(url);
                     }}

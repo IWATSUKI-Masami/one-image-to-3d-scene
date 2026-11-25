@@ -195,6 +195,8 @@ export interface ProjectArchive {
   processingTimes?: Record<string, number>;
   sourceImageName?: string; // File name of the analyzed photo (without extension), used for saved file names
   sceneLayout?: SceneLayout; // Placements set by hand in the 3D scene, scene settings and camera
+  /** Ids of the checked cards in each tab (the 3D scene shows only the checked 3D models) */
+  selection?: { original?: string[]; completed?: string[]; models3D?: string[]; scene?: string[] };
 }
 
 // ---- AI provider settings ----

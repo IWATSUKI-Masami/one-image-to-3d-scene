@@ -55,9 +55,9 @@
     },
     {
       "id": "o5",
-      "label": "black office chair",
+      "label": "black ergonomic office chair",
       "match": {
-        "label_prefix": "Black Office"
+        "label_prefix": "Black Ergonomic"
       },
       "height_m": 1.2,
       "width_m": 0.65,
@@ -66,7 +66,7 @@
     {
       "id": "o6",
       "match": {
-        "label_prefix": "Wooden Side"
+        "label_prefix": "Wooden Si"
       },
       "height_m": 0.9,
       "width_m": 0.45,
@@ -74,9 +74,9 @@
     },
     {
       "id": "o7",
-      "label": "mesh wastebasket",
+      "label": "gray mesh wastebasket",
       "match": {
-        "label_prefix": "Mesh Wasteb"
+        "label_prefix": "Gray Mesh"
       },
       "height_m": 0.3,
       "width_m": 0.28,

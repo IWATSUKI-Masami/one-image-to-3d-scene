@@ -26,7 +26,7 @@ export const BoundingBoxOverlay: React.FC<BoundingBoxOverlayProps> = ({ objects,
         return (
           <div
             key={idx}
-            className="absolute transition-colors group"
+            className="absolute transition-colors group hover:z-20"
             style={{
               top: `${top}%`,
               left: `${left}%`,
@@ -36,8 +36,11 @@ export const BoundingBoxOverlay: React.FC<BoundingBoxOverlayProps> = ({ objects,
               backgroundColor: `${boxColor}1A` // ~10% opacity
             }}
           >
+            {/* The name may extend above the photo (the photo's frame does not clip it); for boxes in
+                the right half it is aligned to the box's right edge, so that it is not cut off by the
+                right edge of the page */}
             <span
-              className="absolute -top-6 left-0 text-white text-xs px-2 py-0.5 rounded shadow-sm opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10"
+              className={`absolute -top-6 ${left + width / 2 > 50 ? 'right-0' : 'left-0'} text-white text-xs px-2 py-0.5 rounded shadow-sm opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10`}
               style={{ backgroundColor: boxColor }}
             >
               {obj.label}
