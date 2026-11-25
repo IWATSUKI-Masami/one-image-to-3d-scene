@@ -19,9 +19,9 @@ This is the reference implementation of the paper listed in [Citation](#citation
   </tr>
 </table>
 
-All sample photos are AI-generated, and you can use them to try the app: [`samples/cafe-couple.webp`](samples/cafe-couple.webp) (above, generated with Gemini) and [`samples/table-talk.webp`](samples/table-talk.webp), the input used in the paper and in the walkthrough below. Two more photos were used to test the method on other scenes: [`samples/office-desk.webp`](samples/office-desk.webp) (a desk without people, with a chair cut off at the right border, an office chair hidden behind the desk and a laptop seen from the back of its screen) and [`samples/woman-at-desk.webp`](samples/woman-at-desk.webp) (a person seen from the side at an L-shaped desk, with a bookcase and a floor lamp cut off at the borders; correct the desk's annotation to "L-shaped" if the VLM describes it as rectangular).
+All sample photos are AI-generated, and you can use them to try the app: [`samples/cafe-couple.webp`](samples/cafe-couple.webp) (above, generated with Gemini; used in the walkthrough below) and [`samples/table-talk.webp`](samples/table-talk.webp), the input used in the paper. Two more photos were used to test the method on other scenes: [`samples/office-desk.webp`](samples/office-desk.webp) (a desk without people, with a chair cut off at the right border, an office chair hidden behind the desk and a laptop seen from the back of its screen) and [`samples/woman-at-desk.webp`](samples/woman-at-desk.webp) (a person seen from the side at an L-shaped desk, with a bookcase and a floor lamp cut off at the borders; correct the desk's annotation to "L-shaped" if the VLM describes it as rectangular).
 
-The scene above is the automatic result. The placement can also be adjusted by hand in edit mode (**Edit ON** in the 3D Scene tab); see *Edited by hand* in the walkthrough below.
+The scene above is the automatic result. The placement can be corrected by a vision-language model with **✨ Arrange** (see the last row of the walkthrough below and [Semantic arrangement with AI](#semantic-arrangement-with-ai-arrange)), or by hand in edit mode (**Edit ON** in the 3D Scene tab).
 
 <p align="center"><img src="docs/images/demo-rotate.gif" alt="The 3D scene of the paper's sample, turned around in the app" width="480"></p>
 <p align="center"><sub>The 3D scene of the paper's sample, turned around in the app (automatic placement). Demo videos of the whole process: <a href="docs/videos/demo.mp4"><code>docs/videos/demo.mp4</code></a> (33 s, English captions) and <a href="docs/videos/demo-ja.mp4"><code>docs/videos/demo-ja.mp4</code></a> (24 s, square, Japanese captions)</sub></p>
@@ -51,28 +51,28 @@ An article explaining the method and its implementation (in Japanese) is on Qiit
 
 ### Walkthrough (sample photo)
 
-Results of the current version. Detection and completion use OpenAI (only the right chair in the completion image was completed with Gemini), 3D generation uses TRELLIS.2, and people were completed with the **Calm** face style. The scene uses perspective placement (far/near ratio 1.5) and front alignment, and each model is placed by the box of its visible part, kept through completion (the paper's box placement).
+Results of the current version for [`samples/cafe-couple.webp`](samples/cafe-couple.webp). Detection and completion use OpenAI, 3D generation uses TRELLIS.2, and people were completed with the **Calm** face style. The scene uses perspective placement (far/near ratio 1.5) and front alignment, and each model is placed by the box of its visible part, kept through completion (the paper's box placement). The last row shows the result of **Arrange** with Claude.
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/images/step1-detection.webp" alt="Object detection"><br><sub><b>Detection</b> — the VLM finds 8 objects and gives each a label and a box.</sub></td>
-    <td width="50%"><img src="docs/images/step1-masks.webp" alt="Object masks"><br><sub><b>Segmentation</b> — SAM 2.1, running in the browser, segments the visible pixels of each object from its box. Only thin strips of the chairs' backrests are visible at the borders.</sub></td>
+    <td width="50%"><img src="docs/images/cafe-step1-detection.webp" alt="Object detection"><br><sub><b>Detection</b> — the VLM finds 6 objects and gives each a label, a box and a description.</sub></td>
+    <td width="50%"><img src="docs/images/cafe-step1-masks.webp" alt="Object masks"><br><sub><b>Segmentation</b> — SAM 2.1, running in the browser, segments the visible pixels of each object from its box. The table is cut off by the lower border, the man by the right border, and the people's lower bodies are hidden by the table.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/step2-extracted.webp" alt="Extracted objects"><br><sub><b>Cropping</b> — each object is cut out of the photo.</sub></td>
-    <td width="50%"><img src="docs/images/step3-completed.webp" alt="Completed objects"><br><sub><b>Completion</b> — the hidden parts are drawn with a transparent background. The visible part stays in place (green box, "Part: kept"), so no feature matching is needed.</sub></td>
+    <td width="50%"><img src="docs/images/cafe-step2-extracted.webp" alt="Extracted objects"><br><sub><b>Cropping</b> — each object is cut out of the photo; the face style for people (here <b>Calm</b>) is chosen before completion.</sub></td>
+    <td width="50%"><img src="docs/images/cafe-step3-completed.webp" alt="Completed objects"><br><sub><b>Completion</b> — the hidden parts are drawn with a transparent background: the round table's pedestal, and the legs and feet of the two seated people. The visible part stays in place ("Part: kept"), so no feature matching is needed.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/step4-3d-models.webp" alt="3D models"><br><sub><b>3D generation</b> — one textured 3D model per object (TRELLIS.2).</sub></td>
-    <td width="50%"><img src="docs/images/step5-depth-map.webp" alt="Depth map"><br><sub><b>Depth estimation</b> — the depth map from Depth Anything V2 (brighter is nearer).</sub></td>
+    <td width="50%"><img src="docs/images/cafe-step4-3d-models.webp" alt="3D models"><br><sub><b>3D generation</b> — one textured 3D model per object (TRELLIS.2). Front alignment turns the woman by 26° and the man by −62°; it is not used for the round table, which has no front.</sub></td>
+    <td width="50%"><img src="docs/images/cafe-step5-depth-map.webp" alt="Depth map"><br><sub><b>Depth estimation</b> — the depth map from Depth Anything V2 (brighter is nearer).</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/scene-auto.webp" alt="3D scene"><br><sub><b>Scene composition</b> — the 8 objects are placed with perspective at the depth of their PC Boxes. The chairs, of which only the backrests are visible, stand behind the people; the table, visible only as the front of its top, is still placed only roughly.</sub></td>
-    <td width="50%"><img src="docs/images/scene-tab.webp" alt="3D scene with its controls"><br><sub><b>3D Scene tab</b> — the scene and its controls: depth range, point size, <b>Perspective</b>, <b>Align</b> (front alignment), boxes and point cloud, <b>Save</b> / <b>Load</b> of the layout, <b>GLB</b> export, <b>✨ Arrange</b> (semantic arrangement with AI), <b>Match</b> (photo match), <b>Ref</b> (reference analysis for evaluation), and <b>Edit</b> for moving models by hand.</sub></td>
+    <td width="50%"><img src="docs/images/cafe-scene-auto.webp" alt="3D scene, automatic placement"><br><sub><b>Scene composition</b> — the 6 objects are placed with perspective at the depth of their PC Boxes, each on its own: the table, of which only the top is visible, comes out about half its real height and behind the woman, and the vase and cups sink into its top.</sub></td>
+    <td width="50%"><img src="docs/images/cafe-scene-tab.webp" alt="3D scene with its controls"><br><sub><b>3D Scene tab</b> — the scene and its controls: depth range, point size, <b>Perspective</b>, <b>Align</b> (front alignment), boxes and point cloud, <b>Save</b> / <b>Load</b> of the layout, <b>GLB</b> export, <b>✨ Arrange</b> (semantic arrangement with AI), <b>Match</b> (photo match), <b>Ref</b> (reference analysis for evaluation), <b>Log</b>, and <b>Edit</b> for moving models by hand.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/scene-edited.webp" alt="3D scene edited by hand"><br><sub><b>Edited by hand</b> — the table and chairs of the sample moved and resized in edit mode (<b>Edit ON</b>, Move and Scale), seen from above: the cups and the vase now stand on the table and the people sit on their chairs.</sub></td>
-    <td width="50%"></td>
+    <td width="50%"><img src="docs/images/cafe-arrange-after-claude.webp" alt="3D scene after Arrange with Claude"><br><sub><b>Arrange (Claude)</b> — the table at its real height with its pedestal on the floor, the vase and cups on its top, the two people seated behind it (physical issues 6 → 0, photo match 0.376 → 0.678). See <a href="#semantic-arrangement-with-ai-arrange">Semantic arrangement with AI</a>.</sub></td>
+    <td width="50%"><img src="docs/images/cafe-arrange-photo-match.webp" alt="Photo match after Arrange"><br><sub><b>Photo match</b> (<b>📏 Match</b>) after Arrange — each model seen from the photo's camera over its mask in the photo: green where they overlap, red in the photo only, blue in the scene only, with each object's IoU.</sub></td>
   </tr>
 </table>
 
@@ -142,9 +142,9 @@ The best final runs with Claude (`claude-opus-5-5`, effort high, at most 6 round
 
 <table>
   <tr>
-    <td width="33%"><img src="samples/table-talk.webp" alt="Input photo of table-talk"><br><sub><b>Photo</b> — two people sit on both sides of a corner of the table.</sub></td>
-    <td width="33%"><img src="docs/images/arrange-table-talk-before.webp" alt="Scene before Arrange, with a huge table"><br><sub><b>Before Arrange</b> — automatic placement: the generated table is about 4 m wide and stands behind the people; cups and chairs float.</sub></td>
-    <td width="33%"><img src="docs/images/arrange-table-talk-after-claude.webp" alt="Scene after Arrange with Claude"><br><sub><b>After Arrange (Claude)</b> — the table at real size in front of the people, kept corner-on; cups and vase on the top, each person on a chair. Physical issues 7 → 0.</sub></td>
+    <td width="33%"><img src="samples/cafe-couple.webp" alt="Input photo of cafe-couple"><br><sub><b>Photo</b> — two people at a round café table, with a vase and two cups.</sub></td>
+    <td width="33%"><img src="docs/images/cafe-scene-auto.webp" alt="cafe-couple before Arrange"><br><sub><b>Before Arrange</b> — automatic placement: the table about half its real height and behind the woman, the vase and cups sunk into its top, the woman floating.</sub></td>
+    <td width="33%"><img src="docs/images/cafe-arrange-after-claude.webp" alt="cafe-couple after Arrange with Claude"><br><sub><b>After Arrange (Claude)</b> — the table at its real height on the floor in front of the people, the vase and cups on its top, the two seated behind it. Physical issues 6 → 0.</sub></td>
   </tr>
 </table>
 
@@ -162,13 +162,17 @@ Claude and OpenAI (`gpt-5.6-sol`) on the same four scenes (same models, same sta
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/images/arrange-table-talk-after-claude.webp" alt="table-talk after Arrange with Claude"><br><sub><b>Claude</b> — the table top keeps the shape of the generated model; the table was shrunk to real size (photo match 0.509, weighted 0.637).</sub></td>
-    <td width="50%"><img src="docs/images/arrange-table-talk-after-openai.webp" alt="table-talk after Arrange with OpenAI"><br><sub><b>OpenAI</b> — the same scene; the table's depth was cut to about a third (its width only to 0.8) to fit its partly hidden outline in the photo, so it became long and narrow (photo match 0.575, weighted 0.656).</sub></td>
+    <td width="50%"><img src="docs/images/cafe-arrange-after-claude.webp" alt="cafe-couple after Arrange with Claude"><br><sub><b>Claude</b> — the cups and vase keep their generated proportions; only the table, generated too low, was stretched in height (photo match 0.678, weighted 0.714).</sub></td>
+    <td width="50%"><img src="docs/images/cafe-arrange-after-openai.webp" alt="cafe-couple after Arrange with OpenAI"><br><sub><b>OpenAI</b> — the same scene; the cups were narrowed to 0.73 and 0.79 of their width, and the vase and cups were estimated about 20–40% taller than they are (photo match 0.620, weighted 0.633).</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/images/cafe-arrange-photo-match.webp" alt="Photo match after Arrange with Claude"><br><sub>Photo match after Arrange with Claude.</sub></td>
+    <td width="50%"><img src="docs/images/cafe-arrange-photo-match-openai.webp" alt="Photo match after Arrange with OpenAI"><br><sub>Photo match after Arrange with OpenAI.</sub></td>
   </tr>
 </table>
 
 - **Understanding of relations:** both models understand the relations about equally well.
-- **Real sizes:** they differ in estimating real sizes, and in whether they keep the objects' shapes. OpenAI raised the photo match on one photo by flattening the table to fit its partly hidden outline, and it lowered the match on `woman-at-desk`.
+- **Real sizes:** they differ in estimating real sizes, and in whether they keep the objects' shapes. OpenAI raised the photo match on one photo (`table-talk`) by flattening the table to fit its partly hidden outline, and it lowered the match on `woman-at-desk`.
 - **Gemini:** in earlier runs on the two development photos it was slower and less stable (see [docs/roadmap.md](docs/roadmap.md)).
 
 ### Limits seen in the runs

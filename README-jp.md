@@ -19,9 +19,9 @@
   </tr>
 </table>
 
-サンプル画像はすべて生成AIで作成したもので、アプリを試す際にお使いください。上の [`samples/cafe-couple.webp`](samples/cafe-couple.webp) は Gemini で作成しました。[`samples/table-talk.webp`](samples/table-talk.webp) は論文で入力として使ったもので、下の「処理の流れ（サンプル画像）」でも使っています。ほかの場面での試験には、次の2枚を使いました。[`samples/office-desk.webp`](samples/office-desk.webp) は人物のいない机の写真で、右端で切れた椅子、机に隠れたオフィスチェア、画面の背面側から見たノートPCを含みます。[`samples/woman-at-desk.webp`](samples/woman-at-desk.webp) はL字型の机に横向きで座る人物の写真で、本棚とフロアランプが画像の端で切れています（VLM が机を長方形と記述した場合は、注釈を「L字型」に直してください）。
+サンプル画像はすべて生成AIで作成したもので、アプリを試す際にお使いください。上の [`samples/cafe-couple.webp`](samples/cafe-couple.webp) は Gemini で作成したもので、下の「処理の流れ（サンプル画像）」で使っています。[`samples/table-talk.webp`](samples/table-talk.webp) は論文で入力として使ったものです。ほかの場面での試験には、次の2枚を使いました。[`samples/office-desk.webp`](samples/office-desk.webp) は人物のいない机の写真で、右端で切れた椅子、机に隠れたオフィスチェア、画面の背面側から見たノートPCを含みます。[`samples/woman-at-desk.webp`](samples/woman-at-desk.webp) はL字型の机に横向きで座る人物の写真で、本棚とフロアランプが画像の端で切れています（VLM が机を長方形と記述した場合は、注釈を「L字型」に直してください）。
 
-上の3Dシーンは自動で配置した結果です。配置は、3D Scene タブの編集モード（**Edit ON**）で手で調整することもできます（下の「手で編集した結果」を参照）。
+上の3Dシーンは自動で配置した結果です。配置は、画像を読める AI に **✨ Arrange** で直させることも（下の「処理の流れ」の最後の行と、[AI による意味を考えた配置替え](#ai-による意味を考えた配置替えarrange)を参照）、3D Scene タブの編集モード（**Edit ON**）で手で直すこともできます。
 
 <p align="center"><img src="docs/images/demo-rotate.gif" alt="論文のサンプルの3Dシーンをアプリで回したところ" width="480"></p>
 <p align="center"><sub>論文のサンプルの3Dシーンを、アプリで回したところです（自動の配置）。処理の流れ全体のデモ動画：<a href="docs/videos/demo-ja.mp4"><code>docs/videos/demo-ja.mp4</code></a>（24秒、正方形、日本語字幕）、<a href="docs/videos/demo.mp4"><code>docs/videos/demo.mp4</code></a>（33秒、英語字幕）</sub></p>
@@ -51,28 +51,28 @@
 
 ### 処理の流れ（サンプル画像）
 
-最新版での結果です。物体検出と画像補完には OpenAI（補完の画像の右の椅子だけは Gemini）、3D生成には TRELLIS.2 を使い、人物の顔は **Calm** で補完しました。3Dシーンでは、遠近を考慮した配置（遠/近の比 1.5）と向き合わせを使い、各モデルを、補完の間に保った見えていた部分の枠に合わせて置いています（論文の箱による配置）。
+[`samples/cafe-couple.webp`](samples/cafe-couple.webp) での最新版の結果です。物体検出と画像補完には OpenAI、3D生成には TRELLIS.2 を使い、人物の顔は **Calm** で補完しました。3Dシーンでは、遠近を考慮した配置（遠/近の比 1.5）と向き合わせを使い、各モデルを、補完の間に保った見えていた部分の枠に合わせて置いています（論文の箱による配置）。最後の行は、Claude による **Arrange** の結果です。
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/images/step1-detection.webp" alt="物体検出"><br><sub><b>物体検出</b>：VLM が8つの物体を見つけ、ラベルと枠を付けます。</sub></td>
-    <td width="50%"><img src="docs/images/step1-masks.webp" alt="物体のマスク"><br><sub><b>切り分け</b>：SAM 2.1（ブラウザ内で実行）が、枠を手がかりに各物体の見えている画素を切り分けます。両端の椅子は、背もたれの細い部分だけが見えています。</sub></td>
+    <td width="50%"><img src="docs/images/cafe-step1-detection.webp" alt="物体検出"><br><sub><b>物体検出</b>：VLM が6つの物体を見つけ、それぞれに名前、枠、説明を付けます。</sub></td>
+    <td width="50%"><img src="docs/images/cafe-step1-masks.webp" alt="物体マスク"><br><sub><b>セグメンテーション</b>：ブラウザで動く SAM 2.1 が、枠から各物体の見えている画素を切り分けます。テーブルは写真の下の端で、男性は右の端で切れ、2人の下半身はテーブルに隠れています。</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/step2-extracted.webp" alt="切り出し"><br><sub><b>切り出し</b>：物体ごとに写真から切り出します。</sub></td>
-    <td width="50%"><img src="docs/images/step3-completed.webp" alt="画像補完"><br><sub><b>画像補完</b>：隠れた部分を透明背景で描き足します。見えていた部分は元の位置に保たれる（緑の枠、「Part: kept」）ので、特徴点マッチングは要りません。</sub></td>
+    <td width="50%"><img src="docs/images/cafe-step2-extracted.webp" alt="切り出した物体"><br><sub><b>切り出し</b>：各物体を写真から切り出します。人物の顔のスタイル（ここでは <b>Calm</b>）は補完の前に選びます。</sub></td>
+    <td width="50%"><img src="docs/images/cafe-step3-completed.webp" alt="補完した物体"><br><sub><b>補完</b>：隠れた部分を透明な背景で描き足します（丸テーブルの台座、座った2人の脚と足）。見えていた部分は位置を保つ（「Part: kept」）ので、特徴点マッチングは要りません。</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/step4-3d-models.webp" alt="3Dモデル"><br><sub><b>3D生成</b>：物体ごとにテクスチャ付きの3Dモデルを作ります（TRELLIS.2）。</sub></td>
-    <td width="50%"><img src="docs/images/step5-depth-map.webp" alt="深度マップ"><br><sub><b>深度推定</b>：Depth Anything V2 による深度マップです（明るいほど手前）。</sub></td>
+    <td width="50%"><img src="docs/images/cafe-step4-3d-models.webp" alt="3Dモデル"><br><sub><b>3D生成</b>：物体ごとにテクスチャ付きの3Dモデルを作ります（TRELLIS.2）。向き合わせで女性を 26°、男性を −62° 回します。正面のない丸テーブルには使いません。</sub></td>
+    <td width="50%"><img src="docs/images/cafe-step5-depth-map.webp" alt="深度マップ"><br><sub><b>深度推定</b>：Depth Anything V2 による深度マップです（明るいほど近い）。</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/scene-auto.webp" alt="3Dシーン"><br><sub><b>シーン合成</b>：8つの物体を、遠近を考慮してそれぞれの PC Box の奥行きに置きます。背もたれしか見えない椅子も人物の後ろに置かれますが、天板の手前しか見えないテーブルの位置はまだおおよそです。</sub></td>
-    <td width="50%"><img src="docs/images/scene-tab.webp" alt="操作パネル付きの3Dシーン"><br><sub><b>3D Scene タブ</b>：シーンと操作パネルです。深度の範囲、点の大きさ、<b>Perspective</b>、<b>Align</b>（向き合わせ）、各種の枠と点群の表示、配置の <b>Save</b> / <b>Load</b>、<b>GLB</b> の書き出し、<b>✨ Arrange</b>（AI による意味を考えた配置替え）、<b>Match</b>（写真との一致度）、<b>Ref</b>（評価用の正解の解析）、モデルを手で動かす <b>Edit</b> があります。</sub></td>
+    <td width="50%"><img src="docs/images/cafe-scene-auto.webp" alt="3Dシーン（自動の配置）"><br><sub><b>シーン合成</b>：6つの物体を、遠近を考慮してそれぞれの PC Box の奥行きに、1つずつ置きます。天板しか見えないテーブルは現実の半分ほどの高さで女性の後ろに置かれ、花瓶とカップが天板にめり込みます。</sub></td>
+    <td width="50%"><img src="docs/images/cafe-scene-tab.webp" alt="操作パネル付きの3Dシーン"><br><sub><b>3D Scene タブ</b>：シーンと操作パネルです。深度の範囲、点の大きさ、<b>Perspective</b>、<b>Align</b>（向き合わせ）、各種の枠と点群の表示、配置の <b>Save</b> / <b>Load</b>、<b>GLB</b> の書き出し、<b>✨ Arrange</b>（AI による意味を考えた配置替え）、<b>Match</b>（写真との一致度）、<b>Ref</b>（評価用の正解の解析）、<b>Log</b>、モデルを手で動かす <b>Edit</b> があります。</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/scene-edited.webp" alt="手で編集した3Dシーン"><br><sub><b>手で編集した結果</b>：サンプルのテーブルと椅子の位置と大きさを、編集モード（<b>Edit ON</b>）の移動（Move）と拡大縮小（Scale）で直し、上から見たところです。カップと花瓶がテーブルに載り、2人が椅子に座っています。</sub></td>
-    <td width="50%"></td>
+    <td width="50%"><img src="docs/images/cafe-arrange-after-claude.webp" alt="Claude による Arrange の後の3Dシーン"><br><sub><b>Arrange（Claude）</b>：テーブルを現実の高さにして台座を床に着け、花瓶とカップを天板に載せ、2人をその向こうに座らせました（物理的な問題 6 → 0、写真との一致度 0.376 → 0.678）。<a href="#ai-による意味を考えた配置替えarrange">AI による意味を考えた配置替え</a>を参照。</sub></td>
+    <td width="50%"><img src="docs/images/cafe-arrange-photo-match.webp" alt="Arrange の後の写真との一致度"><br><sub>Arrange の後の<b>写真との一致度</b>（<b>📏 Match</b>）：写真のカメラから見た各モデルを、写真のマスクに重ねたものです。緑は重なる部分、赤は写真にだけある部分、青はシーンにだけある部分で、物体ごとの IoU も表示します。</sub></td>
   </tr>
 </table>
 
@@ -142,9 +142,9 @@ Claude（`claude-opus-5-5`、effort high、最大6回、指示文 `d5d766f8`）�
 
 <table>
   <tr>
-    <td width="33%"><img src="samples/table-talk.webp" alt="table-talk の入力写真"><br><sub><b>写真</b> — 2人はテーブルの角をはさんで座っている。</sub></td>
-    <td width="33%"><img src="docs/images/arrange-table-talk-before.webp" alt="Arrange の前のシーン。巨大なテーブル"><br><sub><b>Arrange の前</b> — 自動の配置。生成されたテーブルは幅約 4 m で人物の後ろにあり、カップと椅子が浮いている。</sub></td>
-    <td width="33%"><img src="docs/images/arrange-table-talk-after-claude.webp" alt="Claude による Arrange の後のシーン"><br><sub><b>Arrange の後（Claude）</b> — テーブルを実寸にして人物の手前に置き、斜めの向きを保った。カップと花瓶は天板の上、人物はそれぞれ椅子に座る。物理的な問題 7 → 0。</sub></td>
+    <td width="33%"><img src="samples/cafe-couple.webp" alt="cafe-couple の入力写真"><br><sub><b>写真</b> — 丸いカフェテーブルの2人と、花瓶と2つのカップ。</sub></td>
+    <td width="33%"><img src="docs/images/cafe-scene-auto.webp" alt="cafe-couple の Arrange の前"><br><sub><b>Arrange の前</b> — 自動の配置。テーブルは現実の半分ほどの高さで女性の後ろにあり、花瓶とカップは天板にめり込み、女性は浮いている。</sub></td>
+    <td width="33%"><img src="docs/images/cafe-arrange-after-claude.webp" alt="Claude による cafe-couple の Arrange の後"><br><sub><b>Arrange の後（Claude）</b> — テーブルは現実の高さで床に立ち、人物の手前にある。花瓶とカップは天板の上、2人はその向こうに座る。物理的な問題 6 → 0。</sub></td>
   </tr>
 </table>
 
@@ -162,13 +162,17 @@ Claude（`claude-opus-5-5`、effort high、最大6回、指示文 `d5d766f8`）�
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/images/arrange-table-talk-after-claude.webp" alt="Claude による table-talk の Arrange の後"><br><sub><b>Claude</b> — 天板は生成モデルの形を保ち、テーブル全体を実寸に縮めた（一致度 0.509、重み付き 0.637）。</sub></td>
-    <td width="50%"><img src="docs/images/arrange-table-talk-after-openai.webp" alt="OpenAI による table-talk の Arrange の後"><br><sub><b>OpenAI</b> — 同じシーン。一部が隠れた写真のテーブルの輪郭に合わせて奥行きを約3分の1に縮めた（幅は 0.8 倍）ため、細長くなった（一致度 0.575、重み付き 0.656）。</sub></td>
+    <td width="50%"><img src="docs/images/cafe-arrange-after-claude.webp" alt="Claude による cafe-couple の Arrange の後"><br><sub><b>Claude</b> — カップと花瓶は生成されたときの縦横比のまま。低く生成されたテーブルだけを縦に伸ばした（一致度 0.678、重み付き 0.714）。</sub></td>
+    <td width="50%"><img src="docs/images/cafe-arrange-after-openai.webp" alt="OpenAI による cafe-couple の Arrange の後"><br><sub><b>OpenAI</b> — 同じシーン。カップの幅を 0.73 倍と 0.79 倍に細め、花瓶とカップの高さを実際より 20〜40% ほど高く見積もった（一致度 0.620、重み付き 0.633）。</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/images/cafe-arrange-photo-match.webp" alt="Claude による Arrange の後の写真との一致度"><br><sub>Claude による Arrange の後の写真との一致度。</sub></td>
+    <td width="50%"><img src="docs/images/cafe-arrange-photo-match-openai.webp" alt="OpenAI による Arrange の後の写真との一致度"><br><sub>OpenAI による Arrange の後の写真との一致度。</sub></td>
   </tr>
 </table>
 
 - **関係の理解：** 2つの AI はほぼ同じです。
-- **現実の大きさ：** 差が出るのは、現実の大きさの見積もりと、物の形を保つかどうかです。OpenAI は1枚で、一部が隠れたテーブルの輪郭に合わせてテーブルを平たくし、一致度を上げました。`woman-at-desk` では一致度を下げました。
+- **現実の大きさ：** 差が出るのは、現実の大きさの見積もりと、物の形を保つかどうかです。OpenAI は1枚（`table-talk`）で、一部が隠れたテーブルの輪郭に合わせてテーブルを平たくし、一致度を上げました。`woman-at-desk` では一致度を下げました。
 - **Gemini：** 開発に使った2枚での以前の実行で、遅く不安定でした（[docs/roadmap-jp.md](docs/roadmap-jp.md) を参照）。
 
 ### 実行で見えた限界
