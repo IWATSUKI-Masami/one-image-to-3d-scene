@@ -68,7 +68,7 @@ Results of the current version. Detection and completion use OpenAI (only the ri
   </tr>
   <tr>
     <td width="50%"><img src="docs/images/scene-result.webp" alt="3D scene"><br><sub><b>Scene composition</b> — the 8 objects are placed with perspective at the depth of their PC Boxes. The chairs, of which only the backrests are visible, stand behind the people; the table, visible only as the front of its top, is still placed only roughly.</sub></td>
-    <td width="50%"><img src="docs/images/step7-scene-ui.webp" alt="3D scene with its controls"><br><sub><b>3D Scene tab</b> — the scene and its controls: depth range, point size, <b>Perspective</b>, <b>Align</b> (front alignment), boxes and point cloud, <b>Save</b> / <b>Load</b> of the layout, and <b>Edit</b> for moving models by hand.</sub></td>
+    <td width="50%"><img src="docs/images/step7-scene-ui.webp" alt="3D scene with its controls"><br><sub><b>3D Scene tab</b> — the scene and its controls: depth range, point size, <b>Perspective</b>, <b>Align</b> (front alignment), boxes and point cloud, <b>Save</b> / <b>Load</b> of the layout, <b>GLB</b> export, <b>✨ Arrange</b> (semantic arrangement with AI), <b>Match</b> (photo match), <b>Ref</b> (reference analysis for evaluation), and <b>Edit</b> for moving models by hand.</sub></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/images/scene-edited.webp" alt="3D scene edited by hand"><br><sub><b>Edited by hand</b> — the table and chairs of the sample moved and resized in edit mode (<b>Edit ON</b>, Move and Scale), seen from above: the cups and the vase now stand on the table and the people sit on their chairs.</sub></td>
@@ -140,6 +140,14 @@ The best final runs with Claude (`claude-opus-5-5`, effort high, at most 6 round
 - **The weighted photo match counts each object by its area in the photo.** Objects seen only as thin strips at the borders (the chairs) or hidden behind others otherwise weigh as much as the people in the mean. `office-desk` matched the photo well from the start, so it changed little.
 - **In `table-talk`, the analysis matches the photo.** It reads that the two people sit on both sides of a corner of the table. The model keeps the table corner-on, as front alignment measured it, and puts the corner between them. In this run the generated table was about 4 m wide; the model scaled it down to real size.
 
+<table>
+  <tr>
+    <td width="33%"><img src="samples/table-talk.webp" alt="Input photo of table-talk"><br><sub><b>Photo</b> — two people sit on both sides of a corner of the table.</sub></td>
+    <td width="33%"><img src="docs/images/arrange-table-talk-before.webp" alt="Scene before Arrange, with a huge table"><br><sub><b>Before Arrange</b> — automatic placement: the generated table is about 4 m wide and stands behind the people; cups and chairs float.</sub></td>
+    <td width="33%"><img src="docs/images/arrange-table-talk-after-claude.webp" alt="Scene after Arrange with Claude"><br><sub><b>After Arrange (Claude)</b> — the table at real size in front of the people, kept corner-on; cups and vase on the top, each person on a chair. Physical issues 7 → 0.</sub></td>
+  </tr>
+</table>
+
 Claude and OpenAI (`gpt-5.6-sol`) on the same four scenes (same models, same starting placement):
 
 | | Claude | OpenAI |
@@ -151,6 +159,13 @@ Claude and OpenAI (`gpt-5.6-sol`) on the same four scenes (same models, same sta
 | Error of the real heights in the analysis | **2.9%** | 12.2% |
 | Objects other than people stretched along one axis | 3 (tables and a desk generated too low) | 10 (cups, chairs, a wastebasket, a lamp; tables flattened) |
 | Rounds, mean | **3.0** | 5.0 |
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/arrange-table-talk-after-claude.webp" alt="table-talk after Arrange with Claude"><br><sub><b>Claude</b> — the table top keeps the shape of the generated model; the table was shrunk to real size (photo match 0.509, weighted 0.637).</sub></td>
+    <td width="50%"><img src="docs/images/arrange-table-talk-after-openai.webp" alt="table-talk after Arrange with OpenAI"><br><sub><b>OpenAI</b> — the same scene; the table's depth was cut to about a third (its width only to 0.8) to fit its partly hidden outline in the photo, so it became long and narrow (photo match 0.575, weighted 0.656).</sub></td>
+  </tr>
+</table>
 
 - **Understanding of relations:** both models understand the relations about equally well.
 - **Real sizes:** they differ in estimating real sizes, and in whether they keep the objects' shapes. OpenAI raised the photo match on one photo by flattening the table to fit its partly hidden outline, and it lowered the match on `woman-at-desk`.
@@ -164,6 +179,14 @@ Claude and OpenAI (`gpt-5.6-sol`) on the same four scenes (same models, same sta
   - the far section of an L-shaped desk generated too thin, because its depth is not visible in the photo.
 - **Relation checks use bounding boxes.** They cannot represent non-convex furniture such as an L-shaped desk.
 - **Most of the relations the analysis misses are front-to-back orders** between small objects (a vase and a cup).
+
+<table>
+  <tr>
+    <td width="50%"><img src="samples/woman-at-desk.webp" alt="Input photo of woman-at-desk"><br><sub><b>Photo</b> (not used for development) — a woman at the inner corner of an L-shaped desk.</sub></td>
+    <td width="50%"><img src="docs/images/arrange-woman-at-desk-after-claude.webp" alt="woman-at-desk after Arrange with Claude"><br><sub><b>After Arrange (Claude)</b> — the woman in the corner of the L, items on the desk, shelves and lamp on the floor (physical issues 8 → 0). The far section of the desk was generated too thin: its depth is not visible in the photo.</sub></td>
+  </tr>
+</table>
+
 
 ## Requirements
 

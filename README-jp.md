@@ -68,7 +68,7 @@
   </tr>
   <tr>
     <td width="50%"><img src="docs/images/scene-result.webp" alt="3Dシーン"><br><sub><b>シーン合成</b>：8つの物体を、遠近を考慮してそれぞれの PC Box の奥行きに置きます。背もたれしか見えない椅子も人物の後ろに置かれますが、天板の手前しか見えないテーブルの位置はまだおおよそです。</sub></td>
-    <td width="50%"><img src="docs/images/step7-scene-ui.webp" alt="操作パネル付きの3Dシーン"><br><sub><b>3D Scene タブ</b>：シーンと操作パネルです。深度の範囲、点の大きさ、<b>Perspective</b>、<b>Align</b>（向き合わせ）、各種の枠と点群の表示、配置の <b>Save</b> / <b>Load</b>、モデルを手で動かす <b>Edit</b> があります。</sub></td>
+    <td width="50%"><img src="docs/images/step7-scene-ui.webp" alt="操作パネル付きの3Dシーン"><br><sub><b>3D Scene タブ</b>：シーンと操作パネルです。深度の範囲、点の大きさ、<b>Perspective</b>、<b>Align</b>（向き合わせ）、各種の枠と点群の表示、配置の <b>Save</b> / <b>Load</b>、<b>GLB</b> の書き出し、<b>✨ Arrange</b>（AI による意味を考えた配置替え）、<b>Match</b>（写真との一致度）、<b>Ref</b>（評価用の正解の解析）、モデルを手で動かす <b>Edit</b> があります。</sub></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/images/scene-edited.webp" alt="手で編集した3Dシーン"><br><sub><b>手で編集した結果</b>：サンプルのテーブルと椅子の位置と大きさを、編集モード（<b>Edit ON</b>）の移動（Move）と拡大縮小（Scale）で直し、上から見たところです。カップと花瓶がテーブルに載り、2人が椅子に座っています。</sub></td>
@@ -140,6 +140,14 @@ Claude（`claude-opus-5-5`、effort high、最大6回、指示文 `d5d766f8`）�
 - **重み付きの一致度は、各物体を写真での面積で重み付けします。** 平均では、端に細く写るだけの物（椅子）や他の物に隠れた物が、人物と同じ重みになってしまうためです。`office-desk` は最初から写真とよく合っていたので、変化は小さくなりました。
 - **`table-talk` では、解析が写真どおりです。** 2人はテーブルの角をはさんで座っていると読みました。AI は、正面合わせで測ったとおりテーブルを斜めのまま保ち、角を2人の間に置きました。この実行では生成されたテーブルの幅が約 4 m ありましたが、AI が実寸に縮めました。
 
+<table>
+  <tr>
+    <td width="33%"><img src="samples/table-talk.webp" alt="table-talk の入力写真"><br><sub><b>写真</b> — 2人はテーブルの角をはさんで座っている。</sub></td>
+    <td width="33%"><img src="docs/images/arrange-table-talk-before.webp" alt="Arrange の前のシーン。巨大なテーブル"><br><sub><b>Arrange の前</b> — 自動の配置。生成されたテーブルは幅約 4 m で人物の後ろにあり、カップと椅子が浮いている。</sub></td>
+    <td width="33%"><img src="docs/images/arrange-table-talk-after-claude.webp" alt="Claude による Arrange の後のシーン"><br><sub><b>Arrange の後（Claude）</b> — テーブルを実寸にして人物の手前に置き、斜めの向きを保った。カップと花瓶は天板の上、人物はそれぞれ椅子に座る。物理的な問題 7 → 0。</sub></td>
+  </tr>
+</table>
+
 同じ4つのシーン（同じモデル、同じ配置から開始）での Claude と OpenAI（`gpt-5.6-sol`）：
 
 | | Claude | OpenAI |
@@ -151,6 +159,13 @@ Claude（`claude-opus-5-5`、effort high、最大6回、指示文 `d5d766f8`）�
 | 解析の現実の高さの誤差 | **2.9%** | 12.2% |
 | 人物以外で1つの軸だけ伸ばした物体 | 3（低く生成されたテーブルと机） | 10（カップ、椅子、くずかご、ランプ。テーブルは平たく） |
 | 調整の回数（平均） | **3.0** | 5.0 |
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/arrange-table-talk-after-claude.webp" alt="Claude による table-talk の Arrange の後"><br><sub><b>Claude</b> — 天板は生成モデルの形を保ち、テーブル全体を実寸に縮めた（一致度 0.509、重み付き 0.637）。</sub></td>
+    <td width="50%"><img src="docs/images/arrange-table-talk-after-openai.webp" alt="OpenAI による table-talk の Arrange の後"><br><sub><b>OpenAI</b> — 同じシーン。一部が隠れた写真のテーブルの輪郭に合わせて奥行きを約3分の1に縮めた（幅は 0.8 倍）ため、細長くなった（一致度 0.575、重み付き 0.656）。</sub></td>
+  </tr>
+</table>
 
 - **関係の理解：** 2つの AI はほぼ同じです。
 - **現実の大きさ：** 差が出るのは、現実の大きさの見積もりと、物の形を保つかどうかです。OpenAI は1枚で、一部が隠れたテーブルの輪郭に合わせてテーブルを平たくし、一致度を上げました。`woman-at-desk` では一致度を下げました。
@@ -164,6 +179,14 @@ Claude（`claude-opus-5-5`、effort high、最大6回、指示文 `d5d766f8`）�
   - L字型の机の奥の部分が細く生成される（写真ではその奥行きが見えない）。
 - **関係の検査は外接箱を使います。** L字型の机のような凹んだ形の家具は表せません。
 - **解析が見落とす関係の多くは、小さい物どうしの前後関係です**（花瓶とカップ）。
+
+<table>
+  <tr>
+    <td width="50%"><img src="samples/woman-at-desk.webp" alt="woman-at-desk の入力写真"><br><sub><b>写真</b>（開発に不使用）— L字型の机の内側の角に座る女性。</sub></td>
+    <td width="50%"><img src="docs/images/arrange-woman-at-desk-after-claude.webp" alt="Claude による woman-at-desk の Arrange の後"><br><sub><b>Arrange の後（Claude）</b> — 女性は L字の角に座り、机の上の物は天板に、棚とランプは床に立つ（物理的な問題 8 → 0）。机の奥の部分は細く生成された（写真ではその奥行きが見えない）。</sub></td>
+  </tr>
+</table>
+
 
 ## 必要な環境
 
