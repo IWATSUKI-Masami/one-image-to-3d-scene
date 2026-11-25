@@ -32,6 +32,7 @@ An article explaining the method and its implementation (in Japanese) is on Qiit
 
 - **Partly visible objects at the right size.** While generative AI draws the hidden parts, the visible part is kept at a known place, so its place in the completed image is known without feature matching and the 3D model is placed by it. The chairs at the edges of the paper's sample, of which only a thin part of the backrest is visible, stand behind the people.
 - **Orientation by render-and-compare.** Each 3D model is rendered while turning around the vertical axis and compared with its completed image (silhouette, aspect ratio, shading), then turned to face the camera as in the photo.
+- **AI that understands the photo before it rearranges the scene.** In **Arrange**, a vision-language model first analyzes the original photo (real sizes and relations such as what rests on what and who sits at what). It then corrects the 3D scene in rounds, checking renderings against the photo, physical checks and the relations. One set of general instructions is used for every photo, with nothing tailored to the test photos. With Claude, physical issues went to 0 on all four sample photos, including two not used for development (see [Semantic arrangement with AI](#semantic-arrangement-with-ai-arrange)).
 - **Runs in your browser.** React and Three.js; object masks (SAM 2.1) and the alignment are computed in the browser. Detection and completion use your own OpenAI or Gemini key, and 3D generation uses Hugging Face Spaces.
 
 ## Pipeline
@@ -74,6 +75,95 @@ Results of the current version. Detection and completion use OpenAI (only the ri
     <td width="50%"></td>
   </tr>
 </table>
+
+## Semantic arrangement with AI (Arrange)
+
+The automatic placement puts each object at the depth estimated for it, one object at a time. Distances along the line of sight and sizes are therefore rough, and relations between objects often break: cups float above the table or sink into it, people do not sit on their chairs, a table comes out half its real height. **Arrange** lets a vision-language model correct the scene in two stages, so that it is consistent both with the photo and with how the objects in it relate to each other.
+
+### Two stages: understand the photo first, then place
+
+1. **Semantic analysis of the original photo.** Before it sees the 3D scene, the model describes the photo with a tool (`report_scene`):
+   - what the scene is;
+   - the real height and width of each object, and which objects give the scale (e.g. seated adults, a standard desk);
+   - the relations between objects: *on* (with whether the contact is visible in the photo), *sits on*, *sits at*, *faces*, *in front of*.
+2. **Placement in rounds, with the analysis as the plan.** In each round the model sees:
+   - the photo and three renderings of the scene (from the photo's camera, from above and obliquely);
+   - the list of objects with measured values.
+   
+   It then calls `update_placements` with edits for several objects at once. The edits include `scale`, `scale_axes`, `rotate_y_deg`, `along_ray`, `rest_on` / `drop_on` and `place_under`, and the model can also set the photo's camera and the floor. After every round the app measures the new scene and returns the values to the model:
+   - **photo match**: the IoU of each model's visible part, seen from the photo's camera, with the object's mask in the photo;
+   - **physical checks** on the meshes: floating, sunk, inside another model;
+   - **relation checks** against the model's own analysis: unmet supports, a person inside the table's outline, sizes far from the real ones, a model turned away from the orientation measured by front alignment.
+   
+   The model ends with `finish` and a summary of what it changed and what still differs from the photo.
+
+The tools keep each object where it is in the photo. `along_ray` changes an object's distance and size together. `rest_on` slides an object along the line of sight onto its support, and the model uses it when the contact is visible in the photo. When the contact is hidden (legs below the photo's edge), it uses `drop_on`, which moves the object straight down or up instead.
+
+### No instructions tailored to the photos
+
+- **One set of instructions for every photo.** The instructions contain only general rules: how to use the analysis, supports and contacts, seated people, real sizes, the camera, and how to use the tools and measurements. They name no test photo and none of its objects or layouts. Everything specific to a photo comes from the model's own analysis of it.
+- **Developed on two photos, tested on two others.** The method was developed on two photos (`cafe-couple`, `table-talk`). An earlier version had grown rules for people at café tables; it was replaced by the analysis stage. The examples in the instructions describe common situations (e.g. a table seen corner-on), not these photos; the examples for the camera were rewritten for this reason. The same instructions were then run unchanged on two photos not used for development (`office-desk`: a desk without people; `woman-at-desk`: a person at an L-shaped desk).
+- **Traceable.** Each run records the version of the instructions, a hash of the prompts and tools (all results below: `d5d766f8`), and the version of the app.
+- **References kept from the model.** The reference analyses used for evaluation are never shown to the model.
+
+### Other features
+
+- **Real sizes from the analysis.** The model decides the scale from the objects the analysis names as reliable (people, standard furniture). It then gives every object its real height by scaling it uniformly.
+- **People keep their body proportions.** Stretching a person along one axis is refused; people can only be scaled uniformly. For every object the change in proportions from the generated model is recorded.
+- **The photo's camera is estimated when needed.** The scene assumes a level camera with a 60° field of view. When real sizes and places in the photo conflict, the model can set the camera's downward tilt and field of view; the models keep their place and apparent size in the photo. In the runs below, the model did this only once (`table-talk`, 8°).
+- **The best state is kept.** If the last round made the scene worse, the run returns to its best round. The score for this is the photo match minus the physical and relation issues.
+- **The same method with several AIs.** Claude, OpenAI and Gemini use the same instructions and tools.
+- **Everything recorded for evaluation:** a text report, per-object and per-round CSVs (times, tokens, cost, edits) and an image sheet of what the model saw in each round.
+
+### Evaluation with reference analyses checked by a person
+
+A person checked one reference analysis per photo: the relations, contact visibility and real sizes (`samples/*.analysis.json`). The reference is made by answering questions about an AI draft: correct, wrong or unknown, with corrections. Uncertain relations are kept but not scored. With **📐 Ref**, a run is evaluated against it in two ways:
+
+- **Relation issues:** relations and sizes of the reference that the scene does not satisfy.
+- **The model's own analysis:** recall and precision of its relations, whether it judged contact visibility correctly, and the error of the real heights.
+
+### Results
+
+The best final runs with Claude (`claude-opus-5-5`, effort high, at most 6 rounds; instructions `d5d766f8`). The numbers before each arrow are for the automatic placement.
+
+| Photo | Used for development | Photo match (mean IoU) | Weighted by area in the photo | Physical issues | Relation issues (reference) | Relations found by the analysis | Time / cost |
+|---|---|---|---|---|---|---|---|
+| cafe-couple | yes | 0.376 → **0.678** | 0.374 → **0.714** | 6 → **0** | — ¹ | 13/14 | 113 s / US$0.64 |
+| table-talk | yes | 0.274 → **0.509** | 0.263 → **0.637** | 7 → **0** | 13 → 1 | 19/22 | 195 s / US$0.76 |
+| office-desk | **no** | 0.425 → 0.437 | 0.648 → 0.653 | 5 → **0** | 1 → **0** | 11/11 | 98 s / US$0.65 |
+| woman-at-desk | **no** | 0.294 → **0.405** | 0.382 → **0.583** | 8 → **0** | 5 → 1 ² | 13/13 | 148 s / US$0.96 |
+
+¹ Not counted: the reference was matched to the wrong objects in this run. That has since been fixed; the analysis was counted by hand.
+² The remaining issue is a false one. The woman sits in the inner corner of the L-shaped desk, which a check on the desk's outline (a rectangle) counts as inside the desk.
+
+- **Physical issues reached 0 on every photo.** On the two photos not used for development, the analysis found every relation of the references.
+- **The weighted photo match counts each object by its area in the photo.** Objects seen only as thin strips at the borders (the chairs) or hidden behind others otherwise weigh as much as the people in the mean. `office-desk` matched the photo well from the start, so it changed little.
+- **In `table-talk`, the analysis matches the photo.** It reads that the two people sit on both sides of a corner of the table. The model keeps the table corner-on, as front alignment measured it, and puts the corner between them. In this run the generated table was about 4 m wide; the model scaled it down to real size.
+
+Claude and OpenAI (`gpt-5.6-sol`) on the same four scenes (same models, same starting placement):
+
+| | Claude | OpenAI |
+|---|---|---|
+| Photo match, mean of the four photos | **0.507** | 0.480 |
+| Weighted photo match, mean | **0.647** | 0.614 |
+| Runs with physical issues at 0 | **4/4** | 3/4 |
+| Relations found by the analysis | 56/60 | 55/60 |
+| Error of the real heights in the analysis | **2.9%** | 12.2% |
+| Objects other than people stretched along one axis | 3 (tables and a desk generated too low) | 10 (cups, chairs, a wastebasket, a lamp; tables flattened) |
+| Rounds, mean | **3.0** | 5.0 |
+
+- **Understanding of relations:** both models understand the relations about equally well.
+- **Real sizes:** they differ in estimating real sizes, and in whether they keep the objects' shapes. OpenAI raised the photo match on one photo by flattening the table to fit its partly hidden outline, and it lowered the match on `woman-at-desk`.
+- **Gemini:** in earlier runs on the two development photos it was slower and less stable (see [docs/roadmap.md](docs/roadmap.md)).
+
+### Limits seen in the runs
+
+- **Shapes and poses of the generated models set the ceiling.** Placement cannot fix them:
+  - a person generated upright when leaning forward in the photo;
+  - a person gesturing with wide arms;
+  - the far section of an L-shaped desk generated too thin, because its depth is not visible in the photo.
+- **Relation checks use bounding boxes.** They cannot represent non-convex furniture such as an L-shaped desk.
+- **Most of the relations the analysis misses are front-to-back orders** between small objects (a vase and a cup).
 
 ## Requirements
 
@@ -205,10 +295,14 @@ The repeated attempts are there so that the objects can be placed automatically.
 │   ├── aiService.ts        # Prompts for detection, completion and checks
 │   ├── segmentation.ts     # Object masks in the photo (SAM 2.1 in the browser)
 │   ├── frontAlignment.ts   # Turning each model to match its completed image (render and compare)
+│   ├── semanticArrange.ts  # Arrange: instructions, tools and the round loop
+│   ├── sceneAnalysis.ts    # Arrange: analysis of the photo, relation checks, comparison with a reference
+│   ├── arrangeProviders.ts # Arrange: Claude / OpenAI / Gemini adapters
+│   ├── arrangeReport.ts    # Arrange: reports and CSVs
 │   └── ai/                 # Provider layer (OpenAI / Gemini) and default models
 ├── utils.ts                # Cropping, AKAZE matching, depth, 3D generation APIs
 ├── types.ts                # Type definitions
-├── samples/                # Sample photo
+├── samples/                # Sample photos and reference analyses (*.analysis.json)
 └── docs/                   # Hugging Face Spaces guide, development history, roadmap, README images and demo video
 ```
 

@@ -59,6 +59,7 @@ User interface and documentation:
 
 ### Changed
 
+- README (English and Japanese): a section on **Arrange**: the two stages (analysis of the photo, then placement in rounds), why the instructions are not tailored to the test photos (developed on two photos, tested unchanged on two others), the evaluation with reference analyses, the results of the final runs (Claude on four photos, compared with OpenAI) and the limits seen.
 - Default Gemini models: `gemini-3-pro-preview` → `gemini-pro-latest`, `gemini-3-pro-image-preview` (shut down) → `gemini-3-pro-image`. Gemini calls use the `v1beta` API explicitly (SDK 3.x defaults to `v1`, where such aliases return 404). API keys can be entered in the app; the Google AI Studio key-selection integration was removed.
 - JSON output of all vision tasks is enforced with each provider's structured-output feature; the detection result is wrapped as `{"objects": [...]}`.
 - AKAZE matching (now only the fallback of layout-preserving completion): the homography (8 parameters) is replaced by a RANSAC fit of uniform scale + translation (3 parameters), the completed image is searched at 1, 1/2 and 1/4 scale, and transparent pixels are composited on white. Matches with too few agreeing points or boxes outside the image are rejected, so the whole-object box is used instead. (The paper, Eq. (2), uses a homography.)
