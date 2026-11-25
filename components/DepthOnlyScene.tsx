@@ -809,7 +809,8 @@ export const DepthOnlyScene: React.FC<DepthOnlySceneProps> = ({
                             && words.every(w => (describe(e.model) ?? '').toLowerCase().includes(w) || clean(e.model.label).includes(w)));
                     }
                     if (idx >= 0) { idMap.set(o.id, `o${idx + 1}`); used.add(idx); }
-                    else if (byShort.has(o.id) && !o.match) idMap.set(o.id, o.id);
+                    // By id only for objects without a name, and only if no other object took that id
+                    else if (!o.label && !o.match && byShort.has(o.id) && !used.has(Number(o.id.slice(1)) - 1)) { idMap.set(o.id, o.id); used.add(Number(o.id.slice(1)) - 1); }
                 }
                 const mapId = (id: string) => id === 'floor' || id === 'none' ? id : idMap.get(id);
                 reference = {

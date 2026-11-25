@@ -64,9 +64,9 @@
     },
     {
       "id": "o6",
-      "label": "potted plant",
+      "label": "potted green plant",
       "match": {
-        "label_prefix": "Potted Plant"
+        "label_prefix": "Potted"
       },
       "height_m": 0.25,
       "width_m": 0.2,
@@ -79,7 +79,8 @@
       },
       "height_m": 1.6,
       "width_m": 0.4,
-      "pose": "floor lamp at the right"
+      "pose": "floor lamp at the right",
+      "label": "tall floor lamp"
     },
     {
       "id": "o8",
@@ -164,13 +165,40 @@
       "relation": "in_front_of",
       "object": "o5",
       "contact_visible": false
+    },
+    {
+      "subject": "o6",
+      "relation": "in_front_of",
+      "object": "o7",
+      "contact_visible": false
+    },
+    {
+      "subject": "o3",
+      "relation": "in_front_of",
+      "object": "o2",
+      "contact_visible": false,
+      "certain": false
+    },
+    {
+      "subject": "o1",
+      "relation": "in_front_of",
+      "object": "o2",
+      "contact_visible": false,
+      "certain": false
     }
   ],
-  "notes": "The desk is L-shaped and the woman sits in the corner of the L. The legs of the desk, chair, lamp and bookshelf are below the photo's lower edge. The mug's contact with the desk is barely visible. Objects are matched by the start of their label in the project (and words of the description).",
+  "notes": "The desk is L-shaped and the woman sits in the corner of the L. The legs of the desk, chair, lamp and bookshelf are below the photo's lower edge. The mug's contact with the desk is barely visible. Objects are matched by the start of their label in the project (and words of the description); the plant and the lamp also by their regenerated names. The floor lamp is behind all the other objects. The chair and the seated woman are in the inner corner of the L, so whether the desk and the woman are in front of the chair is uncertain.",
   "part_relations": [
     {
       "subject": "o1",
       "part": "seat position",
+      "relation": "at corner",
+      "object": "o3",
+      "object_part": "inner corner of the L"
+    },
+    {
+      "subject": "o2",
+      "part": "position",
       "relation": "at corner",
       "object": "o3",
       "object_part": "inner corner of the L"

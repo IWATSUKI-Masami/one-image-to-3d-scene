@@ -978,9 +978,6 @@ export const generate3DModelWithTrellis = async (imageUrl: string, hfToken?: str
       throw new Error("Hugging Face token is required for TRELLIS.2. Please enter your HF Token in the settings.");
     }
 
-    const client: any = await Client.connect(space, { token: token as `hf_${string}` });
-    await client.predict("/start_session", {});
-
     const img = await loadImageElement(imageUrl);
 
     // TRELLIS.2 Official Preprocessing (from trellis2/pipelines/trellis2_image_to_3d.py)
@@ -1104,70 +1101,86 @@ export const generate3DModelWithTrellis = async (imageUrl: string, hfToken?: str
     // Create File object (Gradio expects File, not Blob)
     const imageFile = new File([pngBlob], 'input.png', { type: 'image/png' });
 
-    // Image to 3D with default parameters (random seed, like the Gradio UI)
-    const randomSeed = Math.floor(Math.random() * 2147483647);
-    await client.predict("/image_to_3d", {
-      image: imageFile,
-      seed: randomSeed,
-      // People get the highest resolution so that faces keep their relief
-      resolution: highDetail ? "1536" : "1024",
-      ss_guidance_strength: 7.5,
-      ss_guidance_rescale: 0.7,
-      ss_sampling_steps: 12,
-      ss_rescale_t: 5,
-      shape_slat_guidance_strength: 10,  // Increased from 7.5 to reduce wall artifacts
-      shape_slat_guidance_rescale: 0.5,
-      shape_slat_sampling_steps: 12,
-      shape_slat_rescale_t: 3,
-      tex_slat_guidance_strength: 1,
-      tex_slat_guidance_rescale: 0,
-      tex_slat_sampling_steps: 12,
-      tex_slat_rescale_t: 3,
-    });
+    // Generation and GLB extraction are two calls on one Space session. The extraction sometimes
+    // fails with a bare "An error occurred" (the session's state lost between the calls, or a
+    // ZeroGPU limit), so a failed attempt is repeated once with a new session.
+    const MAX_ATTEMPTS = 2;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const client: any = await Client.connect(space, { token: token as `hf_${string}` });
+        await client.predict("/start_session", {});
 
-    // Extract GLB
-    const extractResult = await client.predict("/extract_glb", {
-      decimation_target: 300000,
-      texture_size: highDetail ? 4096 : 2048,
-    });
+        // Image to 3D with default parameters (random seed, like the Gradio UI)
+        const randomSeed = Math.floor(Math.random() * 2147483647);
+        await client.predict("/image_to_3d", {
+          image: imageFile,
+          seed: randomSeed,
+          // People get the highest resolution so that faces keep their relief
+          resolution: highDetail ? "1536" : "1024",
+          ss_guidance_strength: 7.5,
+          ss_guidance_rescale: 0.7,
+          ss_sampling_steps: 12,
+          ss_rescale_t: 5,
+          shape_slat_guidance_strength: 10,  // Increased from 7.5 to reduce wall artifacts
+          shape_slat_guidance_rescale: 0.5,
+          shape_slat_sampling_steps: 12,
+          shape_slat_rescale_t: 3,
+          tex_slat_guidance_strength: 1,
+          tex_slat_guidance_rescale: 0,
+          tex_slat_sampling_steps: 12,
+          tex_slat_rescale_t: 3,
+        });
 
-    const data = extractResult.data as any[];
+        // Extract GLB
+        const extractResult = await client.predict("/extract_glb", {
+          decimation_target: 300000,
+          texture_size: highDetail ? 4096 : 2048,
+        });
 
-    if (data && data.length > 0) {
-      // Try data[1] first (download button/file) as it may have the full GLB
-      // Then fall back to data[0] (Model3D viewer)
-      const candidates = [data[1], data[0]];
+        const data = extractResult.data as any[];
 
-      for (const glbItem of candidates) {
-        if (!glbItem) continue;
+        if (data && data.length > 0) {
+          // Try data[1] first (download button/file) as it may have the full GLB
+          // Then fall back to data[0] (Model3D viewer)
+          const candidates = [data[1], data[0]];
 
-        let glbUrl = "";
-        if (typeof glbItem === 'string') {
-          glbUrl = glbItem;
-        } else if (glbItem.url) {
-          glbUrl = glbItem.url;
-        } else if (glbItem.value && glbItem.value.url) {
-          glbUrl = glbItem.value.url;
-        } else if (glbItem.path) {
-          // Some Gradio responses use 'path' instead of 'url'
-          glbUrl = glbItem.path;
-        }
+          for (const glbItem of candidates) {
+            if (!glbItem) continue;
 
-        if (glbUrl) {
-          // Include auth header for authenticated file access
-          const response = await fetch(glbUrl, { headers: { 'Authorization': `Bearer ${token}` } });
-          if (!response.ok) {
-            console.error("GLB fetch failed:", response.status, response.statusText);
-            continue; // Try next candidate
+            let glbUrl = "";
+            if (typeof glbItem === 'string') {
+              glbUrl = glbItem;
+            } else if (glbItem.url) {
+              glbUrl = glbItem.url;
+            } else if (glbItem.value && glbItem.value.url) {
+              glbUrl = glbItem.value.url;
+            } else if (glbItem.path) {
+              // Some Gradio responses use 'path' instead of 'url'
+              glbUrl = glbItem.path;
+            }
+
+            if (glbUrl) {
+              // Include auth header for authenticated file access
+              const response = await fetch(glbUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+              if (!response.ok) {
+                console.error("GLB fetch failed:", response.status, response.statusText);
+                continue; // Try next candidate
+              }
+              // Create blob with explicit MIME type for GLB
+              const arrayBuffer = await response.arrayBuffer();
+              return new Blob([arrayBuffer], { type: 'model/gltf-binary' });
+            }
           }
-          // Create blob with explicit MIME type for GLB
-          const arrayBuffer = await response.arrayBuffer();
-          return new Blob([arrayBuffer], { type: 'model/gltf-binary' });
         }
+
+        throw new Error("No valid GLB output from TRELLIS.2");
+      } catch (e: any) {
+        // Out of GPU quota: trying again would fail the same way
+        const quota = /quota/i.test(`${e?.message ?? ''} ${e?.original_msg ?? ''}`);
+        if (attempt >= MAX_ATTEMPTS || quota) throw e;
+        console.warn(`TRELLIS.2 attempt ${attempt} failed; trying again with a new session:`, e);
       }
     }
-
-    throw new Error("No valid GLB output from TRELLIS.2");
 
   } catch (e: any) {
     console.error("TRELLIS.2 via Gradio failed:", e);

@@ -70,6 +70,8 @@ User interface and documentation:
 
 ### Fixed
 
+- Reference analyses: an object whose name was not found in the scene was matched by its id (o1, o2, …), so after models were made in another order it could stand for a different object (cafe-couple: the table taken as a mug). Objects with a name are now matched by name only, and an id is never taken twice.
+- TRELLIS.2 sometimes failed with a bare "An error occurred" when extracting the GLB (the second call on the Space session). A failed generation is now tried once more with a new session (not when the GPU quota is used up).
 - Arrange reports showed an elapsed time such as 119.6 s as "1:00" instead of "2:00".
 - PC Box depth now follows Eq. (4) of the paper: the median depth of the non-transparent pixels (alpha > 128) of the object's background-removed image. This code path had never run; boxes and models were placed using the depth at a few fixed points.
 - Hugging Face Spaces could not be called from the browser ("Failed to fetch", CORS): `@gradio/client` 2.0 sent `credentials: 'include'`. The Hugging Face token was never sent (the app passed `hf_token`, the client reads `token`), so ZeroGPU usage was not counted against the user's quota.

@@ -143,6 +143,12 @@
       "relation": "faces",
       "object": "o1",
       "contact_visible": false
+    },
+    {
+      "subject": "o2",
+      "relation": "faces",
+      "object": "o5",
+      "contact_visible": false
     }
   ],
   "notes": "The laptop is open, with the back of its screen toward the camera (the model was regenerated from the annotation 'open silver laptop'). The desk's contact with the floor is not visible. Objects are matched by the start of their label in the project (and words of the description).",

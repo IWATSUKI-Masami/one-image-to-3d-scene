@@ -39,21 +39,30 @@
       "label": "left ceramic coffee cup",
       "height_m": 0.09,
       "width_m": 0.13,
-      "pose": "cup, upright"
+      "pose": "cup, upright",
+      "match": {
+        "label_prefix": "Left Ceramic Coffee"
+      }
     },
     {
       "id": "o5",
       "label": "right ceramic coffee cup",
       "height_m": 0.09,
       "width_m": 0.13,
-      "pose": "cup, upright"
+      "pose": "cup, upright",
+      "match": {
+        "label_prefix": "Right Ceramic Coffee"
+      }
     },
     {
       "id": "o6",
       "label": "round wooden table",
       "height_m": 0.75,
       "width_m": 1.0,
-      "pose": "round table"
+      "pose": "round table",
+      "match": {
+        "label_prefix": "Round Wooden"
+      }
     }
   ],
   "relations": [
