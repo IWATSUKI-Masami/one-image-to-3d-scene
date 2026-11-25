@@ -39,7 +39,7 @@ User interface and documentation:
 - PNG download button on the Depth Map card.
 - The info panel at the bottom left of the 3D scene can be hidden (×) and shown again (i).
 - Projects keep which cards are checked in each tab, so that a 3D scene loads with only the models that were checked (before, every 3D model was checked after loading, e.g. both an old and a regenerated laptop).
-- The names shown when hovering over the boxes on the photo are no longer cut off at the photo's edges.
+- The names shown when hovering over the boxes on the photo are no longer cut off at the photo's edges, and the box under the mouse, with its name, comes to the front of overlapping boxes (the overlay let the mouse through, so this did not work).
 - The Processing Times CSV is named after the photo (e.g. `office-desk_processing_times_<date-time>.csv`), like the project and stats files.
 - Loading a project shows why it failed (not valid JSON, a scene layout file instead of a project, or another file) instead of a generic message.
 - **Delete Scene** closes the 3D scene but keeps the depth map (it deleted the depth map, which then had to be generated again on the Space); **Generate 3D Scene** builds the scene again from it.

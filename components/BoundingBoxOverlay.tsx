@@ -24,9 +24,11 @@ export const BoundingBoxOverlay: React.FC<BoundingBoxOverlayProps> = ({ objects,
         const height = (ymax - ymin) * 100;
 
         return (
+          // pointer-events-auto: the overlay itself lets the mouse through, but each box must
+          // receive it, so that the box under the mouse (and its name) comes to the front
           <div
             key={idx}
-            className="absolute transition-colors group hover:z-20"
+            className="absolute transition-colors group pointer-events-auto hover:z-30"
             style={{
               top: `${top}%`,
               left: `${left}%`,
