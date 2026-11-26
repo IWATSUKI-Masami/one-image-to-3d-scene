@@ -9,7 +9,7 @@ import { BoundingBoxOverlay } from './components/BoundingBoxOverlay';
 import { MaskOverlay } from './components/MaskOverlay';
 import { segmentObjects } from './services/segmentation';
 import { estimateFrontAlignment, ALIGNMENT_VERSION, alignmentYawDeg } from './services/frontAlignment';
-import { checkModelAgainstPhoto } from './services/modelCheck';
+import { checkModelAgainstPhoto, makeObjectOnlyImage } from './services/modelCheck';
 import { buildStatsCsv } from './services/stats';
 import { sameBox } from './components/depthSampling';
 
@@ -1141,9 +1141,13 @@ const App: React.FC = () => {
         const label = baseName(source?.label ?? m.label);
         const description = source?.description ?? completed?.description ?? '';
         const referenceUrl = await makeReferenceImage(previewUrl, m.box_2d);
+        // The object's own pixels (SAM mask), so that other objects in its box are not taken for it
+        const objectOnlyUrl = source?.mask?.url
+          ? await makeObjectOnlyImage(previewUrl, source.mask.url, m.box_2d).catch(() => undefined)
+          : undefined;
         const base = m.provider !== 'trellis' && m.provider !== 'hunyuan3d' ? 180 : 0;
         const r = await checkModelAgainstPhoto(aiSettings, {
-          referenceUrl, completedUrl: m.posterUrl, glbUrl: m.glbUrl,
+          referenceUrl, objectOnlyUrl, completedUrl: m.posterUrl, glbUrl: m.glbUrl,
           yawDeg: base + alignmentYawDeg(m.frontAlignment), label, description, type: m.type ?? source?.type ?? 'object',
         });
         console.log(`[Check] ${m.label}:`, r);

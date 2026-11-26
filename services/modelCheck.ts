@@ -119,6 +119,38 @@ export const composeSheet = async (panels: { title: string; url: string }[], hei
   return c.toDataURL('image/png');
 };
 
+/**
+ * The object's box cut out of the photo, with every pixel outside the object's mask
+ * faded to white, so that other objects inside the box (e.g. a chair behind a laptop)
+ * are not taken for it
+ */
+export const makeObjectOnlyImage = async (photoUrl: string, maskUrl: string, box: [number, number, number, number]): Promise<string> => {
+  const [photo, mask] = await Promise.all([loadImg(photoUrl), loadImg(maskUrl)]);
+  const W = photo.naturalWidth, H = photo.naturalHeight;
+  const [ymin, xmin, ymax, xmax] = box;
+  const pad = 0.15;
+  const bw = (xmax - xmin) * W, bh = (ymax - ymin) * H;
+  const x0 = Math.max(0, Math.floor(xmin * W - pad * bw)), y0 = Math.max(0, Math.floor(ymin * H - pad * bh));
+  const x1 = Math.min(W, Math.ceil(xmax * W + pad * bw)), y1 = Math.min(H, Math.ceil(ymax * H + pad * bh));
+  const w = Math.max(1, x1 - x0), h = Math.max(1, y1 - y0);
+  // The object's pixels only
+  const obj = document.createElement('canvas');
+  obj.width = w; obj.height = h;
+  const octx = obj.getContext('2d')!;
+  octx.drawImage(mask, x0 * mask.naturalWidth / W, y0 * mask.naturalHeight / H, w * mask.naturalWidth / W, h * mask.naturalHeight / H, 0, 0, w, h);
+  octx.globalCompositeOperation = 'source-in';
+  octx.drawImage(photo, x0, y0, w, h, 0, 0, w, h);
+  // The box region faded, with the object on top
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d')!;
+  ctx.drawImage(photo, x0, y0, w, h, 0, 0, w, h);
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(obj, 0, 0);
+  return c.toDataURL('image/png');
+};
+
 const CHECK_SCHEMA: JsonSchema = {
   type: 'object',
   properties: {
@@ -132,32 +164,41 @@ const CHECK_SCHEMA: JsonSchema = {
   additionalProperties: false,
 };
 
-const PROMPT = (label: string, description: string, type: 'person' | 'object') => `You check a 3D model generated from a photo, one object at a time.
+const PROMPT = (label: string, description: string, type: 'person' | 'object', hasMask: boolean) => `You check a 3D model generated from a photo, one object at a time.
 How it was made: the object marked by the red box in the photo was cut out, its hidden parts were drawn by an image model guided by the annotation below, and a 3D model was generated from that completed image. If the annotation is wrong (e.g. it names the wrong kind of object, or the wrong state such as closed instead of open, folded instead of unfolded, or the wrong overall shape), the completed image and the 3D model follow the annotation instead of the photo.
 
 The image has these panels:
-A: the photo, with the object marked by a red box
-B: the completed image (what the 3D model was generated from)
+A: the photo, with the object's box marked in red
+${hasMask
+    ? `B: the object alone: its box cut out of the photo, with everything that is not the object faded to white
+C: the completed image (what the 3D model was generated from)
+D: the 3D model seen from the front, as in the photo
+E: the 3D model seen obliquely from the front left and above
+F: the 3D model seen from directly above`
+    : `B: the completed image (what the 3D model was generated from)
 C: the 3D model seen from the front, as in the photo
 D: the 3D model seen obliquely from the front left and above
-E: the 3D model seen from directly above
+E: the 3D model seen from directly above`}
+
+Which object is meant: the object named in the annotation${hasMask ? ', whose visible pixels are shown in panel B' : ''}. The red box often also contains other objects (in front of it or behind it, e.g. a chair behind a laptop or a table under a cup); they are NOT the object to check, even if they fill most of the box. Never propose an annotation for another object: the correction may change the object's state, shape or kind only when the object itself is clearly misdescribed.
 
 Current annotation (${type}):
 label: ${label}
 description: ${description || '(none)'}
 
-Task: decide whether the 3D model (C, D, E) is the same kind of object, in the same state and with the same overall shape, as the object in the photo (A). Judge from what the photo shows, including what follows from it (e.g. a part seen standing upright in the photo cannot be lying flat). Ignore differences the photo cannot show, small details of texture and color, and the exact pose of people.
+Task: decide whether the 3D model is the same kind of object, in the same state and with the same overall shape, as this object in the photo. Judge from what the photo shows, including what follows from it (e.g. a part seen standing upright in the photo cannot be lying flat). Ignore differences the photo cannot show, small details of texture and color, and the exact pose of people.
 If it does not match, say what differs and why, and propose a corrected label and description that would make the image model draw it correctly: keep everything in the current annotation that is right, and state the corrected kind, state or shape explicitly. Set fixable_by_annotation to false if the difference is not a matter of the annotation.
 If it matches, set matches to true, leave problem empty and return the current label and description.`;
 
 /** Ask the vision model whether a generated 3D model matches its object in the photo */
 export const checkModelAgainstPhoto = async (
   settings: AISettings,
-  input: { referenceUrl: string; completedUrl: string; glbUrl: string; yawDeg: number; label: string; description: string; type: 'person' | 'object' },
+  input: { referenceUrl: string; objectOnlyUrl?: string; completedUrl: string; glbUrl: string; yawDeg: number; label: string; description: string; type: 'person' | 'object' },
 ): Promise<ModelCheckResult> => {
   const views = await renderModelViews(input.glbUrl, input.yawDeg);
   const sheet = await composeSheet([
-    { title: 'photo (object in red box)', url: input.referenceUrl },
+    { title: 'photo (object\'s box in red)', url: input.referenceUrl },
+    ...(input.objectOnlyUrl ? [{ title: 'the object alone', url: input.objectOnlyUrl }] : []),
     { title: 'completed image', url: input.completedUrl },
     { title: '3D model, front', url: views[0] },
     { title: '3D model, oblique', url: views[1] },
@@ -165,7 +206,7 @@ export const checkModelAgainstPhoto = async (
   ]);
   const image = await loadImageData(sheet);
   const r = await analyzeImageJson<{ matches: boolean; problem: string; fixable_by_annotation: boolean; label: string; description: string }>(
-    settings, image, PROMPT(input.label, input.description, input.type), CHECK_SCHEMA, { schemaName: 'model_check', effort: 'medium' },
+    settings, image, PROMPT(input.label, input.description, input.type, !!input.objectOnlyUrl), CHECK_SCHEMA, { schemaName: 'model_check', effort: 'medium' },
   );
   return {
     matches: !!r.matches,
