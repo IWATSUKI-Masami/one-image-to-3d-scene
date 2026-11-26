@@ -8,7 +8,8 @@ import { DepthOnlyScene } from './components/DepthOnlyScene';
 import { BoundingBoxOverlay } from './components/BoundingBoxOverlay';
 import { MaskOverlay } from './components/MaskOverlay';
 import { segmentObjects } from './services/segmentation';
-import { estimateFrontAlignment, ALIGNMENT_VERSION } from './services/frontAlignment';
+import { estimateFrontAlignment, ALIGNMENT_VERSION, alignmentYawDeg } from './services/frontAlignment';
+import { checkModelAgainstPhoto } from './services/modelCheck';
 import { buildStatsCsv } from './services/stats';
 import { sameBox } from './components/depthSampling';
 
@@ -262,8 +263,9 @@ const App: React.FC = () => {
     // Identify items that are NEW to the list (compared to last render)
     // This ensures that newly analyzed or uploaded images are selected by default,
     // while preserving the selection state of existing items.
+    // Annotations proposed by the model check are left unchecked: the user decides
     const newIds = filteredCroppedImages
-      .filter(item => !prevIds.has(item.id))
+      .filter(item => !prevIds.has(item.id) && !item.suggestion)
       .map(item => item.id);
 
     if (newIds.length > 0) {
@@ -1114,6 +1116,60 @@ const App: React.FC = () => {
     setDetectedObjects(prev => prev.map(o => (sameBox(o.box_2d, item.box_2d)
       ? { ...o, label: update.label ?? o.label, description: update.description ?? o.description }
       : o)));
+  };
+
+  /**
+   * Model check: a vision model compares each 3D model (rendered from the front,
+   * obliquely and from above) with its object in the photo and its completed image.
+   * If the model is a different kind of object or in a different state because the
+   * annotation was wrong, the corrected annotation is added as a new extracted card
+   * (left unchecked); the user decides whether to complete it and generate it again.
+   */
+  const [checkingModelIds, setCheckingModelIds] = useState<Set<string>>(new Set());
+  const handleCheckModels = async (models: Model3D[]) => {
+    if (!hasAIKeys) { openAISettings(); return; }
+    if (!previewUrl) { setError('The model check needs the original photo.'); return; }
+    let added = 0;
+    for (const m of models) {
+      if (!m.box_2d) continue;
+      setCheckingModelIds(prev => new Set(prev).add(m.id));
+      const t0 = performance.now();
+      try {
+        const source = croppedImages.find(c => !c.suggestion && sameBox(c.box_2d, m.box_2d!))
+          ?? croppedImages.find(c => sameBox(c.box_2d, m.box_2d!));
+        const completed = completedImages.find(c => c.imageUrl === m.posterUrl);
+        const label = baseName(source?.label ?? m.label);
+        const description = source?.description ?? completed?.description ?? '';
+        const referenceUrl = await makeReferenceImage(previewUrl, m.box_2d);
+        const base = m.provider !== 'trellis' && m.provider !== 'hunyuan3d' ? 180 : 0;
+        const r = await checkModelAgainstPhoto(aiSettings, {
+          referenceUrl, completedUrl: m.posterUrl, glbUrl: m.glbUrl,
+          yawDeg: base + alignmentYawDeg(m.frontAlignment), label, description, type: m.type ?? source?.type ?? 'object',
+        });
+        console.log(`[Check] ${m.label}:`, r);
+        let suggestionId: string | undefined;
+        if (!r.matches && r.fixableByAnnotation && source) {
+          suggestionId = `crop-${Date.now()}-check`;
+          const proposal: CroppedObject = {
+            ...source, id: suggestionId, label: r.label, description: r.description,
+            labelJa: undefined, descriptionJa: undefined, annotationEdited: true,
+            suggestion: { problem: r.problem, fromModel: m.label, at: r.checkedAt },
+          };
+          setCroppedImages(prev => numberDuplicates([proposal, ...prev]));
+          added++;
+        }
+        setModels3D(prev => prev.map(x => (x.id === m.id
+          ? { ...x, check: { matches: r.matches, problem: r.problem, fixableByAnnotation: r.fixableByAnnotation, checkedAt: r.checkedAt, ...(suggestionId ? { suggestionId } : {}) } }
+          : x)));
+        setProcessingTimes(prev => new Map(prev).set(`Check: ${m.label}`, (performance.now() - t0) / 1000));
+      } catch (e: any) {
+        console.error(`[Check] ${m.label} failed:`, e);
+        setError(`Model check failed for ${m.label}: ${e?.message || e}`);
+      } finally {
+        setCheckingModelIds(prev => { const s = new Set(prev); s.delete(m.id); return s; });
+      }
+    }
+    if (added > 0) alert(`${added} corrected annotation${added > 1 ? 's were' : ' was'} added to the Extracted tab (unchecked). Check them and complete them if you agree.`);
   };
 
   const handleDeleteCroppedImage = (id: string) => {
@@ -2301,6 +2357,17 @@ const App: React.FC = () => {
                                 Delete Selected ({models3D.filter(m => selectedItems.has(m.id)).length})
                               </button>
                             )}
+                            {models3D.some(m => selectedItems.has(m.id)) && (
+                              <button
+                                onClick={() => handleCheckModels(models3D.filter(m => selectedItems.has(m.id)))}
+                                disabled={checkingModelIds.size > 0}
+                                title="A vision model compares each selected 3D model with its object in the photo; if the annotation was wrong (e.g. an open laptop described as closed), a corrected annotation is added to the Extracted tab for you to complete"
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-indigo-700 border border-indigo-200 bg-white hover:bg-indigo-50 disabled:opacity-50 transition-colors"
+                              >
+                                {checkingModelIds.size > 0 ? <Spinner /> : <Scan size={14} />}
+                                {checkingModelIds.size > 0 ? 'Checking...' : `Check Models (${models3D.filter(m => selectedItems.has(m.id)).length})`}
+                              </button>
+                            )}
                             <button
                               onClick={handleGenerateDepthMap}
                               disabled={isGeneratingDepth || models3D.length === 0}
@@ -2332,6 +2399,7 @@ const App: React.FC = () => {
                                   selected={selectedItems.has(model.id)}
                                   onSelect={(selected) => handleSelect(model.id, selected)}
                                   showBoundingBox={showBoundingBoxes}
+                                  checking={checkingModelIds.has(model.id)}
                                 />
                               </div>
                             ))}

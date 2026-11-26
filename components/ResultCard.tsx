@@ -365,6 +365,12 @@ export const ResultCard: React.FC<ResultCardProps> = ({ item, onCompleteBody, on
             {item.completion.attempts && item.completion.attempts.length > 1 && ` · ${item.completion.attempts.length} attempts`}
           </p>
         )}
+        {item.suggestion && (
+          <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded mt-1 px-1.5 py-0.5 text-center line-clamp-3"
+            title={`Proposed by the model check of "${item.suggestion.fromModel}": ${item.suggestion.problem}\nComplete this card to generate the object again with the corrected annotation, or delete it.`}>
+            AI suggestion: {item.suggestion.problem}
+          </p>
+        )}
         {shownDescription && (
           <p className="text-xs text-slate-500 mt-1 text-center line-clamp-2" title={shownDescription}>
             {shownDescription}

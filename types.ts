@@ -32,6 +32,8 @@ export interface CroppedObject extends DetectedObject {
   isRefined?: boolean;
   /** How the image was completed (shown on the completed card) */
   completion?: CompletionInfo;
+  /** Added by the model check: a corrected annotation proposed for this object (the user decides whether to complete it) */
+  suggestion?: { problem: string; fromModel: string; at: string };
 }
 
 /**
@@ -102,6 +104,8 @@ export interface Model3D {
    */
   frontAlignment?: { yawDeg: number; score: number; iou: number; version?: number };
   provider?: ModelProvider | 'triposr-local'; // Service that generated the model ('triposr-local': projects saved by earlier versions)
+  /** Result of the model check against the photo (a vision model compares the model with the object) */
+  check?: { matches: boolean; problem: string; fixableByAnnotation: boolean; checkedAt: string; suggestionId?: string };
 }
 
 /** Where one model is in the 3D scene (its container's position, Euler XYZ rotation in radians, and scale) */

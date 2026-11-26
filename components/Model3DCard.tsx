@@ -10,9 +10,11 @@ interface Model3DCardProps {
   selected?: boolean;
   onSelect?: (selected: boolean) => void;
   showBoundingBox?: boolean;
+  /** The model check is running for this model */
+  checking?: boolean;
 }
 
-export const Model3DCard: React.FC<Model3DCardProps> = ({ model, onDelete, selected, onSelect, showBoundingBox }) => {
+export const Model3DCard: React.FC<Model3DCardProps> = ({ model, onDelete, selected, onSelect, showBoundingBox, checking }) => {
   return (
     <div
       className={`bg-white rounded-xl shadow-sm border overflow-hidden hover:shadow-md transition-shadow relative
@@ -78,6 +80,15 @@ export const Model3DCard: React.FC<Model3DCardProps> = ({ model, onDelete, selec
             {model.frontAlignment.score >= MIN_ALIGNMENT_SCORE
               ? `Align: ${Math.round(model.frontAlignment.yawDeg)}° (score ${model.frontAlignment.score.toFixed(2)})`
               : `Align: not used (score ${model.frontAlignment.score.toFixed(2)})`}
+          </p>
+        )}
+        {checking && <p className="text-[11px] text-slate-500 mt-1 text-center">Checking against the photo…</p>}
+        {!checking && model.check && (
+          <p className={`text-[11px] mt-1 text-center line-clamp-2 ${model.check.matches ? 'text-emerald-600' : 'text-amber-700'}`}
+            title={model.check.matches ? 'The model matches its object in the photo' : model.check.problem}>
+            {model.check.matches
+              ? 'Check: matches the photo'
+              : `Check: ${model.check.problem}${model.check.suggestionId ? ' → corrected annotation added to Extracted' : model.check.fixableByAnnotation ? '' : ' (not fixable by the annotation)'}`}
           </p>
         )}
       </div>
