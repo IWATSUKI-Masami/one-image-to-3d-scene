@@ -26,7 +26,7 @@ The scene above is the automatic result. The placement can be corrected by a vis
 <p align="center"><img src="docs/images/demo-rotate-cafe.gif" alt="The 3D scene of cafe-couple after Arrange, turned around in the app" width="480"></p>
 <p align="center"><sub>The 3D scene of the photo above after <b>Arrange</b>, turned around in the app (video: <a href="docs/videos/scene-rotate-cafe.mp4"><code>docs/videos/scene-rotate-cafe.mp4</code></a>, 10 s). Demo videos of the whole process (with the paper's sample): <a href="docs/videos/demo.mp4"><code>docs/videos/demo.mp4</code></a> (33 s, English captions) and <a href="docs/videos/demo-ja.mp4"><code>docs/videos/demo-ja.mp4</code></a> (24 s, square, Japanese captions)</sub></p>
 
-An article explaining the method and its implementation (in Japanese) is on Qiita: [生成AIで隠れた部分を描き足しても位置がずれない：1枚の写真から3Dシーンを組み立てる](https://qiita.com/miwastsuki2026/items/08ce2be1fc32118401ae).
+An article explaining the method and its implementation (in Japanese) is on Qiita: [生成AIで隠れた部分を描き足し、AI に配置を直させる：1枚の写真から3Dシーンを組み立てる](https://qiita.com/miwatsuki2026/items/08ce2be1fc32118401ae).
 
 ## Highlights
 
